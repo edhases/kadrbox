@@ -19,6 +19,11 @@ services:
       - SMTP_FROM=${SMTP_FROM:-Oxide Film <noreply@oxideteam.pp.ua>}
       - APP_URL=${APP_URL:-https://film.oxideteam.pp.ua}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-oxidefilmbot}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI:-https://film.oxideteam.pp.ua/api/v1/auth/discord/callback}
     depends_on:
       postgres:
         condition: service_healthy

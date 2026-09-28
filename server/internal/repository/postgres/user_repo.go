@@ -32,7 +32,7 @@ func (r *UserRepository) CreateUser(ctx context.Context, email, passwordHash, us
 	query := `
 		INSERT INTO users (email, password_hash, username, role, is_verified, created_at, updated_at)
 		VALUES ($1, $2, $3, 'user', FALSE, NOW(), NOW())
-		RETURNING id, email, password_hash, username, avatar_url, bio, role, is_verified, created_at, updated_at
+		RETURNING id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
 	`
 	return r.scanUser(r.pool.QueryRow(ctx, query, email, passwordHash, username))
 }
@@ -40,7 +40,7 @@ func (r *UserRepository) CreateUser(ctx context.Context, email, passwordHash, us
 // GetUserByEmail шукає користувача за email
 func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
 	query := `
-		SELECT id, email, password_hash, username, avatar_url, bio, role, is_verified, created_at, updated_at
+		SELECT id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
 		FROM users WHERE email = $1
 	`
 	return r.scanUser(r.pool.QueryRow(ctx, query, email))
@@ -49,7 +49,7 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*dom
 // GetUserByID отримує профіль за UUID
 func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	query := `
-		SELECT id, email, password_hash, username, avatar_url, bio, role, is_verified, created_at, updated_at
+		SELECT id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
 		FROM users WHERE id = $1
 	`
 	return r.scanUser(r.pool.QueryRow(ctx, query, id))
@@ -112,7 +112,7 @@ func (r *UserRepository) UpdateProfile(ctx context.Context, id uuid.UUID, userna
 		    avatar_url = CASE WHEN $4 <> '' THEN $4 ELSE avatar_url END,
 		    updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, email, password_hash, username, avatar_url, bio, role, is_verified, created_at, updated_at
+		RETURNING id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
 	`
 	return r.scanUser(r.pool.QueryRow(ctx, query, id, username, bio, avatarURL))
 }
@@ -181,6 +181,46 @@ func (r *UserRepository) MarkPasswordResetUsed(ctx context.Context, userID uuid.
 	return nil
 }
 
+// GetUserByTelegramID шукає користувача за Telegram ID
+func (r *UserRepository) GetUserByTelegramID(ctx context.Context, telegramID int64) (*domain.User, error) {
+	query := `
+		SELECT id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
+		FROM users WHERE telegram_id = $1
+	`
+	return r.scanUser(r.pool.QueryRow(ctx, query, telegramID))
+}
+
+// GetUserByDiscordID шукає користувача за Discord ID
+func (r *UserRepository) GetUserByDiscordID(ctx context.Context, discordID string) (*domain.User, error) {
+	query := `
+		SELECT id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
+		FROM users WHERE discord_id = $1
+	`
+	return r.scanUser(r.pool.QueryRow(ctx, query, discordID))
+}
+
+// LinkTelegram прив'язує Telegram ID до існуючого користувача
+func (r *UserRepository) LinkTelegram(ctx context.Context, userID uuid.UUID, telegramID int64) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET telegram_id = $2, updated_at = NOW() WHERE id = $1`, userID, telegramID)
+	return err
+}
+
+// LinkDiscord прив'язує Discord ID до існуючого користувача
+func (r *UserRepository) LinkDiscord(ctx context.Context, userID uuid.UUID, discordID string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET discord_id = $2, updated_at = NOW() WHERE id = $1`, userID, discordID)
+	return err
+}
+
+// CreateOAuthUser створює верифікованого користувача через OAuth (Google/Telegram/Discord)
+func (r *UserRepository) CreateOAuthUser(ctx context.Context, email, passwordHash, username, avatarURL string, telegramID *int64, discordID *string) (*domain.User, error) {
+	query := `
+		INSERT INTO users (email, password_hash, username, avatar_url, role, is_verified, telegram_id, discord_id, created_at, updated_at)
+		VALUES ($1, $2, $3, NULLIF($4, ''), 'user', TRUE, $5, $6, NOW(), NOW())
+		RETURNING id, email, password_hash, username, avatar_url, bio, role, is_verified, telegram_id, discord_id, created_at, updated_at
+	`
+	return r.scanUser(r.pool.QueryRow(ctx, query, email, passwordHash, username, avatarURL, telegramID, discordID))
+}
+
 // ---- helpers ----------------------------------------------------------------
 
 func (r *UserRepository) scanUser(row pgx.Row) (*domain.User, error) {
@@ -195,6 +235,8 @@ func (r *UserRepository) scanUser(row pgx.Row) (*domain.User, error) {
 		&bio,
 		&user.Role,
 		&user.IsVerified,
+		&user.TelegramID,
+		&user.DiscordID,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)

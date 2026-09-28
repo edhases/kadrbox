@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_vector_icons/flutter_vector_icons.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
@@ -409,17 +410,23 @@ class _LoginPageState extends State<LoginPage> {
                         _buildSocialButton(
                           icon: Icons.g_mobiledata,
                           label: 'Google',
+                          color: Colors.redAccent,
                           onTap: () => _handleSocialLogin('google'),
                         ),
-                        // Discord login disabled for now as it's not fully configured
-                        /*
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
                         _buildSocialButton(
-                          icon: Icons.discord,
+                          icon: MaterialCommunityIcons.discord,
                           label: 'Discord',
+                          color: const Color(0xFF5865F2),
                           onTap: () => _handleSocialLogin('discord'),
                         ),
-                        */
+                        const SizedBox(width: 12),
+                        _buildSocialButton(
+                          icon: FontAwesome.telegram,
+                          label: 'Telegram',
+                          color: const Color(0xFF229ED9),
+                          onTap: () => _handleSocialLogin('telegram'),
+                        ),
                       ],
                     ),
                   ],
@@ -435,22 +442,27 @@ class _LoginPageState extends State<LoginPage> {
   Widget _buildSocialButton({
     required IconData icon,
     required String label,
+    Color? color,
     required VoidCallback onTap,
   }) {
     return InkWell(
       onTap: _isLoading ? null : onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        width: 100,
+        width: 95,
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           color: AppTheme.darkCard,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          border: Border.all(
+            color: color != null
+                ? color.withValues(alpha: 0.3)
+                : Colors.white.withValues(alpha: 0.1),
+          ),
         ),
         child: Column(
           children: [
-            Icon(icon, color: Colors.white, size: 28),
+            Icon(icon, color: color ?? Colors.white, size: 28),
             const SizedBox(height: 4),
             Text(
               label,

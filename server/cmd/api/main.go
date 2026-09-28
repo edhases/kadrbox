@@ -94,6 +94,21 @@ func main() {
 	}
 
 	authHandler := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, cfg.JWTSecret, cfg.GoogleClientID)
+	authHandler.SetOAuth(
+		cfg.TelegramBotToken,
+		cfg.TelegramBotUsername,
+		cfg.DiscordClientID,
+		cfg.DiscordClientSecret,
+		cfg.DiscordRedirectURI,
+		cfg.AppURL,
+	)
+	if cfg.TelegramBotToken != "" {
+		log.Println("[OAuth] Telegram auth configured ✓ (bot: @" + cfg.TelegramBotUsername + ")")
+	}
+	if cfg.DiscordClientID != "" {
+		log.Println("[OAuth] Discord auth configured ✓")
+	}
+
 	contentHandler := transporthttp.NewContentHandler(registry, cacheRepo)
 	syncHandler := transporthttp.NewSyncHandler(historyRepo, favoritesRepo)
 

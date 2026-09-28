@@ -156,14 +156,17 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.authWithOAuth2(provider, (url) async {
-        // Launch the authentication URL in an external browser
-        if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-          throw Exception('Не вдалося відкрити вікно авторизації');
-        }
-      });
+      if (provider == 'discord' || provider == 'telegram') {
+        await _server.signInWithOAuthLoopback(provider);
+      } else {
+        await _pb.authWithOAuth2(provider, (url) async {
+          // Launch the authentication URL in an external browser
+          if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+            throw Exception('Не вдалося відкрити вікно авторизації');
+          }
+        });
+      }
       Logger.i('Social sign in successful: $userEmail', tag: _tag);
-      await fetchLinkedProviders(); // Update linked list
       notifyListeners();
     } catch (e) {
       Logger.e('Social sign in failed', tag: _tag, error: e);

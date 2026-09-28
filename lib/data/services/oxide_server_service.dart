@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
@@ -122,6 +123,169 @@ class OxideServerService {
       }
     } catch (e) {
       Logger.e('Google sign in failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Sign in with OAuth provider (discord, telegram) using loopback HTTP server
+  Future<void> signInWithOAuthLoopback(String provider) async {
+    HttpServer? server;
+    try {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final redirectUrl = 'http://127.0.0.1:${server.port}/callback';
+
+      final authUri = Uri.parse('${AppConfig.serverApiUrl}/auth/$provider/login').replace(
+        queryParameters: {'redirect_to': redirectUrl},
+      );
+
+      Logger.i('Launching OAuth for $provider with loopback: $redirectUrl', tag: _tag);
+      if (!await launchUrl(authUri, mode: LaunchMode.externalApplication)) {
+        throw Exception('Не вдалося відкрити браузер для авторизації $provider');
+      }
+
+      final completer = Completer<HttpRequest>();
+      final sub = server.listen((req) {
+        if (req.uri.path == '/callback') {
+          if (!completer.isCompleted) {
+            completer.complete(req);
+          }
+        } else {
+          req.response.statusCode = HttpStatus.notFound;
+          req.response.close();
+        }
+      });
+
+      final request = await completer.future.timeout(
+        const Duration(minutes: 5),
+        onTimeout: () => throw TimeoutException('Час очікування авторизації вичерпано'),
+      );
+      await sub.cancel();
+
+      final params = request.uri.queryParameters;
+      final authError = params['error'];
+      final accessToken = params['access_token'];
+      final refreshToken = params['refresh_token'];
+
+      if (authError != null && authError.isNotEmpty) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..headers.contentType = ContentType.html
+          ..write('''<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Помилка авторизації — Oxide Film</title>
+  <style>
+    body {
+      background: #0f172a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;
+    }
+    .box {
+      background: #1e293b; border: 1px solid #334155; padding: 40px; border-radius: 16px; text-align: center; max-width: 400px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    h2 { margin: 0 0 12px; color: #ef4444; }
+    p { color: #94a3b8; font-size: 15px; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>❌ Авторизацію скасовано</h2>
+    <p>${htmlEscape.convert(authError)}</p>
+  </div>
+</body>
+</html>''');
+        await request.response.close();
+        throw Exception('Авторизація $provider скасована: $authError');
+      }
+
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.html
+        ..write('''<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Успішний вхід — Oxide Film</title>
+  <style>
+    body {
+      background: #0f172a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;
+    }
+    .box {
+      background: #1e293b; border: 1px solid #334155; padding: 40px; border-radius: 16px; text-align: center; max-width: 400px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    h2 { margin: 0 0 12px; color: #10b981; }
+    p { color: #94a3b8; font-size: 15px; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>✅ Авторизація успішна!</h2>
+    <p>Ви можете закрити цю вкладку та повернутися у додаток Oxide Film.</p>
+  </div>
+  <script>setTimeout(() => window.close(), 1500);</script>
+</body>
+</html>''');
+      await request.response.close();
+
+      if (accessToken != null && refreshToken != null) {
+        await setTokensFromOAuth(accessToken: accessToken, refreshToken: refreshToken);
+        Logger.i('OAuth $provider sign in successful: $userEmail', tag: _tag);
+      } else {
+        throw Exception('Токени не отримано від сервера авторизації');
+      }
+    } finally {
+      await server?.close(force: true);
+    }
+  }
+
+  /// Direct token setup from OAuth callback
+  Future<void> setTokensFromOAuth({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
+    _accessToken = accessToken;
+    _refreshToken = refreshToken;
+    await _prefs.setString(_tokenKey, accessToken);
+    await _prefs.setString(_refreshKey, refreshToken);
+    _apiClient.setAuthToken(accessToken);
+    await fetchMe();
+  }
+
+  /// Sign in with Discord code (direct API)
+  Future<void> signInWithDiscordCode(String code, {String? redirectUri}) async {
+    final url = '${AppConfig.serverApiUrl}/auth/discord';
+    try {
+      final body = <String, dynamic>{'code': code.trim()};
+      if (redirectUri != null) body['redirect_uri'] = redirectUri;
+      final res = await _apiClient.post(url, data: body);
+      if (res is Map) {
+        await _saveAuthData(res);
+        Logger.i('User logged in with Discord: $userEmail', tag: _tag);
+      } else {
+        throw Exception('Неочікувана відповідь від сервера');
+      }
+    } catch (e) {
+      Logger.e('Discord sign in failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Sign in with Telegram Auth data (direct API)
+  Future<void> signInWithTelegramData(Map<String, dynamic> telegramData) async {
+    final url = '${AppConfig.serverApiUrl}/auth/telegram';
+    try {
+      final res = await _apiClient.post(url, data: telegramData);
+      if (res is Map) {
+        await _saveAuthData(res);
+        Logger.i('User logged in with Telegram: $userEmail', tag: _tag);
+      } else {
+        throw Exception('Неочікувана відповідь від сервера');
+      }
+    } catch (e) {
+      Logger.e('Telegram sign in failed', tag: _tag, error: e);
       rethrow;
     }
   }

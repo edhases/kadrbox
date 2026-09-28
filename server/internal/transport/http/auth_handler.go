@@ -2,7 +2,9 @@ package http
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +15,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,11 +29,17 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo       *postgres.UserRepository
-	redisClient    *redisRepo.RedisClient
-	emailSvc       *email.Service
-	jwtSecret      string
-	googleClientID string
+	userRepo            *postgres.UserRepository
+	redisClient         *redisRepo.RedisClient
+	emailSvc            *email.Service
+	jwtSecret           string
+	googleClientID      string
+	telegramBotToken    string
+	telegramBotUsername string
+	discordClientID     string
+	discordClientSecret string
+	discordRedirectURI  string
+	appURL              string
 }
 
 func NewAuthHandler(
@@ -46,6 +56,20 @@ func NewAuthHandler(
 		jwtSecret:      jwtSecret,
 		googleClientID: googleClientID,
 	}
+}
+
+// SetOAuth конфігурує параметри сторонньої автентифікації (Telegram, Discord)
+func (h *AuthHandler) SetOAuth(
+	telegramBotToken, telegramBotUsername,
+	discordClientID, discordClientSecret, discordRedirectURI,
+	appURL string,
+) {
+	h.telegramBotToken = telegramBotToken
+	h.telegramBotUsername = telegramBotUsername
+	h.discordClientID = discordClientID
+	h.discordClientSecret = discordClientSecret
+	h.discordRedirectURI = discordRedirectURI
+	h.appURL = appURL
 }
 
 // ---- request/response types -------------------------------------------------
@@ -635,6 +659,508 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 	h.respondWithTokens(w, r, user)
 }
 
+// ---- Telegram Auth ----------------------------------------------------------
+
+type TelegramAuthRequest struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+	PhotoURL  string `json:"photo_url"`
+	AuthDate  int64  `json:"auth_date"`
+	Hash      string `json:"hash"`
+}
+
+func (h *AuthHandler) verifyTelegramAuth(req TelegramAuthRequest) bool {
+	if h.telegramBotToken == "" || req.Hash == "" || req.ID == 0 || req.AuthDate == 0 {
+		return false
+	}
+	now := time.Now().Unix()
+	if now-req.AuthDate > 86400 || req.AuthDate > now+300 {
+		return false
+	}
+
+	var parts []string
+	parts = append(parts, fmt.Sprintf("auth_date=%d", req.AuthDate))
+	if req.FirstName != "" {
+		parts = append(parts, fmt.Sprintf("first_name=%s", req.FirstName))
+	}
+	parts = append(parts, fmt.Sprintf("id=%d", req.ID))
+	if req.LastName != "" {
+		parts = append(parts, fmt.Sprintf("last_name=%s", req.LastName))
+	}
+	if req.PhotoURL != "" {
+		parts = append(parts, fmt.Sprintf("photo_url=%s", req.PhotoURL))
+	}
+	if req.Username != "" {
+		parts = append(parts, fmt.Sprintf("username=%s", req.Username))
+	}
+	sort.Strings(parts)
+	dataCheckString := strings.Join(parts, "\n")
+
+	sha := sha256.Sum256([]byte(h.telegramBotToken))
+	mac := hmac.New(sha256.New, sha[:])
+	mac.Write([]byte(dataCheckString))
+	expectedHash := hex.EncodeToString(mac.Sum(nil))
+
+	return hmac.Equal([]byte(strings.ToLower(expectedHash)), []byte(strings.ToLower(req.Hash)))
+}
+
+func (h *AuthHandler) getOrCreateTelegramUser(ctx context.Context, req TelegramAuthRequest) (*domain.User, error) {
+	user, err := h.userRepo.GetUserByTelegramID(ctx, req.ID)
+	if err == nil {
+		if req.PhotoURL != "" && user.AvatarURL == "" {
+			if updated, err := h.userRepo.UpdateProfile(ctx, user.ID, "", "", req.PhotoURL); err == nil {
+				user = updated
+			}
+		}
+		return user, nil
+	}
+
+	displayName := req.Username
+	if displayName == "" {
+		displayName = strings.TrimSpace(req.FirstName + " " + req.LastName)
+	}
+	if displayName == "" {
+		displayName = fmt.Sprintf("tg_user_%d", req.ID)
+	}
+	if len([]rune(displayName)) > 100 {
+		displayName = string([]rune(displayName)[:100])
+	}
+
+	placeholderEmail := fmt.Sprintf("tg_%d@telegram.oxide", req.ID)
+	randomPass, _ := generateToken()
+	hash, err := auth.HashPassword(randomPass)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	newUser, err := h.userRepo.CreateOAuthUser(ctx, placeholderEmail, hash, displayName, req.PhotoURL, &req.ID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	return newUser, nil
+}
+
+// TelegramAuth — POST /api/v1/auth/telegram
+func (h *AuthHandler) TelegramAuth(w http.ResponseWriter, r *http.Request) {
+	var req TelegramAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if !h.verifyTelegramAuth(req) {
+		jsonError(w, "invalid telegram authentication signature", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.getOrCreateTelegramUser(r.Context(), req)
+	if err != nil {
+		jsonError(w, "failed to process user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.respondWithTokens(w, r, user)
+}
+
+// TelegramLoginWeb — GET /api/v1/auth/telegram/login та GET /auth/telegram
+func (h *AuthHandler) TelegramLoginWeb(w http.ResponseWriter, r *http.Request) {
+	if h.telegramBotToken == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Telegram недоступний", "TELEGRAM_BOT_TOKEN не налаштований на сервері", "", "", "")))
+		return
+	}
+
+	botUser := h.telegramBotUsername
+	if botUser == "" {
+		botUser = "oxidefilmbot"
+	}
+
+	redirectTarget := r.URL.Query().Get("redirect_to")
+	if redirectTarget == "" {
+		redirectTarget = r.URL.Query().Get("state")
+	}
+
+	authURL := "/api/v1/auth/telegram/callback"
+	if redirectTarget != "" {
+		authURL = fmt.Sprintf("/api/v1/auth/telegram/callback?state=%s", url.QueryEscape(redirectTarget))
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вхід через Telegram — Oxide Film</title>
+  <style>
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #f8fafc;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+      padding: 40px; max-width: 440px; margin: 20px; text-align: center;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .icon { font-size: 50px; margin-bottom: 16px; }
+    h1 { font-size: 22px; margin: 0 0 12px; color: #fff; }
+    p { color: #94a3b8; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
+    .logo { font-size: 14px; color: #229ED9; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+    .widget-container { display: flex; justify-content: center; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Oxide Film</div>
+    <div class="icon">✈️</div>
+    <h1>Вхід через Telegram</h1>
+    <p>Натисніть кнопку нижче для авторизації за допомогою вашого облікового запису Telegram:</p>
+    <div class="widget-container">
+      <script async src="https://telegram.org/js/telegram-widget.js?22" 
+              data-telegram-login="%s" 
+              data-size="large" 
+              data-radius="12" 
+              data-auth-url="%s" 
+              data-request-access="write"></script>
+    </div>
+  </div>
+</body>
+</html>`, botUser, authURL)
+	_, _ = w.Write([]byte(html))
+}
+
+// TelegramCallbackWeb — GET /api/v1/auth/telegram/callback
+func (h *AuthHandler) TelegramCallbackWeb(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	id, _ := strconv.ParseInt(q.Get("id"), 10, 64)
+	authDate, _ := strconv.ParseInt(q.Get("auth_date"), 10, 64)
+
+	req := TelegramAuthRequest{
+		ID:        id,
+		FirstName: q.Get("first_name"),
+		LastName:  q.Get("last_name"),
+		Username:  q.Get("username"),
+		PhotoURL:  q.Get("photo_url"),
+		AuthDate:  authDate,
+		Hash:      q.Get("hash"),
+	}
+
+	state := q.Get("state")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if !h.verifyTelegramAuth(req) {
+		if isSafeRedirectURL(state) {
+			sep := "?"
+			if strings.Contains(state, "?") {
+				sep = "&"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape("Недійсний підпис авторизації Telegram")), http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка Telegram", "Недійсний підпис авторизації Telegram.", "", "", "")))
+		return
+	}
+
+	user, err := h.getOrCreateTelegramUser(r.Context(), req)
+	if err != nil {
+		if isSafeRedirectURL(state) {
+			sep := "?"
+			if strings.Contains(state, "?") {
+				sep = "&"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape("Не вдалося зберегти користувача: "+err.Error())), http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка сервера", "Не вдалося зберегти користувача: "+err.Error(), "", "", "")))
+		return
+	}
+
+	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка токена", "Не вдалося згенерувати токен", "", "", "")))
+		return
+	}
+
+	refreshToken := auth.GenerateRefreshToken()
+	_ = h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour)
+
+	if isSafeRedirectURL(state) {
+		sep := "?"
+		if strings.Contains(state, "?") {
+			sep = "&"
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s%saccess_token=%s&refresh_token=%s", state, sep, accessToken, refreshToken), http.StatusTemporaryRedirect)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(renderOAuthStatusHTML(true, "Вхід успішний!", "Повертаємося у додаток Oxide Film...", "telegram", accessToken, refreshToken)))
+}
+
+// ---- Discord OAuth2 ---------------------------------------------------------
+
+type discordTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+	Error        string `json:"error"`
+	ErrorDesc    string `json:"error_description"`
+}
+
+type discordUserResponse struct {
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Discriminator string `json:"discriminator"`
+	GlobalName    string `json:"global_name"`
+	Avatar        string `json:"avatar"`
+	Email         string `json:"email"`
+	Verified      bool   `json:"verified"`
+}
+
+func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI string) (*domain.User, error) {
+	if h.discordClientID == "" || h.discordClientSecret == "" {
+		return nil, errors.New("discord credentials not configured")
+	}
+
+	form := url.Values{}
+	form.Set("client_id", h.discordClientID)
+	form.Set("client_secret", h.discordClientSecret)
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+
+	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("build token request: %w", err)
+	}
+	reqHTTP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(reqHTTP)
+	if err != nil {
+		return nil, fmt.Errorf("exchange token request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var tokenResp discordTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK || tokenResp.AccessToken == "" {
+		msg := tokenResp.ErrorDesc
+		if msg == "" {
+			msg = tokenResp.Error
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("discord token error (status %d)", resp.StatusCode)
+		}
+		return nil, errors.New(msg)
+	}
+
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://discord.com/api/users/@me", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build user request: %w", err)
+	}
+	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+
+	userResp, err := client.Do(userReq)
+	if err != nil {
+		return nil, fmt.Errorf("fetch discord user: %w", err)
+	}
+	defer userResp.Body.Close()
+
+	var discordUser discordUserResponse
+	if err := json.NewDecoder(userResp.Body).Decode(&discordUser); err != nil {
+		return nil, fmt.Errorf("decode user response: %w", err)
+	}
+	if userResp.StatusCode != http.StatusOK || discordUser.ID == "" {
+		return nil, fmt.Errorf("failed to fetch discord user info (status %d)", userResp.StatusCode)
+	}
+
+	var avatarURL string
+	if discordUser.Avatar != "" {
+		avatarURL = fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", discordUser.ID, discordUser.Avatar)
+	}
+
+	user, err := h.userRepo.GetUserByDiscordID(ctx, discordUser.ID)
+	if err == nil {
+		if avatarURL != "" && user.AvatarURL == "" {
+			if updated, err := h.userRepo.UpdateProfile(ctx, user.ID, "", "", avatarURL); err == nil {
+				user = updated
+			}
+		}
+		return user, nil
+	}
+
+	if discordUser.Email != "" {
+		if existing, err := h.userRepo.GetUserByEmail(ctx, discordUser.Email); err == nil {
+			_ = h.userRepo.LinkDiscord(ctx, existing.ID, discordUser.ID)
+			if !existing.IsVerified && discordUser.Verified {
+				_ = h.userRepo.MarkEmailVerified(ctx, existing.ID)
+				existing.IsVerified = true
+			}
+			if existing.AvatarURL == "" && avatarURL != "" {
+				if updated, err := h.userRepo.UpdateProfile(ctx, existing.ID, "", "", avatarURL); err == nil {
+					existing = updated
+				}
+			}
+			return existing, nil
+		}
+	}
+
+	emailAddr := discordUser.Email
+	if emailAddr == "" {
+		emailAddr = fmt.Sprintf("discord_%s@discord.oxide", discordUser.ID)
+	}
+
+	displayName := discordUser.GlobalName
+	if displayName == "" {
+		displayName = discordUser.Username
+	}
+	if displayName == "" {
+		displayName = "discord_user"
+	}
+	if len([]rune(displayName)) > 100 {
+		displayName = string([]rune(displayName)[:100])
+	}
+
+	randomPass, _ := generateToken()
+	hash, err := auth.HashPassword(randomPass)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	newUser, err := h.userRepo.CreateOAuthUser(ctx, emailAddr, hash, displayName, avatarURL, nil, &discordUser.ID)
+	if err != nil {
+		return nil, fmt.Errorf("create discord user: %w", err)
+	}
+	return newUser, nil
+}
+
+// DiscordLogin — GET /api/v1/auth/discord/login та GET /auth/discord
+func (h *AuthHandler) DiscordLogin(w http.ResponseWriter, r *http.Request) {
+	if h.discordClientID == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Discord недоступний", "DISCORD_CLIENT_ID не налаштований на сервері", "", "", "")))
+		return
+	}
+
+	params := url.Values{}
+	params.Set("client_id", h.discordClientID)
+	params.Set("redirect_uri", h.discordRedirectURI)
+	params.Set("response_type", "code")
+	params.Set("scope", "identify email")
+	params.Set("prompt", "consent")
+
+	if state := r.URL.Query().Get("state"); state != "" {
+		params.Set("state", state)
+	} else if redirect := r.URL.Query().Get("redirect_to"); redirect != "" {
+		params.Set("state", redirect)
+	}
+
+	authURL := "https://discord.com/api/oauth2/authorize?" + params.Encode()
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+// DiscordCallback — GET /api/v1/auth/discord/callback
+func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if code == "" {
+		errDesc := r.URL.Query().Get("error_description")
+		if errDesc == "" {
+			errDesc = "Авторизацію через Discord було скасовано."
+		}
+		if isSafeRedirectURL(state) {
+			sep := "?"
+			if strings.Contains(state, "?") {
+				sep = "&"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(errDesc)), http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка Discord", errDesc, "", "", "")))
+		return
+	}
+
+	user, err := h.processDiscordCode(r.Context(), code, h.discordRedirectURI)
+	if err != nil {
+		if isSafeRedirectURL(state) {
+			sep := "?"
+			if strings.Contains(state, "?") {
+				sep = "&"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(err.Error())), http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка авторизації", err.Error(), "", "", "")))
+		return
+	}
+
+	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка токена", "Не вдалося згенерувати токен сесії", "", "", "")))
+		return
+	}
+
+	refreshToken := auth.GenerateRefreshToken()
+	_ = h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour)
+
+	if isSafeRedirectURL(state) {
+		sep := "?"
+		if strings.Contains(state, "?") {
+			sep = "&"
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s%saccess_token=%s&refresh_token=%s", state, sep, accessToken, refreshToken), http.StatusTemporaryRedirect)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(renderOAuthStatusHTML(true, "Вхід через Discord успішний!", "Повертаємося у додаток Oxide Film...", "discord", accessToken, refreshToken)))
+}
+
+type DiscordAuthRequest struct {
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
+}
+
+// DiscordAuthAPI — POST /api/v1/auth/discord (прямий обмін коду на JWT з клієнта)
+func (h *AuthHandler) DiscordAuthAPI(w http.ResponseWriter, r *http.Request) {
+	var req DiscordAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
+		jsonError(w, "code is required", http.StatusBadRequest)
+		return
+	}
+	redirectURI := req.RedirectURI
+	if redirectURI == "" {
+		redirectURI = h.discordRedirectURI
+	}
+
+	user, err := h.processDiscordCode(r.Context(), req.Code, redirectURI)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	h.respondWithTokens(w, r, user)
+}
+
 // ---- helpers ----------------------------------------------------------------
 
 func (h *AuthHandler) respondWithTokens(w http.ResponseWriter, r *http.Request, user *domain.User) {
@@ -845,3 +1371,96 @@ func renderEmailStatusHTML(success bool, title, message string) string {
 </body>
 </html>`, title, accentColor, icon, title, message)
 }
+
+func renderOAuthStatusHTML(success bool, title, message, provider, accessToken, refreshToken string) string {
+	icon := "✅"
+	accentColor := "#10b981"
+	if !success {
+		icon = "❌"
+		accentColor = "#ef4444"
+	} else if provider == "discord" {
+		accentColor = "#5865F2"
+	} else if provider == "telegram" {
+		accentColor = "#229ED9"
+	}
+
+	deepLink := fmt.Sprintf("oxide://auth/%s?access_token=%s&refresh_token=%s", provider, accessToken, refreshToken)
+	if provider == "" {
+		deepLink = fmt.Sprintf("oxide://auth?access_token=%s&refresh_token=%s", accessToken, refreshToken)
+	}
+
+	actionBtn := ""
+	autoScript := ""
+	if success {
+		actionBtn = fmt.Sprintf(`<a href="%s" class="btn" style="background: %s;">Відкрити Oxide Film</a>`, deepLink, accentColor)
+		autoScript = fmt.Sprintf(`
+  <script>
+    try {
+      window.location.href = %q;
+    } catch(e) {}
+  </script>`, deepLink)
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>%s — Oxide Film</title>
+  <style>
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #f8fafc;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+      padding: 40px; max-width: 440px; margin: 20px; text-align: center;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .icon { font-size: 54px; margin-bottom: 20px; }
+    h1 { font-size: 22px; margin: 0 0 12px; color: #fff; }
+    p { color: #94a3b8; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
+    .logo { font-size: 14px; color: %s; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+    .btn {
+      display: inline-block; padding: 12px 24px; color: #fff; text-decoration: none;
+      border-radius: 8px; font-weight: bold; font-size: 15px; transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Oxide Film</div>
+    <div class="icon">%s</div>
+    <h1>%s</h1>
+    <p>%s</p>
+    %s
+  </div>
+  %s
+</body>
+</html>`, title, accentColor, icon, title, message, actionBtn, autoScript)
+}
+
+func isSafeRedirectURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if u.Scheme == "oxide" {
+		return true
+	}
+	if u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" {
+		return true
+	}
+	if u.Hostname() == "film.oxideteam.pp.ua" || u.Hostname() == "oxideteam.pp.ua" || strings.HasSuffix(u.Hostname(), ".oxideteam.pp.ua") {
+		return true
+	}
+	return false
+}
+
+

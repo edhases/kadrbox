@@ -60,6 +60,8 @@ func NewRouter(
 	// Веб-сторінки підтвердження email та скидання пароля при кліку з листа
 	r.Get("/verify-email", authH.VerifyEmailWeb)
 	r.Get("/reset-password", authH.ResetPasswordWeb)
+	r.Get("/auth/telegram", authH.TelegramLoginWeb)
+	r.Get("/auth/discord", authH.DiscordLogin)
 
 	// WebSocket Watch Party
 	r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
@@ -79,6 +81,12 @@ func NewRouter(
 			r.Post("/forgot-password", authH.ForgotPassword)
 			r.Post("/reset-password", authH.ResetPassword)
 			r.Post("/google", authH.GoogleAuth)
+			r.Post("/telegram", authH.TelegramAuth)
+			r.Get("/telegram/login", authH.TelegramLoginWeb)
+			r.Get("/telegram/callback", authH.TelegramCallbackWeb)
+			r.Post("/discord", authH.DiscordAuthAPI)
+			r.Get("/discord/login", authH.DiscordLogin)
+			r.Get("/discord/callback", authH.DiscordCallback)
 		})
 
 		// Публічний каталог і пошук

@@ -16,9 +16,15 @@ type Config struct {
 	DBSSLMode    string
 	RedisAddr    string
 	RedisPass    string
-	JWTSecret      string
-	BaseProxyURL   string
-	GoogleClientID string
+	JWTSecret           string
+	BaseProxyURL        string
+	AppURL              string
+	GoogleClientID      string
+	TelegramBotToken    string
+	TelegramBotUsername string
+	DiscordClientID     string
+	DiscordClientSecret string
+	DiscordRedirectURI  string
 }
 
 func (c *Config) PostgresDSN() string {
@@ -45,9 +51,15 @@ func Load() *Config {
 		DBSSLMode:      getEnv("DB_SSLMODE", "disable"),
 		RedisAddr:      getEnv("REDIS_ADDR", "redis:6379"),
 		RedisPass:      getEnv("REDIS_PASSWORD", ""),
-		JWTSecret:      getEnv("JWT_SECRET", "super-secret-jwt-key-oxide-film-2026"),
-		BaseProxyURL:   getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
-		GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
+		JWTSecret:           getEnv("JWT_SECRET", "super-secret-jwt-key-oxide-film-2026"),
+		BaseProxyURL:        getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
+		AppURL:              getEnv("APP_URL", "https://film.oxideteam.pp.ua"),
+		GoogleClientID:      getEnv("GOOGLE_CLIENT_ID", ""),
+		TelegramBotToken:    getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramBotUsername: getEnv("TELEGRAM_BOT_USERNAME", "oxidefilmbot"),
+		DiscordClientID:     getEnv("DISCORD_CLIENT_ID", ""),
+		DiscordClientSecret: getEnv("DISCORD_CLIENT_SECRET", ""),
+		DiscordRedirectURI:  getEnv("DISCORD_REDIRECT_URI", "https://film.oxideteam.pp.ua/api/v1/auth/discord/callback"),
 	}
 }
 

@@ -16,6 +16,8 @@ type User struct {
 	Bio          string    `json:"bio,omitempty"`
 	Role         string    `json:"role"`
 	IsVerified   bool      `json:"is_verified"`
+	TelegramID   *int64    `json:"telegram_id,omitempty"`
+	DiscordID    *string   `json:"discord_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
