@@ -340,6 +340,11 @@ class FavoritesService extends ChangeNotifier {
             rating: fav.rating,
             ratingSource: fav.ratingSource,
           );
+        } else {
+          await _server.removeFavorite(
+            mediaId: fav.mediaId,
+            providerId: fav.providerId,
+          );
         }
         return;
       }

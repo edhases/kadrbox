@@ -23,6 +23,7 @@ class _FakeBackend implements WatchPartyBackend {
     required String myId,
     required String myName,
     required Function(WatchPartyMessage) onMessage,
+    void Function()? onDisconnected,
   }) async {
     connected = true;
     _onMessage = onMessage;

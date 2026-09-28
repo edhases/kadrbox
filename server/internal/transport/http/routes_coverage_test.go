@@ -21,7 +21,7 @@ func qwAuthRouter(t *testing.T, svc *email.Service) http.Handler {
 	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
 	contentH := transporthttp.NewContentHandler(reg, nil)
-	authH := transporthttp.NewAuthHandler(nil, nil, svc, "secret")
+	authH := transporthttp.NewAuthHandler(nil, nil, svc, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
 }

@@ -133,6 +133,7 @@ abstract class WatchPartyBackend {
     required String myId,
     required String myName,
     required Function(WatchPartyMessage) onMessage,
+    void Function()? onDisconnected,
   });
   Future<void> disconnect();
   void sendBroadcast(WatchPartyMessage message);
@@ -158,6 +159,7 @@ class _PocketBaseBackend implements WatchPartyBackend {
     required String myId,
     required String myName,
     required Function(WatchPartyMessage) onMessage,
+    void Function()? onDisconnected,
   }) async {
     try {
       _roomCode = roomCode;
@@ -348,6 +350,8 @@ class _OxideServerBackend implements WatchPartyBackend {
   String? _roomCode;
   final String _tag = 'WatchParty_OxideServer';
 
+  bool _isDisconnecting = false;
+
   _OxideServerBackend(this._server);
 
   @override
@@ -357,8 +361,10 @@ class _OxideServerBackend implements WatchPartyBackend {
     required String myId,
     required String myName,
     required Function(WatchPartyMessage) onMessage,
+    void Function()? onDisconnected,
   }) async {
     _roomCode = roomCode;
+    _isDisconnecting = false;
 
     try {
       _ws = await _server.connectWatchParty(
@@ -381,9 +387,15 @@ class _OxideServerBackend implements WatchPartyBackend {
         },
         onError: (err) {
           Logger.e('WS error: $err', tag: _tag);
+          if (!_isDisconnecting) {
+            onDisconnected?.call();
+          }
         },
         onDone: () {
           Logger.i('WS connection closed', tag: _tag);
+          if (!_isDisconnecting) {
+            onDisconnected?.call();
+          }
         },
       );
     } catch (e) {
@@ -394,6 +406,7 @@ class _OxideServerBackend implements WatchPartyBackend {
 
   @override
   Future<void> disconnect() async {
+    _isDisconnecting = true;
     await _sub?.cancel();
     _sub = null;
     await _ws?.close();
@@ -431,10 +444,18 @@ class _PeerDartBackend implements WatchPartyBackend {
     required String myId,
     required String myName,
     required Function(WatchPartyMessage) onMessage,
+    void Function()? onDisconnected,
   }) async {
     try {
       final peerId = isHost ? 'oxide-$roomCode' : null; // Custom ID for host
       _peer = Peer(id: peerId);
+
+      _peer!.on('close').listen((_) {
+        onDisconnected?.call();
+      });
+      _peer!.on('disconnected').listen((_) {
+        onDisconnected?.call();
+      });
 
       final completer = Completer<void>();
 
@@ -846,7 +867,20 @@ class WatchPartyService extends ChangeNotifier {
       myId: _myId,
       myName: _myName,
       onMessage: _onMessageReceived,
+      onDisconnected: _onBackendDisconnected,
     );
+  }
+
+  void _onBackendDisconnected() {
+    if (_state == WatchPartyState.connected ||
+        _state == WatchPartyState.hosting ||
+        _state == WatchPartyState.joining) {
+      Logger.w('WatchParty connection lost unexpectedly', tag: _tag);
+      _stopHeartbeat();
+      _state = WatchPartyState.error;
+      _error = 'З\'єднання з кімнатою перервано';
+      notifyListeners();
+    }
   }
 
   void _setError(String msg) {

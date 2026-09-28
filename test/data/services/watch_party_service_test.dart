@@ -20,6 +20,7 @@ class MockWatchPartyBackend implements WatchPartyBackend {
     required String myId,
     required String myName,
     required Function(WatchPartyMessage) onMessage,
+    void Function()? onDisconnected,
   }) async {
     log.add('connect(roomCode: $roomCode, isHost: $isHost)');
     onMessageCallback = onMessage;

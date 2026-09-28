@@ -15,7 +15,7 @@ func covTestRouter() http.Handler {
 	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
 	contentH := transporthttp.NewContentHandler(reg, nil)
-	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret")
+	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
 }

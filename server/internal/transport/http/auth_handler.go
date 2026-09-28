@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -24,10 +25,11 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo    *postgres.UserRepository
-	redisClient *redisRepo.RedisClient
-	emailSvc    *email.Service
-	jwtSecret   string
+	userRepo       *postgres.UserRepository
+	redisClient    *redisRepo.RedisClient
+	emailSvc       *email.Service
+	jwtSecret      string
+	googleClientID string
 }
 
 func NewAuthHandler(
@@ -35,12 +37,14 @@ func NewAuthHandler(
 	redisClient *redisRepo.RedisClient,
 	emailSvc *email.Service,
 	jwtSecret string,
+	googleClientID string,
 ) *AuthHandler {
 	return &AuthHandler{
-		userRepo:    userRepo,
-		redisClient: redisClient,
-		emailSvc:    emailSvc,
-		jwtSecret:   jwtSecret,
+		userRepo:       userRepo,
+		redisClient:    redisClient,
+		emailSvc:       emailSvc,
+		jwtSecret:      jwtSecret,
+		googleClientID: googleClientID,
 	}
 }
 
@@ -461,6 +465,25 @@ func (h *AuthHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Валідація реального вмісту файлу (Magic Bytes / MIME-тип)
+	buff := make([]byte, 512)
+	n, readErr := file.Read(buff)
+	if readErr != nil && readErr != io.EOF {
+		jsonError(w, "failed to read file content", http.StatusBadRequest)
+		return
+	}
+	contentType := http.DetectContentType(buff[:n])
+	if !strings.HasPrefix(contentType, "image/jpeg") &&
+		!strings.HasPrefix(contentType, "image/png") &&
+		!strings.HasPrefix(contentType, "image/webp") {
+		jsonError(w, "invalid image content type: "+contentType, http.StatusBadRequest)
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		jsonError(w, "failed to process file", http.StatusInternalServerError)
+		return
+	}
+
 	uploadDir := "./data/uploads/avatars"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		jsonError(w, "failed to create upload directory", http.StatusInternalServerError)
@@ -504,9 +527,18 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Валідація ID Token через Google TokenInfo API
+	// Валідація ID Token через Google TokenInfo API з таймаутом
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
 	tokenURL := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?id_token=%s", url.QueryEscape(req.IDToken))
-	resp, err := http.Get(tokenURL)
+	reqHttp, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
+	if err != nil {
+		jsonError(w, "failed to build google request", http.StatusInternalServerError)
+		return
+	}
+
+	resp, err := http.DefaultClient.Do(reqHttp)
 	if err != nil {
 		jsonError(w, "failed to contact google oauth", http.StatusBadGateway)
 		return
@@ -519,6 +551,7 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var info struct {
+		Aud           string `json:"aud"`
 		Email         string `json:"email"`
 		EmailVerified string `json:"email_verified"`
 		Name          string `json:"name"`
@@ -527,6 +560,18 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.Email == "" {
 		jsonError(w, "invalid google token payload", http.StatusUnauthorized)
+		return
+	}
+
+	// Перевірка статусу верифікації пошти в Google
+	if info.EmailVerified != "true" && info.EmailVerified != "1" {
+		jsonError(w, "google email is not verified", http.StatusUnauthorized)
+		return
+	}
+
+	// Перевірка Audience (Client ID) якщо налаштовано на сервері
+	if h.googleClientID != "" && info.Aud != h.googleClientID {
+		jsonError(w, "google token audience mismatch", http.StatusUnauthorized)
 		return
 	}
 

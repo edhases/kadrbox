@@ -16,8 +16,9 @@ type Config struct {
 	DBSSLMode    string
 	RedisAddr    string
 	RedisPass    string
-	JWTSecret    string
-	BaseProxyURL string
+	JWTSecret      string
+	BaseProxyURL   string
+	GoogleClientID string
 }
 
 func (c *Config) PostgresDSN() string {
@@ -35,17 +36,18 @@ func (c *Config) PostgresDSN() string {
 
 func Load() *Config {
 	return &Config{
-		ServerPort:   getEnv("SERVER_PORT", "8080"),
-		DBHost:       getEnv("DB_HOST", "postgres"),
-		DBPort:       getEnv("DB_PORT", "5432"),
-		DBUser:       getEnv("DB_USER", "postgres"),
-		DBPassword:   getEnv("DB_PASSWORD", "postgres"),
-		DBName:       getEnv("DB_NAME", "oxide_film"),
-		DBSSLMode:    getEnv("DB_SSLMODE", "disable"),
-		RedisAddr:    getEnv("REDIS_ADDR", "redis:6379"),
-		RedisPass:    getEnv("REDIS_PASSWORD", ""),
-		JWTSecret:    getEnv("JWT_SECRET", "super-secret-jwt-key-oxide-film-2026"),
-		BaseProxyURL: getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
+		ServerPort:     getEnv("SERVER_PORT", "8080"),
+		DBHost:         getEnv("DB_HOST", "postgres"),
+		DBPort:         getEnv("DB_PORT", "5432"),
+		DBUser:         getEnv("DB_USER", "postgres"),
+		DBPassword:     getEnv("DB_PASSWORD", "postgres"),
+		DBName:         getEnv("DB_NAME", "oxide_film"),
+		DBSSLMode:      getEnv("DB_SSLMODE", "disable"),
+		RedisAddr:      getEnv("REDIS_ADDR", "redis:6379"),
+		RedisPass:      getEnv("REDIS_PASSWORD", ""),
+		JWTSecret:      getEnv("JWT_SECRET", "super-secret-jwt-key-oxide-film-2026"),
+		BaseProxyURL:   getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
+		GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
 	}
 }
 

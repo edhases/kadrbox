@@ -17,7 +17,7 @@ import (
 // без інтеграційного оточення.
 
 func covVerifyHandler() *transporthttp.AuthHandler {
-	return transporthttp.NewAuthHandler(nil, nil, nil, "secret")
+	return transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 }
 
 func covVerifyError(t *testing.T, rr *httptest.ResponseRecorder) string {
@@ -68,7 +68,7 @@ func TestCovHttpResendUnconfigured(t *testing.T) {
 	if svc.IsConfigured() {
 		t.Fatal("precondition: service must be unconfigured")
 	}
-	h := transporthttp.NewAuthHandler(nil, nil, svc, "secret")
+	h := transporthttp.NewAuthHandler(nil, nil, svc, "secret", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/resend-verification",
 		strings.NewReader(`{"email":"u@example.com"}`))
@@ -92,7 +92,7 @@ func TestCovHttpResendConfiguredInvalidJSON(t *testing.T) {
 	if !svc.IsConfigured() {
 		t.Fatal("precondition: service must be configured")
 	}
-	h := transporthttp.NewAuthHandler(nil, nil, svc, "secret")
+	h := transporthttp.NewAuthHandler(nil, nil, svc, "secret", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/resend-verification",
 		strings.NewReader("{not-json"))
@@ -111,7 +111,7 @@ func TestCovHttpResendConfiguredInvalidJSON(t *testing.T) {
 func TestCovHttpResendConfiguredEmptyEmail(t *testing.T) {
 	t.Setenv("RESEND_API", "re_test_key")
 	svc := email.NewService()
-	h := transporthttp.NewAuthHandler(nil, nil, svc, "secret")
+	h := transporthttp.NewAuthHandler(nil, nil, svc, "secret", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/resend-verification",
 		strings.NewReader(`{}`))

@@ -232,9 +232,19 @@ class ApiClient {
         );
       case DioExceptionType.badResponse:
         final statusCode = e.response?.statusCode ?? 0;
-        final statusMessage = e.response?.statusMessage ?? 'Unknown';
+        String message = 'Server error $statusCode: ${e.response?.statusMessage ?? 'Unknown'}';
+        final data = e.response?.data;
+        if (data is Map) {
+          if (data['error'] != null && data['error'].toString().trim().isNotEmpty) {
+            message = data['error'].toString().trim();
+          } else if (data['message'] != null && data['message'].toString().trim().isNotEmpty) {
+            message = data['message'].toString().trim();
+          }
+        } else if (data is String && data.trim().isNotEmpty) {
+          message = data.trim();
+        }
         return ServerException(
-          message: 'Server error $statusCode: $statusMessage',
+          message: message,
           statusCode: statusCode,
           code: 'HTTP_$statusCode',
         );

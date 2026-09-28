@@ -12,7 +12,7 @@ import (
 // covAuthHandler будує AuthHandler з nil-залежностями.
 // Безпечні лише шляхи, що повертаються до звернення до репозиторію.
 func covAuthHandler() *transporthttp.AuthHandler {
-	return transporthttp.NewAuthHandler(nil, nil, nil, "secret")
+	return transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 }
 
 // TestCovHttpRegisterInvalidJSON — сміттєве тіло дає 400 "invalid request payload".

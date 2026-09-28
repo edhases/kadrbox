@@ -58,10 +58,7 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			for _, clients := range h.rooms {
 				for client := range clients {
-					_ = client.conn.WriteMessage(
-						websocket.CloseMessage,
-						websocket.FormatCloseMessage(websocket.CloseGoingAway, "server restarting"),
-					)
+					// Закриваємо канал send — writePump сам безпечно відправить CloseGoingAway без гонки
 					close(client.send)
 				}
 			}
@@ -75,7 +72,6 @@ func (h *Hub) Run() {
 				h.rooms[client.roomCode] = make(map[*Client]bool)
 			}
 			h.rooms[client.roomCode][client] = true
-			h.mu.Unlock()
 
 			event := &domain.WatchPartyEvent{
 				Action:     "userJoined",
@@ -87,7 +83,9 @@ func (h *Hub) Run() {
 			if h.redisClient != nil {
 				_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
 			}
-			h.broadcast <- event
+			// Прямий виклик без блокування каналу broadcast (BUG-GO-02)
+			h.broadcastToRoomLocked(event)
+			h.mu.Unlock()
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -100,7 +98,6 @@ func (h *Hub) Run() {
 					}
 				}
 			}
-			h.mu.Unlock()
 
 			event := &domain.WatchPartyEvent{
 				Action:     "userLeft",
@@ -112,28 +109,34 @@ func (h *Hub) Run() {
 			if h.redisClient != nil {
 				_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
 			}
-			h.broadcast <- event
+			// Прямий виклик без блокування каналу broadcast (BUG-GO-02)
+			h.broadcastToRoomLocked(event)
+			h.mu.Unlock()
 
 		case event := <-h.broadcast:
 			h.mu.Lock()
-			clients := h.rooms[event.RoomCode]
-			data, err := json.Marshal(event)
-			if err == nil {
-				for client := range clients {
-					// Ехо-фільтрація (хост не отримує назад своє ж повідомлення)
-					if client.userID == event.SenderID && event.Action != "userJoined" && event.Action != "userLeft" {
-						continue
-					}
-					select {
-					case client.send <- data:
-					default:
-						// Безпечне закриття без data race під Lock()
-						close(client.send)
-						delete(clients, client)
-					}
-				}
-			}
+			h.broadcastToRoomLocked(event)
 			h.mu.Unlock()
+		}
+	}
+}
+
+// broadcastToRoomLocked розсилає повідомлення всім підключеним клієнтам кімнати (викликається під h.mu.Lock())
+func (h *Hub) broadcastToRoomLocked(event *domain.WatchPartyEvent) {
+	clients := h.rooms[event.RoomCode]
+	data, err := json.Marshal(event)
+	if err == nil {
+		for client := range clients {
+			// Ехо-фільтрація (хост не отримує назад своє ж повідомлення дій відтворення)
+			if client.userID == event.SenderID && event.Action != "userJoined" && event.Action != "userLeft" {
+				continue
+			}
+			select {
+			case client.send <- data:
+			default:
+				close(client.send)
+				delete(clients, client)
+			}
 		}
 	}
 }
@@ -178,7 +181,10 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		select {
+		case c.hub.unregister <- c:
+		case <-c.hub.stopChan:
+		}
 		c.conn.Close()
 	}()
 
@@ -222,7 +228,10 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.conn.WriteMessage(
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+				)
 				return
 			}
 

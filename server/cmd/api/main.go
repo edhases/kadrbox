@@ -88,7 +88,7 @@ func main() {
 		log.Println("[Email] RESEND_API not set — email verification disabled (auto-verify mode)")
 	}
 
-	authHandler := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, cfg.JWTSecret)
+	authHandler := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, cfg.JWTSecret, cfg.GoogleClientID)
 	contentHandler := transporthttp.NewContentHandler(registry, cacheRepo)
 	syncHandler := transporthttp.NewSyncHandler(historyRepo, favoritesRepo)
 

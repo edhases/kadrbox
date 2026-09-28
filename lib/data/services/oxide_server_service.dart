@@ -377,20 +377,20 @@ class OxideServerService {
     if (!isAuthenticated) return;
     final url = '${AppConfig.serverApiUrl}/sync/history';
     final payload = {
-      'mediaId': mediaId,
-      'providerId': providerId,
+      'media_id': mediaId,
+      'provider_id': providerId,
       'title': title,
-      'posterUrl': posterUrl,
+      'poster_url': posterUrl,
       'year': year,
-      'mediaType': mediaType,
-      'positionMs': positionMs,
-      'durationMs': durationMs,
+      'media_type': mediaType,
+      'position_ms': positionMs,
+      'duration_ms': durationMs,
       'season': season,
       'episode': episode,
-      'episodeTitle': episodeTitle,
-      'lastStreamUrl': lastStreamUrl,
+      'episode_title': episodeTitle,
+      'last_stream_url': lastStreamUrl,
       'voiceover': voiceover,
-      'watchedAt': (watchedAt ?? DateTime.now()).toUtc().toIso8601String(),
+      'watched_at': (watchedAt ?? DateTime.now()).toUtc().toIso8601String(),
     };
 
     try {
@@ -450,14 +450,14 @@ class OxideServerService {
     final url = '${AppConfig.serverApiUrl}/sync/favorites/toggle';
     try {
       final res = await _apiClient.post(url, data: {
-        'mediaId': mediaId,
-        'providerId': providerId,
+        'media_id': mediaId,
+        'provider_id': providerId,
         'title': title,
-        'posterUrl': posterUrl,
+        'poster_url': posterUrl,
         'year': year,
-        'mediaType': mediaType,
+        'media_type': mediaType,
         'rating': rating,
-        'ratingSource': ratingSource,
+        'rating_source': ratingSource,
       });
       if (res is Map && res['is_favorite'] != null) {
         return res['is_favorite'] as bool;
@@ -466,6 +466,23 @@ class OxideServerService {
       Logger.w('Failed to toggle favorite on server: $e', tag: _tag);
     }
     return false;
+  }
+
+  /// Explicitly remove favorite from server
+  Future<void> removeFavorite({
+    required String mediaId,
+    required String providerId,
+  }) async {
+    if (!isAuthenticated) return;
+    final url = '${AppConfig.serverApiUrl}/sync/favorites';
+    try {
+      await _apiClient.delete(url, queryParameters: {
+        'media_id': mediaId,
+        'provider_id': providerId,
+      });
+    } catch (e) {
+      Logger.w('Failed to remove favorite from server: $e', tag: _tag);
+    }
   }
 
   // ===========================================================================

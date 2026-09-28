@@ -2,6 +2,8 @@ package http
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/edhases/oxide-server/internal/transport/http/middleware"
 	"github.com/edhases/oxide-server/internal/transport/ws"
@@ -25,10 +27,21 @@ func NewRouter(
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 
-	// 2. Безпечний і гнучкий CORS без колізії wildcard + credentials
+	// 2. Безпечний CORS (дозволяємо нативні додатки без Origin, свій домен та локальні сервери)
 	r.Use(cors.Handler(cors.Options{
 		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			return true // дозволяє будь-який origin динамічно зі збереженням credentials
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			hostname := u.Hostname()
+			return hostname == "localhost" ||
+				hostname == "127.0.0.1" ||
+				hostname == "oxideteam.pp.ua" ||
+				strings.HasSuffix(hostname, ".oxideteam.pp.ua")
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Refresh-Token"},
@@ -47,8 +60,8 @@ func NewRouter(
 	// WebSocket Watch Party
 	r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
 
-	// Роздача завантажених файлів (аватари тощо)
-	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./data/uploads"))))
+	// Роздача завантажених файлів (аватари тощо) без Directory Listing (BUG-GO-06)
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServerNoListing("./data/uploads")))
 
 	// REST API v1
 	r.Route("/api/v1", func(r chi.Router) {
@@ -87,9 +100,34 @@ func NewRouter(
 				r.Get("/continue-watching", syncH.GetContinueWatching)
 				r.Get("/favorites", syncH.GetFavorites)
 				r.Post("/favorites/toggle", syncH.ToggleFavorite)
+				r.Delete("/favorites", syncH.RemoveFavorite)
 			})
 		})
 	})
 
 	return r
 }
+
+// fileServerNoListing запобігає виводу Directory Listing для папок
+func fileServerNoListing(root string) http.Handler {
+	fs := http.Dir(root)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		f, err := fs.Open(r.URL.Path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer f.Close()
+		stat, err := f.Stat()
+		if err != nil || stat.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		http.FileServer(fs).ServeHTTP(w, r)
+	})
+}
+

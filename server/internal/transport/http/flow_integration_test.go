@@ -56,7 +56,7 @@ func covFlowRigSetup(t *testing.T) *covFlowRig {
 	cacheRepo := postgres.NewCacheRepository(pool)
 
 	reg := provider.NewRegistry()
-	authH := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, "test-secret")
+	authH := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, "test-secret", "")
 	contentH := transporthttp.NewContentHandler(reg, cacheRepo)
 	syncH := transporthttp.NewSyncHandler(historyRepo, favoritesRepo)
 	hub := ws.NewHub(redisClient)
