@@ -20,6 +20,7 @@ import '../../data/services/stats_service.dart';
 import '../../data/services/episode_update_service.dart';
 import '../../data/services/video_player_service.dart';
 import '../../data/services/watch_party_service.dart';
+import '../../data/services/oxide_server_service.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/pocketbase_service.dart';
 import '../../data/services/search_service.dart';
@@ -50,28 +51,36 @@ Future<void> configureDependencies() async {
   final prefs = await SharedPreferences.getInstance();
   getIt.registerSingleton<SharedPreferences>(prefs);
 
-  // PocketBase backend service
+  // Core services - register UserAgentService and ApiClient
+  final uaService = UserAgentService(prefs: prefs);
+  await uaService.initialize();
+  getIt.registerSingleton<UserAgentService>(uaService);
+
+  final apiClient = ApiClient(uaService: uaService);
+  getIt.registerSingleton<ApiClient>(apiClient);
+
+  // Oxide Go Server backend service (Chi + PostgreSQL 16 + Redis)
+  final serverService = OxideServerService(prefs, apiClient);
+  getIt.registerSingleton<OxideServerService>(serverService);
+
+  // PocketBase backend service (legacy fallback)
   getIt.registerSingleton<PocketBaseService>(PocketBaseService(prefs));
 
   // Database (must be early)
   final database = AppDatabase();
   getIt.registerSingleton<AppDatabase>(database);
 
-  // Core services - register UserAgentService and ApiClient
-  final uaService = UserAgentService(prefs: prefs);
-  await uaService.initialize();
-  getIt.registerSingleton<UserAgentService>(uaService);
-
-  getIt.registerLazySingleton<ApiClient>(() => ApiClient(uaService: uaService));
-
   // URL Resolver for auto-detecting domain changes
   getIt.registerLazySingleton<UrlResolverService>(
     () => UrlResolverService(getIt<SharedPreferences>()),
   );
 
-  // Auth service (must be early as others may depend on it)
+  // Auth service (supports both Oxide Server and PocketBase fallback)
   getIt.registerLazySingleton<AuthService>(
-    () => AuthService(getIt<PocketBaseService>()),
+    () => AuthService(
+      getIt<OxideServerService>(),
+      getIt<PocketBaseService>(),
+    ),
   );
 
   // Services
@@ -82,6 +91,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<FavoritesService>(
     () => FavoritesService(
       database: database,
+      server: getIt<OxideServerService>(),
       pocketBase: getIt<PocketBaseService>(),
       authService: getIt<AuthService>(),
     ),
@@ -89,6 +99,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<HistoryService>(
     () => HistoryService(
       database: database,
+      server: getIt<OxideServerService>(),
       pocketBase: getIt<PocketBaseService>(),
       authService: getIt<AuthService>(),
     ),
@@ -102,6 +113,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<StatsService>(() => StatsService(database));
   getIt.registerLazySingleton<WatchPartyService>(
     () => WatchPartyService(
+      server: getIt<OxideServerService>(),
       pocketBase: getIt<PocketBaseService>(),
       settings: getIt<SettingsService>(),
     ),

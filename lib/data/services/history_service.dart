@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:pocketbase/pocketbase.dart';
 import '../database/app_database.dart';
 import '../database/dao/history_dao.dart';
+import 'oxide_server_service.dart';
 import 'pocketbase_service.dart';
 import 'auth_service.dart';
 
@@ -10,12 +11,13 @@ import 'auth_service.dart';
 ///
 /// **Offline-first strategy:**
 /// - Local Drift database is the PRIMARY source of truth
-/// - Cloud (PocketBase) is used for backup and cross-device sync
+/// - Cloud (Oxide Server / PocketBase fallback) is used for backup and cross-device sync
 /// - All reads come from local DB (fast)
 /// - Writes go to local DB first, then sync to cloud in background
 /// - On startup, pull latest from cloud and merge with local
 class HistoryService extends ChangeNotifier {
   final HistoryDao _dao;
+  final OxideServerService _server;
   final PocketBaseService _pocketBase;
   final AuthService _authService;
 
@@ -38,9 +40,11 @@ class HistoryService extends ChangeNotifier {
 
   HistoryService({
     required AppDatabase database,
+    required OxideServerService server,
     required PocketBaseService pocketBase,
     required AuthService authService,
   }) : _dao = HistoryDao(database),
+       _server = server,
        _pocketBase = pocketBase,
        _authService = authService {
     _init();
@@ -193,6 +197,49 @@ class HistoryService extends ChangeNotifier {
       _isSyncing = true;
       notifyListeners();
 
+      if (_server.isAuthenticated) {
+        final serverRecords = await _server.getHistory();
+        for (final data in serverRecords) {
+          final mediaId = (data['mediaId'] ?? data['media_id']) as String?;
+          final providerId = (data['providerId'] ?? data['provider_id']) as String?;
+          if (mediaId == null || providerId == null) continue;
+
+          final season = data['season'] as int?;
+          final episode = data['episode'] as int?;
+
+          final localItem = await _dao.getForMedia(
+            mediaId,
+            providerId,
+            season: season,
+            episode: episode,
+          );
+
+          final watchedAtStr = (data['watchedAt'] ?? data['watched_at']) as String?;
+          final cloudWatchedAt = watchedAtStr != null ? DateTime.parse(watchedAtStr) : DateTime.now();
+
+          if (localItem == null || localItem.watchedAt.isBefore(cloudWatchedAt)) {
+            await _dao.saveProgress(
+              mediaId: mediaId,
+              providerId: providerId,
+              title: (data['title'] ?? '') as String,
+              posterUrl: (data['posterUrl'] ?? data['poster_url']) as String?,
+              year: data['year'] as int?,
+              mediaType: (data['mediaType'] ?? data['media_type'] ?? 'movie') as String,
+              positionMs: (data['positionMs'] ?? data['position_ms'] ?? 0) as int,
+              durationMs: (data['durationMs'] ?? data['duration_ms'] ?? 0) as int,
+              season: season,
+              episode: episode,
+              episodeTitle: (data['episodeTitle'] ?? data['episode_title']) as String?,
+              lastStreamUrl: (data['lastStreamUrl'] ?? data['last_stream_url']) as String?,
+              voiceover: data['voiceover'] as String?,
+              watchedAt: cloudWatchedAt,
+            );
+          }
+        }
+        debugPrint('✅ Synced ${serverRecords.length} items from Oxide Server');
+        return;
+      }
+
       // Fetch from cloud
       final cloudRecords = await _pocketBase.pb
           .collection('watch_history')
@@ -201,7 +248,6 @@ class HistoryService extends ChangeNotifier {
       for (final record in cloudRecords.items) {
         final data = record.data;
 
-        // Check if local has newer version
         final localItem = await _dao.getForMedia(
           data['media_id'] as String,
           data['provider_id'] as String,
@@ -211,7 +257,6 @@ class HistoryService extends ChangeNotifier {
 
         final cloudWatchedAt = DateTime.parse(data['watched_at'] as String);
 
-        // Merge: newer timestamp wins
         if (localItem == null || localItem.watchedAt.isBefore(cloudWatchedAt)) {
           await _dao.saveProgress(
             mediaId: data['media_id'] as String,
@@ -231,8 +276,7 @@ class HistoryService extends ChangeNotifier {
           );
         }
       }
-
-      debugPrint('✅ Synced ${cloudRecords.items.length} items from cloud');
+      debugPrint('✅ Synced ${cloudRecords.items.length} items from PocketBase');
     } catch (e) {
       debugPrint('⚠️ Failed to pull from cloud: $e');
     } finally {
@@ -245,13 +289,11 @@ class HistoryService extends ChangeNotifier {
   /// Optional feature - falls back to periodic sync if realtime fails
   Future<void> _subscribeToRealtime() async {
     if (!_authService.isAuthenticated) {
-      debugPrint('[History] Not authenticated, skipping realtime subscription');
       return;
     }
 
     final user = _authService.currentUser;
     if (user == null) {
-      debugPrint('[History] No user info, skipping realtime subscription');
       return;
     }
 
@@ -411,6 +453,30 @@ class HistoryService extends ChangeNotifier {
       final userId = _authService.currentUser?.id;
       if (userId == null) return;
 
+      if (_server.isAuthenticated) {
+        await _server.saveHistoryProgress(
+          mediaId: mediaId,
+          providerId: providerId,
+          title: localItem.title.isEmpty ? 'Unknown' : localItem.title,
+          posterUrl: (localItem.posterUrl?.startsWith('http') ?? false)
+              ? localItem.posterUrl
+              : null,
+          year: localItem.year,
+          mediaType: localItem.mediaType,
+          positionMs: localItem.positionMs,
+          durationMs: localItem.durationMs,
+          season: season,
+          episode: episode,
+          episodeTitle: localItem.episodeTitle,
+          lastStreamUrl: (localItem.lastStreamUrl?.startsWith('http') ?? false)
+              ? localItem.lastStreamUrl
+              : null,
+          voiceover: localItem.voiceover,
+          watchedAt: localItem.watchedAt,
+        );
+        return;
+      }
+
       // Check if exists in cloud (include season/episode for series)
       String filter =
           'user_id = "$userId" && media_id = "$mediaId" && provider_id = "$providerId"';
@@ -421,38 +487,38 @@ class HistoryService extends ChangeNotifier {
           .collection('watch_history')
           .getList(filter: filter);
 
-      final body = {
-        'user_id': userId,
-        'media_id': mediaId,
-        'provider_id': providerId,
-        'title': localItem.title.isEmpty ? 'Unknown' : localItem.title,
-        'poster_url': (localItem.posterUrl?.startsWith('http') ?? false)
-            ? localItem.posterUrl
-            : null,
-        'year': localItem.year,
-        'media_type': localItem.mediaType,
-        'position_ms': localItem.positionMs,
-        'duration_ms': localItem.durationMs,
-        'season': season,
-        'episode': episode,
-        'episode_title': localItem.episodeTitle,
-        'last_stream_url':
-            (localItem.lastStreamUrl?.startsWith('http') ?? false)
-            ? localItem.lastStreamUrl
-            : null,
-        'voiceover': localItem.voiceover,
-        'watched_at': localItem.watchedAt.toIso8601String(),
-      };
+        final body = {
+          'user_id': userId,
+          'media_id': mediaId,
+          'provider_id': providerId,
+          'title': localItem.title.isEmpty ? 'Unknown' : localItem.title,
+          'poster_url': (localItem.posterUrl?.startsWith('http') ?? false)
+              ? localItem.posterUrl
+              : null,
+          'year': localItem.year,
+          'media_type': localItem.mediaType,
+          'position_ms': localItem.positionMs,
+          'duration_ms': localItem.durationMs,
+          'season': season,
+          'episode': episode,
+          'episode_title': localItem.episodeTitle,
+          'last_stream_url':
+              (localItem.lastStreamUrl?.startsWith('http') ?? false)
+              ? localItem.lastStreamUrl
+              : null,
+          'voiceover': localItem.voiceover,
+          'watched_at': localItem.watchedAt.toIso8601String(),
+        };
 
-      if (existing.items.isEmpty) {
-        // Create new
-        await _pocketBase.pb.collection('watch_history').create(body: body);
-      } else {
-        // Update existing
-        await _pocketBase.pb
-            .collection('watch_history')
-            .update(existing.items.first.id, body: body);
-      }
+        if (existing.items.isEmpty) {
+          // Create new
+          await _pocketBase.pb.collection('watch_history').create(body: body);
+        } else {
+          // Update existing
+          await _pocketBase.pb
+              .collection('watch_history')
+              .update(existing.items.first.id, body: body);
+        }
     } catch (e) {
       debugPrint('Failed to sync item to cloud: $e');
     }

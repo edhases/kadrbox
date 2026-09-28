@@ -3,9 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/utils/logger.dart';
+import 'oxide_server_service.dart';
 import 'pocketbase_service.dart';
 
-/// Authentication service using PocketBase
+/// Authentication service supporting Oxide Go Server (Chi/PostgreSQL) and PocketBase fallback
 ///
 /// Note: Most cloud sync functionality (watch history, favorites) has been
 /// moved to HistoryService and FavoritesService for offline-first approach.
@@ -13,6 +14,7 @@ import 'pocketbase_service.dart';
 class AuthService extends ChangeNotifier {
   static const _tag = 'AuthService';
 
+  final OxideServerService _server;
   final PocketBaseService _pb;
 
   // Cached state
@@ -20,10 +22,10 @@ class AuthService extends ChangeNotifier {
   String? _error;
 
   // Getters
-  bool get isAuthenticated => _pb.isAuthenticated;
-  String? get userId => _pb.userId;
-  String? get userEmail => _pb.userEmail;
-  String? get userName => _pb.userName;
+  bool get isAuthenticated => _server.isAuthenticated || _pb.isAuthenticated;
+  String? get userId => _server.userId ?? _pb.userId;
+  String? get userEmail => _server.userEmail ?? _pb.userEmail;
+  String? get userName => _server.userName ?? _pb.userName;
   bool get isLoading => _isLoading;
   bool get isGuest => !isAuthenticated;
   String? get error => _error;
@@ -39,6 +41,16 @@ class AuthService extends ChangeNotifier {
   /// Get user profile data (for UI pages)
   Map<String, dynamic>? get profile {
     if (!isAuthenticated) return null;
+    if (_server.isAuthenticated) {
+      return {
+        'display_name': _server.userName ?? displayName,
+        'bio': _server.bio ?? '',
+        'avatar': _server.avatar ?? '',
+        'created_at': _server.user?['created_at'] ?? '',
+        'watched_count': 0,
+        'favorites_count': 0,
+      };
+    }
     final record = _pb.pb.authStore.record;
     if (record == null) return null;
 
@@ -53,9 +65,12 @@ class AuthService extends ChangeNotifier {
     };
   }
 
-  /// Get avatar URL from PocketBase
+  /// Get avatar URL from backend
   String? get avatarUrl {
     if (!isAuthenticated) return null;
+    if (_server.isAuthenticated && _server.avatar != null && _server.avatar!.isNotEmpty) {
+      return _server.avatar;
+    }
     final record = _pb.pb.authStore.record;
     if (record == null || record.data['avatar'] == null) return null;
 
@@ -65,8 +80,7 @@ class AuthService extends ChangeNotifier {
 
   String get displayName => userName ?? userEmail?.split('@').first ?? 'Гість';
 
-  AuthService(this._pb) {
-    // PocketBase auth state is automatically persisted via AsyncAuthStore
+  AuthService(this._server, this._pb) {
     if (isAuthenticated) {
       Logger.i('User already authenticated: $userEmail', tag: _tag);
     }
@@ -83,7 +97,7 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.signUp(
+      await _server.signUp(
         email: email,
         password: password,
         name: displayName ?? email.split('@').first,
@@ -91,6 +105,16 @@ class AuthService extends ChangeNotifier {
       Logger.i('Sign up successful for: $email', tag: _tag);
       notifyListeners();
     } catch (e) {
+      try {
+        await _pb.signUp(
+          email: email,
+          password: password,
+          name: displayName ?? email.split('@').first,
+        );
+        Logger.i('Fallback PB Sign up successful for: $email', tag: _tag);
+        notifyListeners();
+        return;
+      } catch (_) {}
       Logger.e('Sign up failed', tag: _tag, error: e);
       _error = _translateError(e.toString());
       rethrow;
@@ -106,10 +130,16 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.signIn(email, password);
+      await _server.signIn(email, password);
       Logger.i('Sign in successful for: $email', tag: _tag);
       notifyListeners();
     } catch (e) {
+      try {
+        await _pb.signIn(email, password);
+        Logger.i('Fallback PB Sign in successful for: $email', tag: _tag);
+        notifyListeners();
+        return;
+      } catch (_) {}
       Logger.e('Sign in failed', tag: _tag, error: e);
       _error = _translateError(e.toString());
       rethrow;
@@ -203,7 +233,10 @@ class AuthService extends ChangeNotifier {
   Future<void> signOut() async {
     Logger.i('Signing out user: $userEmail', tag: _tag);
     try {
-      await _pb.signOut();
+      await _server.signOut();
+      if (_pb.isAuthenticated) {
+        await _pb.signOut();
+      }
       notifyListeners();
       Logger.i('Sign out successful', tag: _tag);
     } catch (e) {
@@ -223,11 +256,16 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      final updateData = <String, dynamic>{};
-      if (displayName != null) updateData['name'] = displayName;
-      if (bio != null) updateData['bio'] = bio;
+      if (_server.isAuthenticated) {
+        await _server.updateProfile(name: displayName, bio: bio);
+      }
+      if (_pb.isAuthenticated && _pb.userId != null) {
+        final updateData = <String, dynamic>{};
+        if (displayName != null) updateData['name'] = displayName;
+        if (bio != null) updateData['bio'] = bio;
 
-      await _pb.pb.collection('users').update(userId!, body: updateData);
+        await _pb.pb.collection('users').update(_pb.userId!, body: updateData);
+      }
       Logger.i('Profile updated successfully', tag: _tag);
       notifyListeners();
     } catch (e) {
@@ -277,7 +315,14 @@ class AuthService extends ChangeNotifier {
 
   /// Refresh authentication token
   Future<bool> refreshAuth() async {
-    return await _pb.refreshAuth();
+    if (_server.isAuthenticated) {
+      final ok = await _server.refreshAuth();
+      if (ok) return true;
+    }
+    if (_pb.isAuthenticated) {
+      return await _pb.refreshAuth();
+    }
+    return false;
   }
 
   /// Update user avatar

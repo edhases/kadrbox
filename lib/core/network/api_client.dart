@@ -84,39 +84,112 @@ class ApiClient {
     }
   }
 
-  /// GET request that returns JSON
+  /// Set or clear Authorization Bearer token
+  void setAuthToken(String? token) {
+    if (token != null && token.isNotEmpty) {
+      _dio.options.headers['Authorization'] = 'Bearer $token';
+    } else {
+      _dio.options.headers.remove('Authorization');
+    }
+  }
+
+  /// GET request that returns JSON Map
   Future<Map<String, dynamic>> getJson(
     String url, {
     Map<String, dynamic>? queryParameters,
     Map<String, dynamic>? headers,
   }) async {
     try {
-      final response = await _dio.get<Map<String, dynamic>>(
+      final response = await _dio.get(
         url,
         queryParameters: queryParameters,
         options: Options(headers: headers),
       );
-      return response.data ?? {};
+      if (response.data is Map) {
+        return Map<String, dynamic>.from(response.data as Map);
+      }
+      return {};
     } on DioException catch (e) {
       throw _handleDioError(e);
     }
   }
 
-  /// POST request
-  Future<Map<String, dynamic>> post(
+  /// GET request that returns JSON List
+  Future<List<dynamic>> getJsonList(
+    String url, {
+    Map<String, dynamic>? queryParameters,
+    Map<String, dynamic>? headers,
+  }) async {
+    try {
+      final response = await _dio.get(
+        url,
+        queryParameters: queryParameters,
+        options: Options(headers: headers),
+      );
+      if (response.data is List) {
+        return List<dynamic>.from(response.data as List);
+      }
+      return [];
+    } on DioException catch (e) {
+      throw _handleDioError(e);
+    }
+  }
+
+  /// POST request returning Map or dynamic
+  Future<dynamic> post(
     String url, {
     dynamic data,
     Map<String, dynamic>? queryParameters,
     Map<String, dynamic>? headers,
   }) async {
     try {
-      final response = await _dio.post<Map<String, dynamic>>(
+      final response = await _dio.post(
         url,
         data: data,
         queryParameters: queryParameters,
         options: Options(headers: headers),
       );
-      return response.data ?? {};
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleDioError(e);
+    }
+  }
+
+  /// PUT request returning Map or dynamic
+  Future<dynamic> put(
+    String url, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Map<String, dynamic>? headers,
+  }) async {
+    try {
+      final response = await _dio.put(
+        url,
+        data: data,
+        queryParameters: queryParameters,
+        options: Options(headers: headers),
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleDioError(e);
+    }
+  }
+
+  /// DELETE request returning Map or dynamic
+  Future<dynamic> delete(
+    String url, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Map<String, dynamic>? headers,
+  }) async {
+    try {
+      final response = await _dio.delete(
+        url,
+        data: data,
+        queryParameters: queryParameters,
+        options: Options(headers: headers),
+      );
+      return response.data;
     } on DioException catch (e) {
       throw _handleDioError(e);
     }

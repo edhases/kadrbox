@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show WebSocket;
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:pocketbase/pocketbase.dart' hide SettingsService;
 import 'package:peerdart/peerdart.dart';
 import 'package:get_it/get_it.dart';
+import 'oxide_server_service.dart';
 import 'pocketbase_service.dart';
 import 'settings_service.dart';
 import '../../core/utils/logger.dart';
@@ -338,6 +340,83 @@ class _PocketBaseBackend implements WatchPartyBackend {
   }
 }
 
+/// Oxide Go Server WebSocket Backend Implementation
+class _OxideServerBackend implements WatchPartyBackend {
+  final OxideServerService _server;
+  WebSocket? _ws;
+  StreamSubscription? _sub;
+  String? _roomCode;
+  final String _tag = 'WatchParty_OxideServer';
+
+  _OxideServerBackend(this._server);
+
+  @override
+  Future<void> connect({
+    required String roomCode,
+    required bool isHost,
+    required String myId,
+    required String myName,
+    required Function(WatchPartyMessage) onMessage,
+  }) async {
+    _roomCode = roomCode;
+
+    try {
+      _ws = await _server.connectWatchParty(
+        roomCode: roomCode,
+        userId: myId,
+        userName: myName,
+      );
+
+      _sub = _ws!.listen(
+        (data) {
+          try {
+            final decoded = jsonDecode(data.toString());
+            if (decoded is Map<String, dynamic>) {
+              final msg = WatchPartyMessage.fromJson(decoded);
+              onMessage(msg);
+            }
+          } catch (e) {
+            Logger.w('Failed to decode WS message: $e', tag: _tag);
+          }
+        },
+        onError: (err) {
+          Logger.e('WS error: $err', tag: _tag);
+        },
+        onDone: () {
+          Logger.i('WS connection closed', tag: _tag);
+        },
+      );
+    } catch (e) {
+      Logger.e('Failed to connect to Oxide Server WebSocket', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> disconnect() async {
+    await _sub?.cancel();
+    _sub = null;
+    await _ws?.close();
+    _ws = null;
+  }
+
+  @override
+  void sendBroadcast(WatchPartyMessage message) {
+    if (_ws != null && _ws!.readyState == WebSocket.open) {
+      final json = jsonEncode({
+        ...message.toJson(),
+        'roomCode': _roomCode,
+      });
+      _ws!.add(json);
+    }
+  }
+
+  @override
+  void sendMessage(String targetId, WatchPartyMessage message) {
+    sendBroadcast(message);
+  }
+}
+
 /// PeerDart Backend Implementation
 class _PeerDartBackend implements WatchPartyBackend {
   Peer? _peer;
@@ -553,15 +632,18 @@ class WatchPartyService extends ChangeNotifier {
   SyncCorrectionMode get correctionMode => _correctionMode;
   bool get isSynced => _correctionMode == SyncCorrectionMode.none;
 
-  // Dependency Injection for testing
+  // Dependency Injection for testing & backend selection
+  final OxideServerService? _server;
   final PocketBaseService _pocketBase;
   final WatchPartyBackend Function(WatchPartyBackendType)? _backendFactory;
 
   WatchPartyService({
+    OxideServerService? server,
     required PocketBaseService pocketBase,
     required SettingsService settings,
     WatchPartyBackend Function(WatchPartyBackendType)? backendFactory,
-  }) : _pocketBase = pocketBase,
+  }) : _server = server,
+       _pocketBase = pocketBase,
        _backendFactory = backendFactory {
     _loadName(settings);
   }
@@ -749,7 +831,11 @@ class WatchPartyService extends ChangeNotifier {
     if (_backendFactory != null) {
       _backend = _backendFactory(type);
     } else if (type == WatchPartyBackendType.pocketbase) {
-      _backend = _PocketBaseBackend(_pocketBase);
+      if (_server != null) {
+        _backend = _OxideServerBackend(_server);
+      } else {
+        _backend = _PocketBaseBackend(_pocketBase);
+      }
     } else {
       _backend = _PeerDartBackend();
     }

@@ -7,7 +7,18 @@ class AppConfig {
   static const String appName = 'Oxide Film';
   static const String appVersion = '1.0.0';
 
-  // PocketBase backend
+  // Oxide Go Server backend (high-performance lightweight Go + PostgreSQL + Redis)
+  static const String defaultServerUrl = 'http://192.168.1.80:8089';
+  static String serverBaseUrl = defaultServerUrl;
+  static String get serverApiUrl => '$serverBaseUrl/api/v1';
+  static String get serverWsUrl {
+    final uri = Uri.parse(serverBaseUrl);
+    final scheme = uri.scheme == 'https' ? 'wss' : 'ws';
+    final port = uri.hasPort ? ':${uri.port}' : '';
+    return '$scheme://${uri.host}$port/api/v1/ws/watch-party';
+  }
+
+  // PocketBase legacy fallback URL
   static const String backendUrl =
       'https://oxide.skystreamua.space'; // Production server
   static String get adminUrl => '$backendUrl/_/';

@@ -5,12 +5,14 @@ import '../../core/utils/logger.dart';
 import '../../domain/entities/entities.dart';
 import '../database/app_database.dart';
 import '../database/dao/favorites_dao.dart';
+import 'oxide_server_service.dart';
 import 'pocketbase_service.dart';
 import 'auth_service.dart';
 
 /// Service for managing favorites with cloud sync
 class FavoritesService extends ChangeNotifier {
   final FavoritesDao _dao;
+  final OxideServerService _server;
   final PocketBaseService _pocketBase;
   final AuthService _authService;
 
@@ -29,9 +31,11 @@ class FavoritesService extends ChangeNotifier {
 
   FavoritesService({
     required AppDatabase database,
+    required OxideServerService server,
     required PocketBaseService pocketBase,
     required AuthService authService,
   }) : _dao = FavoritesDao(database),
+       _server = server,
        _pocketBase = pocketBase,
        _authService = authService {
     _init();
@@ -143,23 +147,46 @@ class FavoritesService extends ChangeNotifier {
 
       debugPrint('[Favorites] Pulling from cloud...');
 
+      if (_server.isAuthenticated) {
+        final records = await _server.getFavorites();
+        debugPrint('[Favorites] Found ${records.length} cloud favorites from Oxide Server');
+
+        for (final cloudData in records) {
+          final mediaId = (cloudData['mediaId'] ?? cloudData['media_id']) as String?;
+          final providerId = (cloudData['providerId'] ?? cloudData['provider_id']) as String?;
+          if (mediaId == null || providerId == null) continue;
+
+          final localExists = await _dao.isFavorite(mediaId, providerId);
+          if (!localExists) {
+            await _dao.add(
+              mediaId: mediaId,
+              providerId: providerId,
+              title: (cloudData['title'] ?? '') as String,
+              posterUrl: (cloudData['posterUrl'] ?? cloudData['poster_url']) as String?,
+              year: cloudData['year'] as int?,
+              mediaType: (cloudData['mediaType'] ?? cloudData['media_type'] ?? 'movie') as String,
+              rating: (cloudData['rating'] as num?)?.toDouble(),
+              ratingSource: (cloudData['ratingSource'] ?? cloudData['rating_source']) as String?,
+            );
+          }
+        }
+        debugPrint('[Favorites] Server cloud pull complete');
+        return;
+      }
+
       final records = await _pocketBase.pb
           .collection('favorites')
           .getFullList(filter: 'user_id = "${user.id}"');
 
       debugPrint('[Favorites] Found ${records.length} cloud favorites');
 
-      // Merge with local favorites (newer timestamp wins)
       for (final record in records) {
         final cloudData = record.data;
         final mediaId = cloudData['media_id'] as String;
         final providerId = cloudData['provider_id'] as String;
 
-        // Check if exists locally
         final localExists = await _dao.isFavorite(mediaId, providerId);
-
         if (!localExists) {
-          // Add from cloud to local
           await _dao.add(
             mediaId: mediaId,
             providerId: providerId,
@@ -170,8 +197,7 @@ class FavoritesService extends ChangeNotifier {
           );
         }
       }
-
-      debugPrint('[Favorites] Cloud pull complete');
+      debugPrint('[Favorites] PB cloud pull complete');
     } catch (e) {
       debugPrint('[Favorites] Pull error: $e');
     }
@@ -297,10 +323,28 @@ class FavoritesService extends ChangeNotifier {
   /// Helper to sync single favorite to cloud
   Future<void> _syncSingleItemToCloud(Favorite? fav, bool isFavorite) async {
     final user = _authService.currentUser;
-    if (user == null) return;
+    if (user == null || fav == null) return;
 
     try {
-      if (isFavorite && fav != null) {
+      if (_server.isAuthenticated) {
+        if (isFavorite) {
+          await _server.toggleFavorite(
+            mediaId: fav.mediaId,
+            providerId: fav.providerId,
+            title: fav.title.isEmpty ? 'Unknown' : fav.title,
+            posterUrl: (fav.posterUrl?.startsWith('http') ?? false)
+                ? fav.posterUrl
+                : null,
+            year: fav.year,
+            mediaType: fav.mediaType,
+            rating: fav.rating,
+            ratingSource: fav.ratingSource,
+          );
+        }
+        return;
+      }
+
+      if (isFavorite) {
         // Create or update in cloud
         final existing = await _pocketBase.pb
             .collection('favorites')
@@ -329,7 +373,7 @@ class FavoritesService extends ChangeNotifier {
               .collection('favorites')
               .update(existing.first.id, body: data);
         }
-      } else if (fav != null) {
+      } else {
         // Remove from cloud
         final existing = await _pocketBase.pb
             .collection('favorites')
