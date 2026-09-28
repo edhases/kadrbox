@@ -47,8 +47,8 @@ class OxideServerService {
   bool get isAuthenticated => _accessToken != null && _accessToken!.isNotEmpty;
   String? get userId => _user?['id'];
   String? get userEmail => _user?['email'];
-  String? get userName => _user?['name'];
-  String? get avatar => _user?['avatar'];
+  String? get userName => _user?['username'];
+  String? get avatar => _user?['avatar_url'];
   String? get bio => _user?['bio'];
   Map<String, dynamic>? get user => _user;
   String? get accessToken => _accessToken;
@@ -89,7 +89,7 @@ class OxideServerService {
       final res = await _apiClient.post(url, data: {
         'email': email.trim(),
         'password': password,
-        'name': name.trim(),
+        'username': name.trim(),
       });
 
       if (res is Map) {
@@ -126,8 +126,8 @@ class OxideServerService {
         'refresh_token': _refreshToken,
       });
 
-      if (res is Map && res['token'] != null) {
-        _accessToken = res['token'] as String;
+      if (res is Map && res['access_token'] != null) {
+        _accessToken = res['access_token'] as String;
         await _prefs.setString(_tokenKey, _accessToken!);
         if (res['refresh_token'] != null) {
           _refreshToken = res['refresh_token'] as String;
@@ -180,7 +180,7 @@ class OxideServerService {
   }
 
   Future<void> _saveAuthData(Map<dynamic, dynamic> res) async {
-    _accessToken = res['token'] as String?;
+    _accessToken = res['access_token'] as String?;
     _refreshToken = res['refresh_token'] as String?;
 
     if (res['user'] != null && res['user'] is Map) {
