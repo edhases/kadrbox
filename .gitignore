@@ -81,3 +81,9 @@ __pycache__/
 
 # Scripts
 /scripts/
+
+# Graphify Knowledge Graph output & cache
+graphify-out/
+
+# Temporary HTML debug/test files
+test_*.html
