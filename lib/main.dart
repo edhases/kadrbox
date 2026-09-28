@@ -39,13 +39,13 @@ void main() async {
       size: Size(1280, 720),
       minimumSize: Size(800, 600),
       center: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Color(0xFF0F172A),
       skipTaskbar: false,
       titleBarStyle: TitleBarStyle.hidden,
       title: 'Oxide Film',
     );
 
-    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.show();
       await windowManager.focus();
     });
