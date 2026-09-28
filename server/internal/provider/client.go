@@ -57,6 +57,14 @@ func (c *TLSClient) Get(ctx context.Context, targetURL, referer string) (string,
 		return "", fmt.Errorf("read response body: %w", err)
 	}
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet := string(bodyBytes)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return "", fmt.Errorf("upstream provider returned status %d: %s", resp.StatusCode, snippet)
+	}
+
 	return string(bodyBytes), nil
 }
 
@@ -83,6 +91,14 @@ func (c *TLSClient) PostForm(ctx context.Context, targetURL, formData, referer s
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet := string(bodyBytes)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return "", fmt.Errorf("upstream provider returned status %d: %s", resp.StatusCode, snippet)
 	}
 
 	return string(bodyBytes), nil

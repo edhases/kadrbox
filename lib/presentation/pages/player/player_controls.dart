@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -923,11 +924,9 @@ List<PopupMenuItem<StreamSource>> _buildVoiceoverMenuItems(
 
       // Try to find match for current quality
       if (controller.state.currentQuality != null) {
-        try {
-          bestMatch = streams.firstWhere(
-            (s) => s.quality == controller.state.currentQuality,
-          );
-        } catch (_) {}
+        bestMatch = streams.firstWhereOrNull(
+          (s) => s.quality == controller.state.currentQuality,
+        );
       }
 
       // Fallback to highest quality
@@ -1175,11 +1174,9 @@ void _showVoiceoverSheet(BuildContext context, PlayerController controller) {
           final streams = entry.value;
           StreamSource? bestMatch;
           if (controller.state.currentQuality != null) {
-            try {
-              bestMatch = streams.firstWhere(
-                (s) => s.quality == controller.state.currentQuality,
-              );
-            } catch (_) {}
+            bestMatch = streams.firstWhereOrNull(
+              (s) => s.quality == controller.state.currentQuality,
+            );
           }
           if (bestMatch == null) {
             streams.sort(

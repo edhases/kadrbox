@@ -53,6 +53,7 @@ dependencies:
   injectable: ^2.5.0
 
   # Utils
+  collection: ^1.18.0
   json_annotation: ^4.10.0
   cached_network_image: ^3.4.1
   shimmer: ^3.0.0

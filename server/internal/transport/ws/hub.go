@@ -173,14 +173,24 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		userName: userName,
 	}
 
-	h.register <- client
-
-	go client.writePump()
-	go client.readPump()
+	select {
+	case h.register <- client:
+		go client.writePump()
+		go client.readPump()
+	case <-h.stopChan:
+		_ = conn.Close()
+		return
+	case <-r.Context().Done():
+		_ = conn.Close()
+		return
+	}
 }
 
 func (c *Client) readPump() {
 	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC RECOVER] readPump panic for user %s: %v", c.userID, rec)
+		}
 		select {
 		case c.hub.unregister <- c:
 		case <-c.hub.stopChan:
@@ -219,6 +229,9 @@ func (c *Client) readPump() {
 func (c *Client) writePump() {
 	ticker := time.NewTicker(20 * time.Second)
 	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC RECOVER] writePump panic for user %s: %v", c.userID, rec)
+		}
 		ticker.Stop()
 		c.conn.Close()
 	}()

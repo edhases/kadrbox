@@ -49,6 +49,11 @@ func main() {
 
 	// 4. Фоновий воркер очищення кешу (кожні 6 годин)
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[PANIC RECOVER] Cache worker panic: %v", rec)
+			}
+		}()
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -117,16 +122,16 @@ func main() {
 
 	log.Println("[Oxide Server] Shutting down gracefully...")
 
-	// Сповіщення клієнтів у WebSocket кімнатах (1001 Going Away)
-	wsHub.GracefulStop()
-
-	// Завершення обробки поточних HTTP-запитів з таймаутом 10 секунд
+	// 1. Припиняємо прийом нових HTTP/WS запитів (таймаут 10 секунд)
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("[HTTP Server] Shutdown error: %v", err)
 	}
+
+	// 2. Лише після закриття HTTP лістенера сповіщаємо та закриваємо клієнтів у WebSocket кімнатах
+	wsHub.GracefulStop()
 
 	log.Println("[Oxide Server] Server stopped cleanly")
 }

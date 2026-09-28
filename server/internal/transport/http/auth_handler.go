@@ -451,6 +451,11 @@ func (h *AuthHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "file too large (max 5MB)", http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 
 	file, header, err := r.FormFile("avatar")
 	if err != nil {

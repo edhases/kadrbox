@@ -78,9 +78,8 @@ func TestCovClientGetWithoutReferer(t *testing.T) {
 	}
 }
 
-func TestCovClientGetIgnoresServerErrorStatus(t *testing.T) {
-	// ХАРАКТЕРИЗАЦІЯ: client.go не перевіряє resp.StatusCode, тому тіло
-	// помилкової відповіді (500) повертається як успіх з nil-помилкою.
+func TestCovClientGetFailsOnServerErrorStatus(t *testing.T) {
+	// Перевірка: client.go повертає помилку на 500 status code (захист від Cloudflare/upstream error).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("boom"))
@@ -92,12 +91,12 @@ func TestCovClientGetIgnoresServerErrorStatus(t *testing.T) {
 		t.Fatalf("NewTLSClient failed: %v", err)
 	}
 
-	body, err := c.Get(context.Background(), srv.URL, "https://ref.example/")
-	if err != nil {
-		t.Fatalf("expected nil error on 500 status (status ignored), got: %v", err)
+	_, err = c.Get(context.Background(), srv.URL, "https://ref.example/")
+	if err == nil {
+		t.Fatalf("expected error on 500 status, got nil")
 	}
-	if body != "boom" {
-		t.Errorf("expected body %q, got %q", "boom", body)
+	if !strings.Contains(err.Error(), "status 500") {
+		t.Errorf("expected error to mention status 500, got: %v", err)
 	}
 }
 

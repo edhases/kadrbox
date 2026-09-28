@@ -1252,7 +1252,9 @@ class _DetailsPageState extends State<DetailsPage> {
 
     try {
       final provider = _registry.getById(widget.providerId);
-      if (provider == null) return;
+      if (provider == null) {
+        throw Exception('Провайдер ${widget.providerId} не знайдено');
+      }
 
       final streams = await provider.getStreams(
         widget.mediaId,
@@ -1263,7 +1265,6 @@ class _DetailsPageState extends State<DetailsPage> {
       if (mounted) {
         setState(() {
           _streams = streams;
-          _isLoadingEpisode = false;
         });
 
         // Auto-play if streams found
@@ -1274,10 +1275,13 @@ class _DetailsPageState extends State<DetailsPage> {
     } catch (e) {
       debugPrint('Failed to load episode streams: $e');
       if (mounted) {
-        setState(() => _isLoadingEpisode = false);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Помилка завантаження: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingEpisode = false);
       }
     }
   }

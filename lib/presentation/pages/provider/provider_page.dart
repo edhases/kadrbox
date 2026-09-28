@@ -185,6 +185,12 @@ class _ProviderPageState extends State<ProviderPage>
     } catch (e) {
       if (mounted) {
         setState(() => _loadingByType[type] = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Не вдалося завантажити сторінку: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     }
   }

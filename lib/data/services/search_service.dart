@@ -186,28 +186,46 @@ class SearchService {
       tag: _tag,
     );
 
-    // Create futures for all providers
-    final futures = <Future<ProviderSearchResult>>[];
+    int completedCount = 0;
+    final controller = StreamController<AggregatedSearchResult>();
+
     for (final provider in providers) {
-      futures.add(_searchProvider(provider, query, type: type, page: page));
-    }
-
-    // Yield results as they complete
-    for (final future in futures) {
-      try {
-        final result = await future;
+      _searchProvider(provider, query, type: type, page: page).then((result) {
         results.add(result);
-
-        yield AggregatedSearchResult(
-          query: query,
-          providerResults: List.from(results),
-          totalDuration: stopwatch.elapsed,
-          isComplete: results.length == providers.length,
-        );
-      } catch (e) {
-        Logger.w('Stream search error: $e', tag: _tag);
-      }
+        completedCount++;
+        if (!controller.isClosed) {
+          controller.add(
+            AggregatedSearchResult(
+              query: query,
+              providerResults: List.from(results),
+              totalDuration: stopwatch.elapsed,
+              isComplete: completedCount == providers.length,
+            ),
+          );
+        }
+        if (completedCount == providers.length && !controller.isClosed) {
+          controller.close();
+        }
+      }).catchError((e) {
+        Logger.w('Stream search error for ${provider.name}: $e', tag: _tag);
+        completedCount++;
+        if (!controller.isClosed) {
+          controller.add(
+            AggregatedSearchResult(
+              query: query,
+              providerResults: List.from(results),
+              totalDuration: stopwatch.elapsed,
+              isComplete: completedCount == providers.length,
+            ),
+          );
+        }
+        if (completedCount == providers.length && !controller.isClosed) {
+          controller.close();
+        }
+      });
     }
+
+    yield* controller.stream;
   }
 
   /// Get quick suggestions from fastest providers

@@ -503,7 +503,14 @@ class OxideServerService {
     });
 
     Logger.i('Connecting to Watch Party WebSocket: $uri', tag: _tag);
-    final ws = await WebSocket.connect(uri.toString());
+    final ws = await WebSocket.connect(
+      uri.toString(),
+    ).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        throw TimeoutException('Watch Party WebSocket connection timed out after 10s');
+      },
+    );
     Logger.i('Connected to Watch Party WebSocket', tag: _tag);
     return ws;
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/painting.dart' show BoxFit;
 
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -405,19 +406,19 @@ class PlayerController extends ChangeNotifier with WindowListener {
           _settingsService.state.subtitleLanguage; // 'uk' by default
       if (preferredLang == 'uk' &&
           (currentUrl.isEmpty)) {
-        try {
-          final ukrStream = streams!.firstWhere((s) {
-            final v = s.voiceover?.toLowerCase() ?? '';
-            final l = s.language?.toLowerCase() ?? '';
-            return v.contains('ukr') ||
-                v.contains('укр') ||
-                v.contains('ua') ||
-                l.contains('ukr') ||
-                l.contains('ua');
-          });
+        final ukrStream = streams!.firstWhereOrNull((s) {
+          final v = s.voiceover?.toLowerCase() ?? '';
+          final l = s.language?.toLowerCase() ?? '';
+          return v.contains('ukr') ||
+              v.contains('укр') ||
+              v.contains('ua') ||
+              l.contains('ukr') ||
+              l.contains('ua');
+        });
+        if (ukrStream != null) {
           current = ukrStream;
           currentUrl = current.url;
-        } catch (_) {}
+        }
       }
 
       // 3. Apply Quality Preference
@@ -652,14 +653,12 @@ class PlayerController extends ChangeNotifier with WindowListener {
         if (_isDisposed) return;
         if (error.isNotEmpty) {
           Logger.w('Player error: $error', tag: _tag);
-          if (!_player.state.playing && _state.position == Duration.zero) {
-            _state = _state.copyWith(
-              hasError: true,
-              errorMessage: error,
-              isBuffering: false,
-            );
-            notifyListeners();
-          }
+          _state = _state.copyWith(
+            hasError: true,
+            errorMessage: error,
+            isBuffering: false,
+          );
+          notifyListeners();
         }
       }),
     );

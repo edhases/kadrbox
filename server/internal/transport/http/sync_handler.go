@@ -268,11 +268,17 @@ func (h *SyncHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isFav {
-		_ = h.favoritesRepo.RemoveFavorite(r.Context(), userID, fav.MediaID, fav.ProviderID)
+		if err := h.favoritesRepo.RemoveFavorite(r.Context(), userID, fav.MediaID, fav.ProviderID); err != nil {
+			http.Error(w, `{"error":"failed to remove favorite"}`, http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"is_favorite":false}`))
 	} else {
-		_ = h.favoritesRepo.AddFavorite(r.Context(), &fav)
+		if err := h.favoritesRepo.AddFavorite(r.Context(), &fav); err != nil {
+			http.Error(w, `{"error":"failed to add favorite"}`, http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"is_favorite":true}`))
 	}

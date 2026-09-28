@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/edhases/oxide-server/internal/domain"
@@ -55,6 +56,11 @@ func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaIt
 		wg.Add(1)
 		go func(prov domain.Provider) {
 			defer wg.Done()
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("[PANIC RECOVER] Provider %s crashed on query %q: %v", prov.Name(), query, rec)
+				}
+			}()
 			items, err := prov.Search(ctx, query)
 			if err == nil && len(items) > 0 {
 				mu.Lock()

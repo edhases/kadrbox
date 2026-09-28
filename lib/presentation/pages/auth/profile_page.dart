@@ -289,9 +289,13 @@ class _ProfilePageState extends State<ProfilePage> {
         }
       } catch (e) {
         if (mounted) {
+          final errText = _authService.error ?? e.toString();
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Помилка видалення: ${_authService.error}')),
+            SnackBar(content: Text('Помилка видалення: $errText')),
           );
+        }
+      } finally {
+        if (mounted) {
           setState(() => _isLoading = false);
         }
       }

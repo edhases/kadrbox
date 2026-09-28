@@ -19,7 +19,13 @@ enum UpdateCheckResult { upToDate, updateAvailable, forcedUpdate, error }
 @lazySingleton
 class UpdateService {
   final SettingsService _settingsService;
-  final Dio _dio = Dio();
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+    ),
+  );
   static const String _tag = 'UpdateService';
 
   // URL to update.json on GitHub

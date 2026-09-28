@@ -469,6 +469,13 @@ class _PeerDartBackend implements WatchPartyBackend {
         if (!completer.isCompleted) completer.completeError(err);
       });
 
+      Future<void> waitPeerOpen() => completer.future.timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              throw TimeoutException('Не вдалося з\'єднатися з сигнальним сервером PeerDart');
+            },
+          );
+
       // Host logic
       if (isHost) {
         _peer!.on<DataConnection>('connection').listen((conn) {
@@ -480,7 +487,7 @@ class _PeerDartBackend implements WatchPartyBackend {
       // Client logic
       else {
         // Wait for peer to open before connecting
-        await completer.future;
+        await waitPeerOpen();
 
         final hostId = 'oxide-$roomCode';
         Logger.d('Connecting to host: $hostId', tag: _tag);
@@ -510,10 +517,12 @@ class _PeerDartBackend implements WatchPartyBackend {
       }
 
       if (isHost) {
-        await completer.future;
+        await waitPeerOpen();
       }
     } catch (e) {
       Logger.e('PeerDart init failed', tag: _tag, error: e);
+      _peer?.dispose();
+      _peer = null;
       rethrow;
     }
   }

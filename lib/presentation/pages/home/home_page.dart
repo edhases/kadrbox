@@ -126,6 +126,7 @@ class _HomePageState extends State<HomePage> {
           : null;
       final selectedType = _filter.type;
 
+      final errors = <String>[];
       final results = await Future.wait(
         providers.map((provider) async {
           try {
@@ -140,6 +141,7 @@ class _HomePageState extends State<HomePage> {
             }
           } catch (e) {
             debugPrint('Failed to load from ${provider.name}: $e');
+            errors.add('${provider.name}: $e');
             return <MediaItem>[];
           }
         }),
@@ -159,6 +161,9 @@ class _HomePageState extends State<HomePage> {
           _allItems = allItems;
           _applyFilter();
           _isLoading = false;
+          if (allItems.isEmpty && errors.length == providers.length && providers.isNotEmpty) {
+            _error = 'Не вдалося завантажити контент. Перевірте з\'єднання з мережею.';
+          }
         });
       }
     } catch (e) {

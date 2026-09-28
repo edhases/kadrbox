@@ -62,8 +62,10 @@ func (r *UserRepository) MarkEmailVerified(ctx context.Context, userID uuid.UUID
 	if err != nil {
 		return fmt.Errorf("mark email verified: %w", err)
 	}
-	_, _ = r.pool.Exec(ctx,
-		`DELETE FROM email_verifications WHERE user_id = $1`, userID)
+	if _, err := r.pool.Exec(ctx,
+		`DELETE FROM email_verifications WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("delete email verification token: %w", err)
+	}
 	return nil
 }
 
@@ -173,7 +175,9 @@ func (r *UserRepository) GetUserByPasswordResetToken(ctx context.Context, token 
 
 // MarkPasswordResetUsed видаляє токен після успішного скидання пароля
 func (r *UserRepository) MarkPasswordResetUsed(ctx context.Context, userID uuid.UUID) error {
-	_, _ = r.pool.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1`, userID)
+	if _, err := r.pool.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("delete password reset token: %w", err)
+	}
 	return nil
 }
 
