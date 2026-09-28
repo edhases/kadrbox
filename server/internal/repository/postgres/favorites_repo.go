@@ -20,11 +20,11 @@ func NewFavoritesRepository(pool *pgxpool.Pool) *FavoritesRepository {
 // AddFavorite додає тайтл в обране
 func (r *FavoritesRepository) AddFavorite(ctx context.Context, f *domain.Favorite) error {
 	query := `
-		INSERT INTO favorites (user_id, media_id, provider_id, title, poster_url, year, media_type, added_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		INSERT INTO favorites (user_id, media_id, provider_id, title, poster_url, year, media_type, rating, rating_source, added_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
 		ON CONFLICT (user_id, media_id, provider_id) DO NOTHING
 	`
-	_, err := r.pool.Exec(ctx, query, f.UserID, f.MediaID, f.ProviderID, f.Title, f.PosterURL, f.Year, f.MediaType)
+	_, err := r.pool.Exec(ctx, query, f.UserID, f.MediaID, f.ProviderID, f.Title, f.PosterURL, f.Year, f.MediaType, f.Rating, f.RatingSource)
 	if err != nil {
 		return fmt.Errorf("add favorite: %w", err)
 	}
@@ -47,7 +47,7 @@ func (r *FavoritesRepository) RemoveFavorite(ctx context.Context, userID uuid.UU
 // GetUserFavorites повертає список закладок користувача
 func (r *FavoritesRepository) GetUserFavorites(ctx context.Context, userID uuid.UUID) ([]domain.Favorite, error) {
 	query := `
-		SELECT id, user_id, media_id, provider_id, title, poster_url, year, media_type, added_at
+		SELECT id, user_id, media_id, provider_id, title, poster_url, year, media_type, rating, rating_source, added_at
 		FROM favorites
 		WHERE user_id = $1
 		ORDER BY added_at DESC
@@ -61,18 +61,19 @@ func (r *FavoritesRepository) GetUserFavorites(ctx context.Context, userID uuid.
 	var list []domain.Favorite
 	for rows.Next() {
 		var f domain.Favorite
-		var poster *string
+		var poster, rSource *string
 		var yr *int
+		var rtg *float64
 
-		if err := rows.Scan(&f.ID, &f.UserID, &f.MediaID, &f.ProviderID, &f.Title, &poster, &yr, &f.MediaType, &f.AddedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.MediaID, &f.ProviderID, &f.Title, &poster, &yr, &f.MediaType, &rtg, &rSource, &f.AddedAt); err != nil {
 			return nil, fmt.Errorf("scan favorite: %w", err)
 		}
 		if poster != nil {
 			f.PosterURL = *poster
 		}
-		if yr != nil {
-			f.Year = *yr
-		}
+		f.Year = yr
+		f.Rating = rtg
+		f.RatingSource = rSource
 		list = append(list, f)
 	}
 	return list, nil

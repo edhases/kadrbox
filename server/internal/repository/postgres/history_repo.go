@@ -22,9 +22,9 @@ func (r *HistoryRepository) UpsertWatchHistory(ctx context.Context, h *domain.Wa
 	query := `
 		INSERT INTO watch_history (
 			user_id, media_id, provider_id, title, poster_url, year, media_type,
-			season, episode, episode_title, position_ms, duration_ms, last_stream_url, voiceover, watched_at
+			season, episode, episode_title, position_ms, duration_ms, last_stream_url, voiceover, rating, rating_source, watched_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW()
 		)
 		ON CONFLICT (user_id, media_id, provider_id, season, episode)
 		DO UPDATE SET
@@ -35,11 +35,14 @@ func (r *HistoryRepository) UpsertWatchHistory(ctx context.Context, h *domain.Wa
 			duration_ms = EXCLUDED.duration_ms,
 			last_stream_url = COALESCE(EXCLUDED.last_stream_url, watch_history.last_stream_url),
 			voiceover = COALESCE(EXCLUDED.voiceover, watch_history.voiceover),
+			rating = COALESCE(EXCLUDED.rating, watch_history.rating),
+			rating_source = COALESCE(EXCLUDED.rating_source, watch_history.rating_source),
 			watched_at = NOW()
 	`
 	_, err := r.pool.Exec(ctx, query,
 		h.UserID, h.MediaID, h.ProviderID, h.Title, h.PosterURL, h.Year, h.MediaType,
 		h.Season, h.Episode, h.EpisodeTitle, h.PositionMs, h.DurationMs, h.LastStreamURL, h.Voiceover,
+		h.Rating, h.RatingSource,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert watch history: %w", err)
@@ -51,7 +54,7 @@ func (r *HistoryRepository) UpsertWatchHistory(ctx context.Context, h *domain.Wa
 func (r *HistoryRepository) GetUserHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]domain.WatchHistory, error) {
 	query := `
 		SELECT id, user_id, media_id, provider_id, title, poster_url, year, media_type,
-		       season, episode, episode_title, position_ms, duration_ms, last_stream_url, voiceover, watched_at
+		       season, episode, episode_title, position_ms, duration_ms, last_stream_url, voiceover, rating, rating_source, watched_at
 		FROM watch_history
 		WHERE user_id = $1
 		ORDER BY watched_at DESC
@@ -66,12 +69,14 @@ func (r *HistoryRepository) GetUserHistory(ctx context.Context, userID uuid.UUID
 	var list []domain.WatchHistory
 	for rows.Next() {
 		var h domain.WatchHistory
-		var poster, epTitle, streamURL, voice *string
+		var poster, epTitle, streamURL, voice, rSource *string
 		var yr *int
+		var rtg *float64
+		var s, e *int
 
 		if err := rows.Scan(
 			&h.ID, &h.UserID, &h.MediaID, &h.ProviderID, &h.Title, &poster, &yr, &h.MediaType,
-			&h.Season, &h.Episode, &epTitle, &h.PositionMs, &h.DurationMs, &streamURL, &voice, &h.WatchedAt,
+			&s, &e, &epTitle, &h.PositionMs, &h.DurationMs, &streamURL, &voice, &rtg, &rSource, &h.WatchedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan history row: %w", err)
 		}
@@ -88,9 +93,11 @@ func (r *HistoryRepository) GetUserHistory(ctx context.Context, userID uuid.UUID
 		if voice != nil {
 			h.Voiceover = *voice
 		}
-		if yr != nil {
-			h.Year = *yr
-		}
+		h.Year = yr
+		h.Rating = rtg
+		h.RatingSource = rSource
+		h.Season = s
+		h.Episode = e
 
 		list = append(list, h)
 	}
@@ -102,7 +109,7 @@ func (r *HistoryRepository) GetUserHistory(ctx context.Context, userID uuid.UUID
 func (r *HistoryRepository) GetContinueWatching(ctx context.Context, userID uuid.UUID, limit int) ([]domain.WatchHistory, error) {
 	query := `
 		SELECT id, user_id, media_id, provider_id, title, poster_url, year, media_type,
-		       season, episode, episode_title, position_ms, duration_ms, last_stream_url, voiceover, watched_at
+		       season, episode, episode_title, position_ms, duration_ms, last_stream_url, voiceover, rating, rating_source, watched_at
 		FROM watch_history
 		WHERE user_id = $1
 		  AND duration_ms > 0
@@ -120,12 +127,14 @@ func (r *HistoryRepository) GetContinueWatching(ctx context.Context, userID uuid
 	var list []domain.WatchHistory
 	for rows.Next() {
 		var h domain.WatchHistory
-		var poster, epTitle, streamURL, voice *string
+		var poster, epTitle, streamURL, voice, rSource *string
 		var yr *int
+		var rtg *float64
+		var s, e *int
 
 		if err := rows.Scan(
 			&h.ID, &h.UserID, &h.MediaID, &h.ProviderID, &h.Title, &poster, &yr, &h.MediaType,
-			&h.Season, &h.Episode, &epTitle, &h.PositionMs, &h.DurationMs, &streamURL, &voice, &h.WatchedAt,
+			&s, &e, &epTitle, &h.PositionMs, &h.DurationMs, &streamURL, &voice, &rtg, &rSource, &h.WatchedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan continue watching: %w", err)
 		}
@@ -142,9 +151,11 @@ func (r *HistoryRepository) GetContinueWatching(ctx context.Context, userID uuid
 		if voice != nil {
 			h.Voiceover = *voice
 		}
-		if yr != nil {
-			h.Year = *yr
-		}
+		h.Year = yr
+		h.Rating = rtg
+		h.RatingSource = rSource
+		h.Season = s
+		h.Episode = e
 
 		list = append(list, h)
 	}

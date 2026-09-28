@@ -16,7 +16,6 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Відкритий CheckOrigin для легкого підключення десктопу/мобілок/вебу без CORS колізій
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
@@ -45,7 +44,7 @@ func NewHub(redisClient *redisRepo.RedisClient) *Hub {
 	return &Hub{
 		redisClient: redisClient,
 		rooms:       make(map[string]map[*Client]bool),
-		broadcast:   make(chan *domain.WatchPartyEvent),
+		broadcast:   make(chan *domain.WatchPartyEvent, 256),
 		register:    make(chan *Client),
 		unregister:  make(chan *Client),
 		stopChan:    make(chan struct{}),
@@ -57,7 +56,6 @@ func (h *Hub) Run() {
 		select {
 		case <-h.stopChan:
 			h.mu.Lock()
-			// Сповіщення всіх клієнтів про планове закриття сервера (1001 Going Away)
 			for _, clients := range h.rooms {
 				for client := range clients {
 					_ = client.conn.WriteMessage(
@@ -67,6 +65,7 @@ func (h *Hub) Run() {
 					close(client.send)
 				}
 			}
+			h.rooms = make(map[string]map[*Client]bool)
 			h.mu.Unlock()
 			return
 
@@ -78,15 +77,17 @@ func (h *Hub) Run() {
 			h.rooms[client.roomCode][client] = true
 			h.mu.Unlock()
 
-			// Повідомлення про підключення нового користувача
 			event := &domain.WatchPartyEvent{
-				Action:     "USER_JOINED",
+				Action:     "userJoined",
 				RoomCode:   client.roomCode,
 				SenderID:   client.userID,
 				SenderName: client.userName,
 				Timestamp:  time.Now(),
 			}
-			_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
+			if h.redisClient != nil {
+				_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
+			}
+			h.broadcast <- event
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -102,34 +103,41 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 			event := &domain.WatchPartyEvent{
-				Action:     "USER_LEFT",
+				Action:     "userLeft",
 				RoomCode:   client.roomCode,
 				SenderID:   client.userID,
 				SenderName: client.userName,
 				Timestamp:  time.Now(),
 			}
-			_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
+			if h.redisClient != nil {
+				_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
+			}
+			h.broadcast <- event
 
 		case event := <-h.broadcast:
-			h.mu.RLock()
+			h.mu.Lock()
 			clients := h.rooms[event.RoomCode]
 			data, err := json.Marshal(event)
 			if err == nil {
 				for client := range clients {
+					// Ехо-фільтрація (хост не отримує назад своє ж повідомлення)
+					if client.userID == event.SenderID && event.Action != "userJoined" && event.Action != "userLeft" {
+						continue
+					}
 					select {
 					case client.send <- data:
 					default:
+						// Безпечне закриття без data race під Lock()
 						close(client.send)
 						delete(clients, client)
 					}
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 		}
 	}
 }
 
-// GracefulStop плавно зупиняє Hub із закриттям сокетів
 func (h *Hub) GracefulStop() {
 	close(h.stopChan)
 }
@@ -194,8 +202,9 @@ func (c *Client) readPump() {
 			event.SenderName = c.userName
 			event.Timestamp = time.Now()
 
-			// Публікація в Redis Pub/Sub (і трансляція локально)
-			_ = c.hub.redisClient.PublishWatchPartyEvent(context.Background(), c.roomCode, &event)
+			if c.hub.redisClient != nil {
+				_ = c.hub.redisClient.PublishWatchPartyEvent(context.Background(), c.roomCode, &event)
+			}
 			c.hub.broadcast <- &event
 		}
 	}

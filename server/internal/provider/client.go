@@ -21,7 +21,6 @@ func NewTLSClient() (*TLSClient, error) {
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(15),
 		tls_client.WithClientProfile(profiles.Chrome_120),
-		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(jar),
 	}
 

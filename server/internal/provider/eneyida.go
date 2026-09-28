@@ -49,14 +49,14 @@ func (p *EneyidaProvider) Search(ctx context.Context, query string) ([]domain.Me
 
 	var items []domain.MediaItem
 	doc.Find("article.short, .short-story").Each(func(i int, s *goquery.Selection) {
-		linkElem := s.Find("h2.short-title a, .short-title a, a.short-btn")
+		linkElem := s.Find("h2.short_title a, .short_title a, a.short_btn")
 		title := strings.TrimSpace(linkElem.Text())
 		href, exists := linkElem.Attr("href")
 		if !exists || title == "" {
 			return
 		}
 
-		imgElem := s.Find(".short-img img")
+		imgElem := s.Find(".short_img img")
 		poster, _ := imgElem.Attr("src")
 		if poster != "" && !strings.HasPrefix(poster, "http") {
 			poster = p.baseURL + poster

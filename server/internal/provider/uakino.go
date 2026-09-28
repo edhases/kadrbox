@@ -20,7 +20,7 @@ type UakinoProvider struct {
 func NewUakinoProvider(client *TLSClient) *UakinoProvider {
 	return &UakinoProvider{
 		client:  client,
-		baseURL: "https://uakino.me",
+		baseURL: "https://uakino.best",
 	}
 }
 

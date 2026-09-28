@@ -25,9 +25,11 @@ func NewRouter(
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 
-	// 2. Безпечний і гнучкий CORS для десктопу, вебу та мобілок
+	// 2. Безпечний і гнучкий CORS без колізії wildcard + credentials
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowOriginFunc: func(r *http.Request, origin string) bool {
+			return true // дозволяє будь-який origin динамічно зі збереженням credentials
+		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Refresh-Token"},
 		ExposedHeaders:   []string{"Link"},

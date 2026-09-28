@@ -24,12 +24,14 @@ CREATE TABLE IF NOT EXISTS favorites (
     poster_url TEXT,
     year INT,
     media_type VARCHAR(50),
+    rating REAL,
+    rating_source VARCHAR(100),
     added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_user_favorite UNIQUE(user_id, media_id, provider_id)
 );
 CREATE INDEX IF NOT EXISTS idx_favorites_user_added ON favorites(user_id, added_at DESC);
 
--- 3. Історія переглядів (з season/episode DEFAULT 0 для фільмів та коректного ON CONFLICT)
+-- 3. Історія переглядів (збережено season/episode як NULL для фільмів + PostgreSQL 16 UNIQUE NULLS NOT DISTINCT)
 CREATE TABLE IF NOT EXISTS watch_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -39,15 +41,17 @@ CREATE TABLE IF NOT EXISTS watch_history (
     poster_url TEXT,
     year INT,
     media_type VARCHAR(50),
-    season INT NOT NULL DEFAULT 0,
-    episode INT NOT NULL DEFAULT 0,
+    season INT,
+    episode INT,
     episode_title VARCHAR(500),
     position_ms BIGINT NOT NULL DEFAULT 0,
     duration_ms BIGINT NOT NULL DEFAULT 0,
     last_stream_url TEXT,
     voiceover VARCHAR(255),
+    rating REAL,
+    rating_source VARCHAR(100),
     watched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_user_history UNIQUE (user_id, media_id, provider_id, season, episode)
+    CONSTRAINT uq_user_history UNIQUE NULLS NOT DISTINCT (user_id, media_id, provider_id, season, episode)
 );
 CREATE INDEX IF NOT EXISTS idx_history_user_watched ON watch_history(user_id, watched_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_continue ON watch_history(user_id, position_ms, duration_ms);

@@ -21,15 +21,17 @@ type User struct {
 
 // Favorite описує збережений фільм/серіал у списку бажаного
 type Favorite struct {
-	ID         uuid.UUID `json:"id"`
-	UserID     uuid.UUID `json:"user_id"`
-	MediaID    string    `json:"media_id"`
-	ProviderID string    `json:"provider_id"`
-	Title      string    `json:"title"`
-	PosterURL  string    `json:"poster_url,omitempty"`
-	Year       int       `json:"year,omitempty"`
-	MediaType  string    `json:"media_type,omitempty"`
-	AddedAt    time.Time `json:"added_at"`
+	ID           uuid.UUID `json:"id"`
+	UserID       uuid.UUID `json:"user_id"`
+	MediaID      string    `json:"media_id"`
+	ProviderID   string    `json:"provider_id"`
+	Title        string    `json:"title"`
+	PosterURL    string    `json:"poster_url,omitempty"`
+	Year         *int      `json:"year,omitempty"`
+	MediaType    string    `json:"media_type,omitempty"`
+	Rating       *float64  `json:"rating,omitempty"`
+	RatingSource *string   `json:"rating_source,omitempty"`
+	AddedAt      time.Time `json:"added_at"`
 }
 
 // WatchHistory описує історію перегляду та прогрес
@@ -40,15 +42,17 @@ type WatchHistory struct {
 	ProviderID    string    `json:"provider_id"`
 	Title         string    `json:"title"`
 	PosterURL     string    `json:"poster_url,omitempty"`
-	Year          int       `json:"year,omitempty"`
+	Year          *int      `json:"year,omitempty"`
 	MediaType     string    `json:"media_type,omitempty"`
-	Season        int       `json:"season"`  // 0 для фільмів
-	Episode       int       `json:"episode"` // 0 для фільмів
+	Season        *int      `json:"season,omitempty"`  // NULL для повнометражних фільмів
+	Episode       *int      `json:"episode,omitempty"` // NULL для повнометражних фільмів
 	EpisodeTitle  string    `json:"episode_title,omitempty"`
 	PositionMs    int64     `json:"position_ms"`
 	DurationMs    int64     `json:"duration_ms"`
 	LastStreamURL string    `json:"last_stream_url,omitempty"`
 	Voiceover     string    `json:"voiceover,omitempty"`
+	Rating        *float64  `json:"rating,omitempty"`
+	RatingSource  *string   `json:"rating_source,omitempty"`
 	WatchedAt     time.Time `json:"watched_at"`
 }
 
