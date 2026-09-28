@@ -1,0 +1,81 @@
+package http
+
+import (
+	"net/http"
+
+	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/oxide-server/internal/transport/ws"
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
+)
+
+func NewRouter(
+	jwtSecret string,
+	authH *AuthHandler,
+	contentH *ContentHandler,
+	syncH *SyncHandler,
+	hub *ws.Hub,
+) *chi.Mux {
+	r := chi.NewRouter()
+
+	// 1. Базові middleware
+	r.Use(chimiddleware.RequestID)
+	r.Use(chimiddleware.RealIP)
+	r.Use(chimiddleware.Logger)
+	r.Use(chimiddleware.Recoverer)
+
+	// 2. Безпечний і гнучкий CORS для десктопу, вебу та мобілок
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Refresh-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
+
+	// Healthcheck
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","service":"oxide-server"}`))
+	})
+
+	// WebSocket Watch Party
+	r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
+
+	// REST API v1
+	r.Route("/api/v1", func(r chi.Router) {
+		// Публічні ендпоінти авторизації
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/register", authH.Register)
+			r.Post("/login", authH.Login)
+			r.Post("/refresh", authH.Refresh)
+		})
+
+		// Публічний каталог і пошук
+		r.Route("/content", func(r chi.Router) {
+			r.Get("/search", contentH.Search)
+			r.Get("/details", contentH.GetDetails)
+			r.Get("/streams", contentH.GetStreams)
+		})
+
+		// Захищені ендпоінти користувача
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.AuthMiddleware(jwtSecret))
+
+			r.Get("/auth/me", authH.Me)
+
+			r.Route("/sync", func(r chi.Router) {
+				r.Get("/history", syncH.GetHistory)
+				r.Post("/history", syncH.SaveProgress)
+				r.Get("/continue-watching", syncH.GetContinueWatching)
+				r.Get("/favorites", syncH.GetFavorites)
+				r.Post("/favorites/toggle", syncH.ToggleFavorite)
+			})
+		})
+	})
+
+	return r
+}
