@@ -57,6 +57,10 @@ func NewRouter(
 		_, _ = w.Write([]byte(`{"status":"ok","service":"oxide-server"}`))
 	})
 
+	// Веб-сторінки підтвердження email та скидання пароля при кліку з листа
+	r.Get("/verify-email", authH.VerifyEmailWeb)
+	r.Get("/reset-password", authH.ResetPasswordWeb)
+
 	// WebSocket Watch Party
 	r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
 

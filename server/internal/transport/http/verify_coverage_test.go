@@ -123,3 +123,33 @@ func TestCovHttpResendConfiguredEmptyEmail(t *testing.T) {
 		t.Errorf("expected 400, got %d", rr.Code)
 	}
 }
+
+func TestCovHttpVerifyEmailWebEmptyToken(t *testing.T) {
+	h := covVerifyHandler()
+	req := httptest.NewRequest(http.MethodGet, "/verify-email", nil)
+	rr := httptest.NewRecorder()
+
+	h.VerifyEmailWeb(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Токен відсутній") {
+		t.Errorf("unexpected body: %q", rr.Body.String())
+	}
+}
+
+func TestCovHttpResetPasswordWebEmptyToken(t *testing.T) {
+	h := covVerifyHandler()
+	req := httptest.NewRequest(http.MethodGet, "/reset-password", nil)
+	rr := httptest.NewRecorder()
+
+	h.ResetPasswordWeb(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Токен відсутній") {
+		t.Errorf("unexpected body: %q", rr.Body.String())
+	}
+}

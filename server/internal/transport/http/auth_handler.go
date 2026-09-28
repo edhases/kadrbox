@@ -674,3 +674,174 @@ func generateToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+// VerifyEmailWeb — GET /verify-email?token=...
+func (h *AuthHandler) VerifyEmailWeb(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if token == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Токен відсутній", "Посилання не містить токена підтвердження.")))
+		return
+	}
+
+	userID, err := h.userRepo.GetUserByVerificationToken(r.Context(), token)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Посилання недійсне або застаріло", "Термін дії посилання закінчився (24 години) або воно вже було використане.")))
+		return
+	}
+
+	if err := h.userRepo.MarkEmailVerified(r.Context(), userID); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Помилка сервера", "Не вдалося зберегти підтвердження email. Спробуйте пізніше.")))
+		return
+	}
+
+	log.Printf("[Email] Web verification successful for user %s", userID)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(renderEmailStatusHTML(true, "Пошту успішно підтверджено!", "Ваш акаунт активовано. Тепер ви можете увійти у застосунок Oxide Film.")))
+}
+
+// ResetPasswordWeb — GET /reset-password?token=...
+func (h *AuthHandler) ResetPasswordWeb(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if token == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Токен відсутній", "Посилання не містить токена скидання пароля.")))
+		return
+	}
+
+	_, err := h.userRepo.GetUserByPasswordResetToken(r.Context(), token)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Посилання недійсне або застаріло", "Термін дії посилання для скидання пароля минув (1 година) або воно вже використане.")))
+		return
+	}
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Скидання пароля — Oxide Film</title>
+  <style>
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #f8fafc;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+      padding: 36px; max-width: 400px; width: 90%%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .logo { color: #6366f1; font-weight: 700; text-transform: uppercase; font-size: 14px; margin-bottom: 8px; }
+    h1 { font-size: 20px; margin: 0 0 16px; color: #fff; }
+    p { color: #94a3b8; font-size: 14px; margin: 0 0 20px; line-height: 1.5; }
+    input {
+      width: 100%%; padding: 12px; border-radius: 8px; border: 1px solid #475569;
+      background: #0f172a; color: #fff; font-size: 15px; margin-bottom: 16px; box-sizing: border-box;
+    }
+    input:focus { outline: none; border-color: #6366f1; }
+    button {
+      width: 100%%; padding: 12px; background: #6366f1; color: #fff; border: none;
+      border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer;
+    }
+    button:hover { background: #4f46e5; }
+    .msg { margin-top: 16px; font-size: 14px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Oxide Film</div>
+    <h1>Новий пароль</h1>
+    <p>Введіть новий пароль для вашого акаунту (мінімум 6 символів):</p>
+    <input type="password" id="pwd" placeholder="Новий пароль" minlength="6" required />
+    <button onclick="submitReset()">Зберегти пароль</button>
+    <div id="res" class="msg"></div>
+  </div>
+  <script>
+    async function submitReset() {
+      const p = document.getElementById('pwd').value;
+      const res = document.getElementById('res');
+      if (!p || p.length < 6) {
+        res.style.display = 'block'; res.style.color = '#ef4444';
+        res.innerText = 'Пароль має містити щонайменше 6 символів';
+        return;
+      }
+      try {
+        const resp = await fetch('/api/v1/auth/reset-password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({token: %q, password: p})
+        });
+        const data = await resp.json();
+        res.style.display = 'block';
+        if (resp.ok) {
+          res.style.color = '#10b981';
+          res.innerText = 'Пароль успішно змінено! Тепер ви можете увійти в застосунок.';
+          document.getElementById('pwd').style.display = 'none';
+          document.querySelector('button').style.display = 'none';
+        } else {
+          res.style.color = '#ef4444';
+          res.innerText = data.error || 'Помилка при збереженні пароля';
+        }
+      } catch (e) {
+        res.style.display = 'block'; res.style.color = '#ef4444';
+        res.innerText = 'Мережева помилка';
+      }
+    }
+  </script>
+</body>
+</html>`, token)
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(html))
+}
+
+func renderEmailStatusHTML(success bool, title, message string) string {
+	icon := "✅"
+	accentColor := "#6366f1"
+	if !success {
+		icon = "❌"
+		accentColor = "#ef4444"
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>%s — Oxide Film</title>
+  <style>
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #f8fafc;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+      padding: 40px; max-width: 440px; margin: 20px; text-align: center;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .icon { font-size: 54px; margin-bottom: 20px; }
+    h1 { font-size: 22px; margin: 0 0 12px; color: #fff; }
+    p { color: #94a3b8; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
+    .logo { font-size: 14px; color: %s; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Oxide Film</div>
+    <div class="icon">%s</div>
+    <h1>%s</h1>
+    <p>%s</p>
+  </div>
+</body>
+</html>`, title, accentColor, icon, title, message)
+}
