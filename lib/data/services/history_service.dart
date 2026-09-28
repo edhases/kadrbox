@@ -288,7 +288,7 @@ class HistoryService extends ChangeNotifier {
   /// Subscribe to realtime updates from PocketBase
   /// Optional feature - falls back to periodic sync if realtime fails
   Future<void> _subscribeToRealtime() async {
-    if (!_authService.isAuthenticated) {
+    if (!_pocketBase.isAuthenticated) {
       return;
     }
 

@@ -47,6 +47,9 @@ func NewRouter(
 	// WebSocket Watch Party
 	r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
 
+	// Роздача завантажених файлів (аватари тощо)
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./data/uploads"))))
+
 	// REST API v1
 	r.Route("/api/v1", func(r chi.Router) {
 		// Публічні ендпоінти авторизації
@@ -54,6 +57,11 @@ func NewRouter(
 			r.Post("/register", authH.Register)
 			r.Post("/login", authH.Login)
 			r.Post("/refresh", authH.Refresh)
+			r.Post("/verify-email", authH.VerifyEmail)
+			r.Post("/resend-verification", authH.ResendVerification)
+			r.Post("/forgot-password", authH.ForgotPassword)
+			r.Post("/reset-password", authH.ResetPassword)
+			r.Post("/google", authH.GoogleAuth)
 		})
 
 		// Публічний каталог і пошук
@@ -68,6 +76,10 @@ func NewRouter(
 			r.Use(middleware.AuthMiddleware(jwtSecret))
 
 			r.Get("/auth/me", authH.Me)
+			r.Put("/auth/profile", authH.UpdateProfile)
+			r.Post("/auth/avatar", authH.UploadAvatar)
+			r.Post("/auth/change-password", authH.ChangePassword)
+			r.Delete("/auth/account", authH.DeleteAccount)
 
 			r.Route("/sync", func(r chi.Router) {
 				r.Get("/history", syncH.GetHistory)

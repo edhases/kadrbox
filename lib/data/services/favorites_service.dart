@@ -205,7 +205,7 @@ class FavoritesService extends ChangeNotifier {
 
   /// Subscribe to realtime updates from PocketBase
   Future<void> _subscribeToRealtime() async {
-    if (!_authService.isAuthenticated) return;
+    if (!_pocketBase.isAuthenticated) return;
 
     final user = _authService.currentUser;
     if (user == null) return;

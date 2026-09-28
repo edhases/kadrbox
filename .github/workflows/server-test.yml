@@ -1,0 +1,53 @@
+name: Server Tests
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-test.yml'
+  pull_request:
+    paths:
+      - 'server/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: oxide_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d oxide_test"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=10
+    env:
+      TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/oxide_test?sslmode=disable
+      TEST_REDIS_ADDR: localhost:6379
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: go vet ./...
+      - run: go test -race -covermode=atomic -coverprofile=coverage.out -coverpkg=./... ./...
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: server/coverage.out
+      - run: go tool cover -func=coverage.out

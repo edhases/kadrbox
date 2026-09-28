@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/edhases/oxide-server/config"
+	"github.com/edhases/oxide-server/internal/email"
 	"github.com/edhases/oxide-server/internal/provider"
 	"github.com/edhases/oxide-server/internal/repository/postgres"
 	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
@@ -80,7 +81,14 @@ func main() {
 	go wsHub.Run()
 
 	// 7. HTTP Хендлери та Chi Роутер
-	authHandler := transporthttp.NewAuthHandler(userRepo, redisClient, cfg.JWTSecret)
+	emailSvc := email.NewService()
+	if emailSvc.IsConfigured() {
+		log.Println("[Email] Resend service configured ✓")
+	} else {
+		log.Println("[Email] RESEND_API not set — email verification disabled (auto-verify mode)")
+	}
+
+	authHandler := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, cfg.JWTSecret)
 	contentHandler := transporthttp.NewContentHandler(registry, cacheRepo)
 	syncHandler := transporthttp.NewSyncHandler(historyRepo, favoritesRepo)
 

@@ -15,7 +15,7 @@ func TestRouterHealthEndpoint(t *testing.T) {
 	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
 	contentH := transporthttp.NewContentHandler(reg, nil)
-	authH := transporthttp.NewAuthHandler(nil, nil, "secret")
+	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 
 	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
@@ -43,7 +43,7 @@ func TestRouterCORSHeaders(t *testing.T) {
 	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
 	contentH := transporthttp.NewContentHandler(reg, nil)
-	authH := transporthttp.NewAuthHandler(nil, nil, "secret")
+	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 
 	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub)

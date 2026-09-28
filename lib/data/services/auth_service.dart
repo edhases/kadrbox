@@ -28,6 +28,7 @@ class AuthService extends ChangeNotifier {
   String? get userName => _server.userName ?? _pb.userName;
   bool get isLoading => _isLoading;
   bool get isGuest => !isAuthenticated;
+  bool get isVerified => _server.isAuthenticated ? _server.isVerified : (_pb.pb.authStore.record?.data['verified'] == true);
   String? get error => _error;
   List<String> _linkedProviders = [];
   List<String> get linkedProviders => _linkedProviders;
@@ -173,6 +174,25 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  /// Sign in with Google ID token directly (Oxide Server)
+  Future<void> signInWithGoogle(String idToken) async {
+    Logger.i('Attempting Google sign in via Oxide Server', tag: _tag);
+    _setLoading(true);
+    _error = null;
+
+    try {
+      await _server.signInWithGoogle(idToken);
+      Logger.i('Google sign in successful: $userEmail', tag: _tag);
+      notifyListeners();
+    } catch (e) {
+      Logger.e('Google sign in failed', tag: _tag, error: e);
+      _error = _translateError(e.toString());
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   /// Link social provider to existing account
   Future<void> linkSocialAccount(String provider) async {
     if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
@@ -284,9 +304,19 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.pb.collection('users').requestPasswordReset(email);
+      if (_server.isAuthenticated || _server.userEmail != null) {
+        await _server.requestPasswordReset(email);
+        Logger.i('Password reset email requested via Oxide Server: $email', tag: _tag);
+        return;
+      }
+      await _server.requestPasswordReset(email);
       Logger.i('Password reset email sent to: $email', tag: _tag);
     } catch (e) {
+      try {
+        await _pb.pb.collection('users').requestPasswordReset(email);
+        Logger.i('Fallback PB password reset sent for: $email', tag: _tag);
+        return;
+      } catch (_) {}
       Logger.e('Password reset failed', tag: _tag, error: e);
       _error = _translateError(e.toString());
       rethrow;
@@ -302,10 +332,33 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.pb.collection('users').requestVerification(email);
-      Logger.i('Verification email sent to: $email', tag: _tag);
+      await _server.resendVerification(email);
+      Logger.i('Verification email sent via Oxide Server: $email', tag: _tag);
     } catch (e) {
+      try {
+        await _pb.pb.collection('users').requestVerification(email);
+        Logger.i('Fallback PB verification email sent: $email', tag: _tag);
+        return;
+      } catch (_) {}
       Logger.e('Email verification request failed', tag: _tag, error: e);
+      _error = _translateError(e.toString());
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Verify email with token from letter
+  Future<void> verifyEmail(String token) async {
+    Logger.i('Verifying email token', tag: _tag);
+    _setLoading(true);
+    _error = null;
+
+    try {
+      await _server.verifyEmail(token);
+      notifyListeners();
+    } catch (e) {
+      Logger.e('Email verification failed', tag: _tag, error: e);
       _error = _translateError(e.toString());
       rethrow;
     } finally {
@@ -336,18 +389,22 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.pb
-          .collection('users')
-          .update(
-            userId!,
-            files: [
-              http.MultipartFile.fromBytes(
-                'avatar',
-                await File(filePath).readAsBytes(),
-                filename: 'avatar.jpg',
-              ),
-            ],
-          );
+      if (_server.isAuthenticated) {
+        await _server.uploadAvatar(filePath);
+      } else if (_pb.isAuthenticated && _pb.userId != null) {
+        await _pb.pb
+            .collection('users')
+            .update(
+              userId!,
+              files: [
+                http.MultipartFile.fromBytes(
+                  'avatar',
+                  await File(filePath).readAsBytes(),
+                  filename: 'avatar.jpg',
+                ),
+              ],
+            );
+      }
       Logger.i('Avatar updated successfully', tag: _tag);
       notifyListeners();
     } catch (e) {
@@ -374,16 +431,21 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.pb
-          .collection('users')
-          .update(
-            userId!,
-            body: {
-              'oldPassword': oldPassword,
-              'password': newPassword,
-              'passwordConfirm': newPasswordConfirm,
-            },
-          );
+      if (_server.isAuthenticated) {
+        await _server.changePassword(oldPassword, newPassword);
+      }
+      if (_pb.isAuthenticated && _pb.userId != null) {
+        await _pb.pb
+            .collection('users')
+            .update(
+              userId!,
+              body: {
+                'oldPassword': oldPassword,
+                'password': newPassword,
+                'passwordConfirm': newPasswordConfirm,
+              },
+            );
+      }
       Logger.i('Password changed successfully', tag: _tag);
     } catch (e) {
       Logger.e('Password change failed', tag: _tag, error: e);
@@ -405,7 +467,12 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      await _pb.pb.collection('users').delete(userId!);
+      if (_server.isAuthenticated) {
+        await _server.deleteAccount();
+      }
+      if (_pb.isAuthenticated && _pb.userId != null) {
+        await _pb.pb.collection('users').delete(userId!);
+      }
       Logger.i('Account deleted successfully', tag: _tag);
       await signOut();
     } catch (e) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
@@ -50,6 +51,7 @@ class OxideServerService {
   String? get userName => _user?['username'];
   String? get avatar => _user?['avatar_url'];
   String? get bio => _user?['bio'];
+  bool get isVerified => (_user?['is_verified'] as bool?) ?? false;
   Map<String, dynamic>? get user => _user;
   String? get accessToken => _accessToken;
 
@@ -100,6 +102,54 @@ class OxideServerService {
       }
     } catch (e) {
       Logger.e('Sign up failed for $email', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Sign in with Google ID token
+  Future<void> signInWithGoogle(String idToken) async {
+    final url = '${AppConfig.serverApiUrl}/auth/google';
+    try {
+      final res = await _apiClient.post(url, data: {
+        'id_token': idToken.trim(),
+      });
+
+      if (res is Map) {
+        await _saveAuthData(res);
+        Logger.i('User logged in with Google: $userEmail', tag: _tag);
+      } else {
+        throw Exception('Неочікувана відповідь від сервера');
+      }
+    } catch (e) {
+      Logger.e('Google sign in failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Підтверджує email за токеном з листа
+  Future<void> verifyEmail(String token) async {
+    final url = '${AppConfig.serverApiUrl}/auth/verify-email';
+    try {
+      await _apiClient.post(url, data: {'token': token});
+      // Оновлюємо локальний стан
+      if (_user != null) {
+        _user = Map<String, dynamic>.from(_user!)..['is_verified'] = true;
+      }
+      Logger.i('Email verified successfully', tag: _tag);
+    } catch (e) {
+      Logger.e('Email verification failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Повторно надсилає лист підтвердження
+  Future<void> resendVerification(String email) async {
+    final url = '${AppConfig.serverApiUrl}/auth/resend-verification';
+    try {
+      await _apiClient.post(url, data: {'email': email});
+      Logger.i('Verification email resent to $email', tag: _tag);
+    } catch (e) {
+      Logger.e('Resend verification failed', tag: _tag, error: e);
       rethrow;
     }
   }
@@ -176,6 +226,96 @@ class OxideServerService {
       _user = Map<String, dynamic>.from(res);
       await _prefs.setString(_userKey, jsonEncode(_user));
       Logger.i('Profile updated', tag: _tag);
+    }
+  }
+
+  /// Upload user avatar
+  Future<String?> uploadAvatar(String filePath) async {
+    if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
+    final url = '${AppConfig.serverApiUrl}/auth/avatar';
+
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw Exception('Файл не знайдено: $filePath');
+    }
+
+    final filename = file.path.split(Platform.pathSeparator).last;
+    final formData = FormData.fromMap({
+      'avatar': await MultipartFile.fromFile(
+        file.path,
+        filename: filename,
+      ),
+    });
+
+    try {
+      final res = await _apiClient.post(url, data: formData);
+      if (res is Map) {
+        _user = Map<String, dynamic>.from(res);
+        await _prefs.setString(_userKey, jsonEncode(_user));
+        Logger.i('Avatar uploaded successfully', tag: _tag);
+        return avatar;
+      }
+    } catch (e) {
+      Logger.e('Failed to upload avatar', tag: _tag, error: e);
+      rethrow;
+    }
+    return null;
+  }
+
+  /// Request password reset email
+  Future<void> requestPasswordReset(String email) async {
+    final url = '${AppConfig.serverApiUrl}/auth/forgot-password';
+    try {
+      await _apiClient.post(url, data: {'email': email.trim()});
+      Logger.i('Password reset requested for $email', tag: _tag);
+    } catch (e) {
+      Logger.e('Password reset request failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Reset password with token from email
+  Future<void> resetPassword(String token, String newPassword) async {
+    final url = '${AppConfig.serverApiUrl}/auth/reset-password';
+    try {
+      await _apiClient.post(url, data: {
+        'token': token.trim(),
+        'password': newPassword,
+      });
+      Logger.i('Password reset successfully', tag: _tag);
+    } catch (e) {
+      Logger.e('Password reset failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Change password for authenticated user
+  Future<void> changePassword(String oldPassword, String newPassword) async {
+    if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
+    final url = '${AppConfig.serverApiUrl}/auth/change-password';
+    try {
+      await _apiClient.post(url, data: {
+        'old_password': oldPassword,
+        'new_password': newPassword,
+      });
+      Logger.i('Password changed successfully', tag: _tag);
+    } catch (e) {
+      Logger.e('Password change failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Delete user account
+  Future<void> deleteAccount() async {
+    if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
+    final url = '${AppConfig.serverApiUrl}/auth/account';
+    try {
+      await _apiClient.delete(url);
+      await signOut();
+      Logger.i('Account deleted successfully', tag: _tag);
+    } catch (e) {
+      Logger.e('Account deletion failed', tag: _tag, error: e);
+      rethrow;
     }
   }
 
