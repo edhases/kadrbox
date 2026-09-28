@@ -15,6 +15,10 @@ services:
       - DB_NAME=${POSTGRES_DB:-oxide_film}
       - REDIS_ADDR=redis:6379
       - JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-2026}
+      - RESEND_API=${RESEND_API:-}
+      - SMTP_FROM=${SMTP_FROM:-Oxide Film <noreply@oxideteam.pp.ua>}
+      - APP_URL=${APP_URL:-https://film.oxideteam.pp.ua}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
     depends_on:
       postgres:
         condition: service_healthy
