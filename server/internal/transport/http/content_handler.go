@@ -151,7 +151,7 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 			{
 				ID:      "bandera",
 				Status:  "ok",
-				Count:   len(clustered),
+				Count:   len(rawResp.Items),
 				Sources: sourceStatuses,
 			},
 		}

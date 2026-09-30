@@ -25,8 +25,7 @@ func (p *dleTrapProvider) Describe() domain.ProviderInfo {
 	return domain.ProviderInfo{ID: p.id, Name: p.Name(), SearchEnabledDefault: true}
 }
 func (p *dleTrapProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
-	p.t.Fatalf("INVARIANT VIOLATION: /search executed network call to DLE provider %s (ban surface exposed!)", p.id)
-	return nil, nil
+	panic("INVARIANT 3 VIOLATION: call to DLE provider during search (ban surface exposed!)")
 }
 func (p *dleTrapProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
 	return nil, nil
@@ -140,7 +139,8 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 	banderaProv := provider.NewBanderaProviderWithConfig(banderaMock.URL, "", banderaMock.Client())
 	registry.Register(banderaProv)
 
-	// Реєструємо DLE-пастки: якщо хтось викличе їхній Search під час /search — тест впаде!
+	// Реєструємо DLE-пастки: якщо /search звернеться до будь-якої з них — буде panic і тест гарантовано впаде!
+	registry.Register(&dleTrapProvider{id: "dle-trap", t: t})
 	registry.Register(&dleTrapProvider{id: "uakino", t: t})
 	registry.Register(&dleTrapProvider{id: "eneyida", t: t})
 	registry.Register(&dleTrapProvider{id: "lavakino", t: t})
@@ -181,18 +181,26 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 		t.Fatalf("failed to decode search response: %v", err)
 	}
 
-	// Інваріант 1: Cutoff працює (відсіяно хоча б 1 нерелевантний елемент)
+	// Інваріант 1: Cutoff працює (відсіяно шумні та нерелевантні елементи)
 	if resp.FilteredOut <= 0 {
 		t.Fatalf("INVARIANT 1 FAILED: expected filtered_out > 0 (got %d), hard cutoff is not filtering noise!", resp.FilteredOut)
 	}
+	if resp.FilteredOut != 2 {
+		t.Fatalf("expected filtered_out == 2, got %d", resp.FilteredOut)
+	}
 
-	// Інваріант 2: Сума segments[].count дорівнює кількості кластеризованих items
+	// Інваріант 2: Нетавтологічна перевірка кластеризації.
+	// segments[0].Count містить СИРУ кількість результатів від джерела (4),
+	// а len(items) — результат ПІСЛЯ cutoff та кластеризації дублів (1).
 	if len(resp.Segments) == 0 {
 		t.Fatalf("expected at least 1 segment in response")
 	}
-	segmentCount := resp.Segments[0].Count
-	if segmentCount != len(resp.Items) {
-		t.Fatalf("INVARIANT 2 FAILED: segments[0].count (%d) != len(items) (%d) after deduplication", segmentCount, len(resp.Items))
+	rawCandidateCount := resp.Segments[0].Count
+	if rawCandidateCount != 4 {
+		t.Fatalf("INVARIANT 2 FAILED: expected raw candidate count 4, got %d", rawCandidateCount)
+	}
+	if rawCandidateCount <= len(resp.Items) {
+		t.Fatalf("INVARIANT 2 FAILED: rawCandidateCount (%d) must be strictly greater than len(items) (%d) on duplicates", rawCandidateCount, len(resp.Items))
 	}
 
 	// Перевірка кластеризації: 2 дублікати Дюни з uaflix та mikai мають об'єднатися в 1 елемент з 2 sources
@@ -203,5 +211,16 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 		t.Fatalf("expected 2 aggregated sources in clustered item, got %d", len(resp.Items[0].Sources))
 	}
 
-	// Інваріант 3: DLE-пастки не викликалися (перевірено тим, що dleTrapProvider.Search не спрацював і не викликав t.Fatalf)
+	// Інваріант 3: DLE-пастки не викликалися (перевірено відсутністю паніки від dleTrapProvider)
+	// Додатково переконуємося, що dleTrapProvider реально панікує при прямому виклику Search:
+	trap := &dleTrapProvider{id: "dle-trap", t: t}
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("expected dleTrapProvider.Search to panic, but it did not")
+			}
+		}()
+		_, _ = trap.Search(context.Background(), "test")
+	}()
 }
