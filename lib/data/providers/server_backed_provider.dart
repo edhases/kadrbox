@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get_it/get_it.dart';
@@ -221,6 +222,11 @@ class ServerBackedProvider extends ContentProvider {
   @visibleForTesting
   StreamSource mapStreamForTest(Map<String, dynamic> json) => _mapStream(json);
 
+  /// Test seam for [_mapDetails].
+  @visibleForTesting
+  MediaDetails mapDetailsForTest(Map<String, dynamic> json) =>
+      _mapDetails(json);
+
   /// Server item URL is used as the app-side id (details/streams need the URL).
   MediaItem _mapItem(Map<String, dynamic> json) {
     final url = json['url'] as String? ?? '';
@@ -251,9 +257,14 @@ class ServerBackedProvider extends ContentProvider {
           episodes: eps is List
               ? eps.whereType<Map>().map((e) {
                   final em = Map<String, dynamic>.from(e);
+                  final rawRef = em['stream_ref'] ?? em['url'];
+                  final String? refStr = rawRef is String
+                      ? rawRef
+                      : (rawRef != null ? jsonEncode(rawRef) : null);
                   return Episode(
                     number: (em['number'] as num?)?.toInt() ?? 0,
                     title: em['title'] as String?,
+                    streamRef: refStr,
                   );
                 }).toList()
               : const [],

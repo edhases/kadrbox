@@ -304,5 +304,43 @@ void main() {
       });
       expect(source.voiceover, '7');
     });
+
+    test('maps Episode streamRef from em["stream_ref"] or em["url"]', () {
+      final details = provider.mapDetailsForTest({
+        'id': 'bo_test_1',
+        'title': 'Серіал',
+        'seasons': [
+          {
+            'number': 1,
+            'title': 'Сезон 1',
+            'episodes': [
+              {
+                'number': 1,
+                'title': 'Серія 1',
+                'url': '{"source":"animeon","ref":{"episode_id":60300}}',
+              },
+              {
+                'number': 2,
+                'title': 'Серія 2',
+                'stream_ref': {'episode_id': 60301},
+              },
+              {'number': 3, 'title': 'Серія 3'},
+            ],
+          },
+        ],
+      });
+
+      expect(details.seasons, isNotNull);
+      expect(details.seasons!.first.episodes.length, 3);
+
+      final ep1 = details.seasons!.first.episodes[0];
+      expect(ep1.streamRef, '{"source":"animeon","ref":{"episode_id":60300}}');
+
+      final ep2 = details.seasons!.first.episodes[1];
+      expect(ep2.streamRef, contains('"episode_id":60301'));
+
+      final ep3 = details.seasons!.first.episodes[2];
+      expect(ep3.streamRef, isNull);
+    });
   });
 }

@@ -1245,8 +1245,25 @@ class _DetailsPageState extends State<DetailsPage> {
         throw Exception('Провайдер ${widget.providerId} не знайдено');
       }
 
+      String targetId = widget.mediaId;
+      final currentDetails = _details;
+      if (currentDetails != null && currentDetails.seasons != null) {
+        for (final s in currentDetails.seasons!) {
+          if (s.number == season) {
+            for (final ep in s.episodes) {
+              if (ep.number == episode &&
+                  ep.streamRef != null &&
+                  ep.streamRef!.isNotEmpty) {
+                targetId = ep.streamRef!;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       final streams = await provider.getStreams(
-        widget.mediaId,
+        targetId,
         season: season,
         episode: episode,
       );

@@ -88,14 +88,16 @@ class Episode extends Equatable {
   final String? title;
   final String? thumbnailUrl;
   final Duration? duration;
+  final String? streamRef;
 
   const Episode({
     required this.number,
     this.title,
     this.thumbnailUrl,
     this.duration,
+    this.streamRef,
   });
 
   @override
-  List<Object?> get props => [number, title, thumbnailUrl, duration];
+  List<Object?> get props => [number, title, thumbnailUrl, duration, streamRef];
 }
