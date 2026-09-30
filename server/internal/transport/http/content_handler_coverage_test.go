@@ -284,6 +284,19 @@ func TestCovHttpStreamsProviderError(t *testing.T) {
 	}
 }
 
+// TestCovHttpStreamsUnresolvablePlayer — ErrUnresolvablePlayer дає 422 Unprocessable Entity.
+func TestCovHttpStreamsUnresolvablePlayer(t *testing.T) {
+	h, _ := covContentHandler(&covStubProvider{id: "p1", err: provider.ErrUnresolvablePlayer})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/streams?provider=p1&url=https://x/1", nil)
+	rr := httptest.NewRecorder()
+
+	h.GetStreams(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("очікувався 422, отримано %d", rr.Code)
+	}
+}
+
 // TestCovHttpProvidersCatalog — каталог містить зареєстрованих провайдерів.
 func TestCovHttpProvidersCatalog(t *testing.T) {
 	h, _ := covContentHandler(&covStubProvider{id: "p1"})

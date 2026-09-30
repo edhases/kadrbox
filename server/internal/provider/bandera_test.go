@@ -669,3 +669,49 @@ func TestBanderaProviderGetDetails_PerVoiceSeasonsTree(t *testing.T) {
 		t.Errorf("expected episode URL in voice 2 to contain ref 301, got %s", v2.Seasons[0].Episodes[0].URL)
 	}
 }
+
+// 14. Чекліст #8: MergeSubtitles дедуплікація, пріоритет та фолбек лейблів
+func TestMergeSubtitles_DeduplicationAndPrecedence(t *testing.T) {
+	primary := []provider.BanderaSubtitleItem{
+		{
+			URL:   provider.FlexibleString("https://example.com/sub_ukr.vtt"),
+			Lang:  provider.FlexibleString("uk"),
+			Label: provider.FlexibleString("Українські (повні)"),
+		},
+		{
+			URL:   provider.FlexibleString("https://example.com/sub_en.vtt"),
+			Lang:  provider.FlexibleString("en"),
+			Label: provider.FlexibleString("English"),
+		},
+	}
+
+	fallback := []provider.BanderaSubtitleItem{
+		// Дублікат primary URL — має бути проігнорований
+		{
+			URL:   provider.FlexibleString("https://example.com/sub_ukr.vtt"),
+			Lang:  provider.FlexibleString("uk"),
+			Label: provider.FlexibleString("Duplicate"),
+		},
+		// Новий унікальний fallback
+		{
+			URL:  provider.FlexibleString("https://example.com/sub_de.vtt"),
+			Lang: provider.FlexibleString("de"),
+		},
+	}
+
+	merged := provider.MergeSubtitles(primary, fallback)
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 merged subtitles, got %d", len(merged))
+	}
+
+	if merged[0].URL != "https://example.com/sub_ukr.vtt" || merged[0].Label != "Українські (повні)" {
+		t.Errorf("unexpected subtitle 0: %+v", merged[0])
+	}
+	if merged[1].URL != "https://example.com/sub_en.vtt" || merged[1].Label != "English" {
+		t.Errorf("unexpected subtitle 1: %+v", merged[1])
+	}
+	if merged[2].URL != "https://example.com/sub_de.vtt" || merged[2].Label != "de" {
+		t.Errorf("unexpected subtitle 2 (should fallback label to lang): %+v", merged[2])
+	}
+}
+

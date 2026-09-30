@@ -107,6 +107,8 @@ func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
 		case errors.Is(err, provider.ErrProviderNotFound):
 			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
+		case errors.Is(err, provider.ErrUnresolvablePlayer):
+			http.Error(w, `{"error":"player page exposes no playable media"}`, http.StatusUnprocessableEntity)
 		default:
 			http.Error(w, `{"error":"failed to get streams"}`, http.StatusInternalServerError)
 		}
