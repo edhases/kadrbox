@@ -87,3 +87,4 @@ graphify-out/
 
 # Temporary HTML debug/test files
 test_*.html
+/.agent_bridge
