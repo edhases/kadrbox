@@ -490,7 +490,15 @@ class _SearchPageState extends State<SearchPage> {
     final clusterText = sr.totalCount == 1
         ? '1 результат'
         : '${sr.totalCount} результатів';
-    final buffer = StringBuffer('$clusterText з $answered/$asked джерел');
+    final buffer = StringBuffer(clusterText);
+
+    // Only show the source fraction when the backend actually reported
+    // sources. A legacy or partial response that says nothing about sources
+    // must not render as "0 of 0", which reads as a total outage.
+    if (asked > 0) {
+      buffer.write(' з $answered/$asked джерел');
+    }
+
     if (envelope.tookMs > 0) {
       buffer.write(' за $duration мс (сервер: ${envelope.tookMs} мс)');
     } else {
