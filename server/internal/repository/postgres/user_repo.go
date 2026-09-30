@@ -244,6 +244,9 @@ func (r *UserRepository) scanUser(row pgx.Row) (*domain.User, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUserNotFound
 		}
+		if isDuplicateKeyError(err) {
+			return nil, ErrUserAlreadyExists
+		}
 		return nil, fmt.Errorf("scan user: %w", err)
 	}
 	if avatarURL != nil {
