@@ -136,6 +136,11 @@ class ServerBackedProvider extends ContentProvider {
   /// The backend currently reads only `q` and keys its cache on the query plan
   /// hash alone, so sending `page` would silently return page 1 again for every
   /// page. Content-type narrowing is therefore applied here, client-side.
+  ///
+  /// A response shape that is neither the current envelope nor the legacy flat
+  /// list THROWS. Returning an empty envelope there would render a successful
+  /// search that found nothing — the exact silent failure this method is
+  /// supposed to make impossible.
   Future<SearchEnvelope> searchEnvelope(
     String query, {
     ContentType? type,
@@ -153,51 +158,13 @@ class ServerBackedProvider extends ContentProvider {
         _mapItem,
       );
     } else if (rawData is List) {
-      // Сумісність зі старішою версією бекенду, яка повертала плоский List<MediaItem>
-      final items = <ScoredMediaItem>[];
-      for (final raw in rawData) {
-        if (raw is Map) {
-          final item = _mapItem(Map<String, dynamic>.from(raw));
-          items.add(
-            ScoredMediaItem(
-              item: item,
-              score: 1.0,
-              matchedBy: 'legacy_server',
-              clusterKey: item.id,
-              sources: [
-                SearchItemSource(
-                  providerId: item.providerId,
-                  sourceKey: item.providerId,
-                  itemId: item.id,
-                ),
-              ],
-            ),
-          );
-        }
-      }
-      envelope = SearchEnvelope(
-        query: query,
-        canonical: query,
-        tookMs: 0,
-        segments: [
-          SearchSegment(
-            id: 'bandera',
-            status: 'ok',
-            count: items.length,
-            sources: {
-              'bandera': SearchSourceStatus(
-                key: 'bandera',
-                status: SourceStatus.ok,
-                count: items.length,
-              ),
-            },
-          ),
-        ],
-        items: items,
-        filteredOut: 0,
-      );
+      envelope = _legacyEnvelope(query, rawData);
     } else {
-      envelope = SearchEnvelope.empty(query);
+      throw FormatException(
+        'Unexpected /content/search response: '
+        '${rawData.runtimeType} (${rawData.toString().length} chars)',
+        query,
+      );
     }
 
     if (type != null) {
@@ -215,6 +182,63 @@ class ServerBackedProvider extends ContentProvider {
       );
     }
     return envelope;
+  }
+
+  /// Wrap a pre-envelope (flat `List<MediaItem>`) response into an envelope.
+  ///
+  /// This exists only so the app keeps working against a backend that has not
+  /// been redeployed yet. It deliberately invents NOTHING:
+  ///
+  /// * `score` is 0, not 1.0 — the old server never scored anything, and a
+  ///   fabricated perfect score would make unranked garbage look authoritative.
+  /// * `matchedBy` is 'legacy' — an honest marker, not one of the server's
+  ///   documented values.
+  /// * `sources` is empty and the segment reports no sources. A flat list
+  ///   genuinely carries no source attribution, so the UI correctly shows no
+  ///   per-source chips instead of inventing a "bandera" source that the
+  ///   server never mentioned.
+  ///
+  /// Delete this once every deployed backend runs the envelope contract.
+  SearchEnvelope _legacyEnvelope(String query, List<dynamic> rawData) {
+    Logger.w(
+      'Backend returned a legacy flat search list; it is out of date. '
+      'Scores, dedup and per-source stats are unavailable until it is '
+      'redeployed.',
+      tag: 'Search',
+    );
+
+    final items = <ScoredMediaItem>[];
+    for (final raw in rawData) {
+      if (raw is! Map) continue;
+      final item = _mapItem(Map<String, dynamic>.from(raw));
+      items.add(
+        ScoredMediaItem(
+          item: item,
+          score: 0,
+          matchedBy: 'legacy',
+          clusterKey: item.id,
+          sources: const [],
+        ),
+      );
+    }
+
+    return SearchEnvelope(
+      query: query,
+      canonical: query,
+      tookMs: 0,
+      segments: [
+        SearchSegment(
+          id: 'legacy',
+          status: 'unknown',
+          count: items.length,
+          // No sources: the legacy shape never reported any. An empty map
+          // keeps `askedCount` at 0, which the stats line treats as
+          // "not reported" rather than "0 of 0".
+        ),
+      ],
+      items: items,
+      filteredOut: 0,
+    );
   }
 
   @override
