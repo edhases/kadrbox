@@ -242,7 +242,12 @@ class HistoryService extends ChangeNotifier {
         return;
       }
     } catch (e) {
-      debugPrint('⚠️ Failed to pull from cloud: $e');
+      final msg = e.toString();
+      if (msg.contains('HTTP_401') || msg.contains('invalid or expired token')) {
+        debugPrint('⚠️ Cloud pull: token expired, skipping sync');
+      } else {
+        debugPrint('⚠️ Failed to pull from cloud: $e');
+      }
     } finally {
       _isSyncing = false;
       notifyListeners();
@@ -259,8 +264,11 @@ class HistoryService extends ChangeNotifier {
 
       final localHistory = await _dao.getAll(limit: 500);
       int synced = 0;
+      bool tokenExpired = false;
 
       for (final item in localHistory) {
+        if (tokenExpired) break; // зупиняємо якщо токен протух — не спамимо
+
         try {
           await _syncSingleItemToCloud(
             mediaId: item.mediaId,
@@ -270,7 +278,14 @@ class HistoryService extends ChangeNotifier {
           );
           synced++;
         } catch (e) {
-          debugPrint('Failed to sync ${item.mediaId}: $e');
+          final msg = e.toString();
+          // Якщо токен протух — зупиняємо весь батч, не пробуємо решту
+          if (msg.contains('HTTP_401') || msg.contains('invalid or expired token')) {
+            debugPrint('Cloud sync: token expired, stopping batch sync');
+            tokenExpired = true;
+          } else {
+            debugPrint('Failed to sync ${item.mediaId}: $e');
+          }
         }
       }
 

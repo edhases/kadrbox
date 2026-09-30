@@ -217,7 +217,7 @@ class _DetailsPageState extends State<DetailsPage> {
                     borderRadius: BorderRadius.circular(12),
                     child: Hero(
                       tag:
-                          'media_poster_${widget.providerId}_${widget.mediaId}',
+                          'media_poster_grid_${widget.providerId}_${widget.mediaId}',
                       child: _buildPoster(),
                     ),
                   ),
@@ -334,7 +334,7 @@ class _DetailsPageState extends State<DetailsPage> {
         fit: StackFit.expand,
         children: [
           Hero(
-            tag: 'media_poster_${widget.providerId}_${widget.mediaId}',
+            tag: 'media_poster_grid_${widget.providerId}_${widget.mediaId}',
             child: CachedNetworkImage(
               imageUrl: _details!.item.posterUrl!,
               fit: BoxFit.cover,

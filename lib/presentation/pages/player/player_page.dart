@@ -425,8 +425,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         child: CircularProgressIndicator(color: Colors.white),
                       ),
 
-                    // Gesture Layer
-                    if (!_videoPlayerService.isNativePiP)
+                    // Gesture Layer — не рендерити при помилці,
+                    // щоб кнопки error widget отримували кліки
+                    if (!_videoPlayerService.isNativePiP && !state.hasError)
                       PlayerGestureLayer(
                         controller: controller,
                         onTap: _toggleControls,
@@ -434,8 +435,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         child: Container(color: Colors.transparent),
                       ),
 
-                    // Controls Layer
-                    if (!_videoPlayerService.isNativePiP)
+                    // Controls Layer — теж не потрібен при помилці
+                    if (!_videoPlayerService.isNativePiP && !state.hasError)
                       PlayerControls(
                         controller: controller,
                         showControls: _showControls,
@@ -464,8 +465,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                             WatchPartyState.connected)
                       _buildWatchPartyFloatingUI(),
 
-                    // Visibility Toggle
-                    if (!_videoPlayerService.isNativePiP)
+                    // Visibility Toggle — не потрібний при помилці
+                    if (!_videoPlayerService.isNativePiP && !state.hasError)
                       Positioned(
                         top: 60 + MediaQuery.paddingOf(context).top,
                         right: 16,

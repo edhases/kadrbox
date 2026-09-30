@@ -40,7 +40,7 @@ func NewBanderaProviderWithConfig(baseURL, sources string, client *http.Client) 
 	}
 	if client == nil {
 		client = &http.Client{
-			Timeout: 20 * time.Second,
+			Timeout: 15 * time.Second,
 		}
 	}
 	return &BanderaProvider{
@@ -177,25 +177,40 @@ func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.Me
 }
 
 func (p *BanderaProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
-	// BBE API v2 не має окремого каталогу популярного, тому використовуємо загальний пошук
-	query := "фільми"
-	if contentType == "series" {
-		query = "серіал"
-	} else if contentType == "anime" {
-		query = "аніме"
-	} else if contentType == "cartoon" {
-		query = "мультфільм"
+	// BBE API v2 не має окремого каталогу популярного.
+	// Виконуємо кілька паралельних запитів по популярних термінах і об'єднуємо результати.
+	var queries []string
+	switch contentType {
+	case "series":
+		queries = []string{"серіал", "серіали", "сезон"}
+	case "anime":
+		queries = []string{"аніме", "anime"}
+	case "cartoon":
+		queries = []string{"мультфільм", "мультсеріал"}
+	case "dorama":
+		queries = []string{"дорама", "dorama"}
+	default:
+		// movie або all — беремо загальні популярні
+		queries = []string{"фільм", "бойовик", "комедія", "драма"}
 	}
+
+	// Ротація за page щоб різні сторінки давали різні результати
+	if page < 1 {
+		page = 1
+	}
+	query := queries[(page-1)%len(queries)]
+
 	return p.Search(ctx, query)
 }
 
 func (p *BanderaProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
-	query := category
-	if query == "" {
+	if category == "" {
 		return p.GetPopular(ctx, contentType, page)
 	}
-	return p.Search(ctx, query)
+	// category може бути жанром ("Драма", "drama", "action" тощо)
+	return p.Search(ctx, category)
 }
+
 
 // BBE Content API Structures
 type bbeContentRequest struct {

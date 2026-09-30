@@ -15,12 +15,16 @@ class MediaCard extends StatefulWidget {
   final MediaItem item;
   final VoidCallback? onTap;
   final bool isFocused; // Deprecated but kept for compatibility
+  /// Namespace для Hero тегу — дозволяє мати один item у різних місцях UI
+  /// без конфлікту Hero анімацій (напр. 'grid', 'recommendations', 'banner')
+  final String heroNamespace;
 
   const MediaCard({
     super.key,
     required this.item,
     this.onTap,
     this.isFocused = false,
+    this.heroNamespace = 'grid',
   });
 
   @override
@@ -149,7 +153,7 @@ class _MediaCardState extends State<MediaCard> {
     );
 
     return Hero(
-      tag: 'media_poster_${widget.item.providerId}_${widget.item.id}',
+      tag: 'media_poster_${widget.heroNamespace}_${widget.item.providerId}_${widget.item.id}',
       child: localPath != null
           ? Image.file(
               File(localPath),

@@ -26,8 +26,9 @@ class SmartSearchService {
   static const int _fuzzyThreshold = 75;
 
   /// Deduplication threshold (0-100)
-  /// 85 = very similar titles are merged
-  static const int _deduplicationThreshold = 85;
+  /// 92 = тільки майже ідентичні назви зливаються; 85 було надто агресивно
+  /// для серіалів де є "Серія 68", "Серія 112" — вони різні але схожі
+  static const int _deduplicationThreshold = 92;
 
   final SearchService _searchService;
   // ignore: unused_field - reserved for future provider-specific logic
@@ -424,30 +425,43 @@ class SmartSearchService {
     final normalizedTitle = item.title.toLowerCase().trim();
     final normalizedQuery = query.toLowerCase().trim();
 
+    // Точний збіг назви — максимальний пріоритет
     if (normalizedTitle == normalizedQuery) {
-      score += 100;
+      score += 150;
     } else if (normalizedTitle.startsWith(normalizedQuery)) {
-      score += 50;
+      score += 80;
     } else if (normalizedTitle.contains(normalizedQuery)) {
-      score += 25;
+      score += 40;
     }
 
+    // Fuzzy similarity
     final similarity = ratio(normalizedTitle, normalizedQuery);
-    score += similarity * 0.3;
+    score += similarity * 0.5;
 
+    // Рейтинг
     if (item.rating != null) {
       score += item.rating! * 2;
     }
 
+    // Бонус за свіжий контент (але слабший ніж раніше)
     if (item.year != null) {
       final yearsOld = DateTime.now().year - item.year!;
       if (yearsOld < 5) {
-        score += (5 - yearsOld) * 3;
+        score += (5 - yearsOld) * 1.5;
       }
     }
 
+    // Невеликий бонус за наявність постеру
     if (item.posterUrl != null && item.posterUrl!.isNotEmpty) {
-      score += 10;
+      score += 5;
+    }
+
+    // Штраф за заголовки-серії типу "Серія 101 Великолепный" — вони менш релевантні
+    // як результат пошуку назви серіалу, ніж сам серіал
+    if (normalizedTitle.contains('серия') ||
+        normalizedTitle.contains('серія') ||
+        RegExp(r'^(episode|ep\.?\s*\d+|\d+\s*серия|\d+\s*серія)').hasMatch(normalizedTitle)) {
+      score -= 15;
     }
 
     return score;

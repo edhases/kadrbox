@@ -88,7 +88,8 @@ class SearchService {
   static const String _tag = 'SearchService';
 
   /// Timeout for individual provider searches
-  static const Duration _providerTimeout = Duration(seconds: 10);
+  /// 20 sec — Bandera/BBE API може відповідати повільно
+  static const Duration _providerTimeout = Duration(seconds: 20);
 
   /// Timeout for suggestions (shorter for UX)
   static const Duration _suggestionTimeout = Duration(seconds: 3);
