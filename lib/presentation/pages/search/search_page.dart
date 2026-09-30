@@ -8,7 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/history_service.dart';
 import '../../../data/services/settings_service.dart';
-import '../../../data/services/search_service.dart';
+import '../../../data/services/search/search_envelope.dart';
 import '../../../data/services/smart_search/smart_search_service.dart';
 import '../../../data/services/provider_catalog_service.dart';
 import '../../../domain/entities/entities.dart';
@@ -33,7 +33,6 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _registry = GetIt.instance<ProviderRegistry>();
-  final _searchService = GetIt.instance<SearchService>();
   final _smartSearchService = GetIt.instance<SmartSearchService>();
   final _historyService = GetIt.instance<HistoryService>();
   final _settings = GetIt.instance<SettingsService>();
@@ -43,18 +42,15 @@ class _SearchPageState extends State<SearchPage> {
   List<MediaItem> _results = [];
   List<SearchSuggestion> _suggestions = [];
   SmartSearchResult? _searchResult;
-  AggregatedSearchResult? _aggregatedResult;
   bool _isLoading = false;
   String? _error;
   bool _hasSearched = false;
   bool _showSuggestions = false;
   Timer? _debounceTimer;
 
-  // Provider filter
-  String? _selectedProviderId;
-
-  // Deduplication toggle
-  bool _deduplicateResults = false;
+  /// Source filter. Null means "all sources" — the clustered view the server
+  /// produced. Selecting a source narrows to the raw entries it contributed.
+  String? _selectedSourceId;
 
   // Recent searches from smart search
   List<String> _recentSearches = [];
@@ -87,7 +83,9 @@ class _SearchPageState extends State<SearchPage> {
     _focusNode.removeListener(_onFocusChanged);
     _focusNode.dispose();
     try {
-      GetIt.instance<ProviderCatalogService>().removeListener(_onCatalogChanged);
+      GetIt.instance<ProviderCatalogService>().removeListener(
+        _onCatalogChanged,
+      );
     } catch (_) {}
     super.dispose();
   }
@@ -182,7 +180,7 @@ class _SearchPageState extends State<SearchPage> {
       // Don't clear results immediately if we want to show loading indicator over old results?
       // Or clear them? Standard is clear or show skeleton.
       _results = [];
-      _aggregatedResult = null;
+      _selectedSourceId = null;
       _searchResult = null;
     });
 
@@ -195,56 +193,42 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     try {
-      // Use SmartSearchService for intelligent multi-provider search
+      // One request. Ranking, deduplication and relevance cutoff are all
+      // server-side concerns now.
       final stream = _smartSearchService.search(query);
 
       _searchSubscription = stream.listen(
         (result) async {
           if (!mounted) return;
 
-          // Get filtered results based on selected provider
-          var items = result.rankedItems;
-
-          // Filter by provider if selected
-          if (_selectedProviderId != null) {
-            items = items
-                .where((i) => i.providerId == _selectedProviderId)
-                .toList();
+          // A backend failure must not masquerade as "nothing found".
+          if (result.hasError) {
+            setState(() {
+              _error = result.error;
+              _isLoading = false;
+              _searchResult = result;
+              _results = const [];
+            });
+            return;
           }
 
-          // Apply deduplication if enabled
-          if (_deduplicateResults && _selectedProviderId == null) {
-            // SmartSearchService now handles basic dedup, but this UI toggle forces aggressive dedup?
-            // Or maybe we reused SearchService logic.
-            // _searchService.deduplicateResults is still available.
-            items = _searchService.deduplicateResults(items);
-          }
+          final items = _itemsForCurrentFilter(result);
 
-          // Check if we should suggest a correction
+          // Only offer a spelling correction when the backend genuinely
+          // completed and found nothing — not while sources are still failing.
           String? suggestion;
-          if (items.isEmpty && result.aggregatedResult.isComplete) {
+          if (items.isEmpty) {
             suggestion = await _smartSearchService.suggestCorrection(query);
           }
 
           setState(() {
             _searchResult = result;
-            _aggregatedResult = result.aggregatedResult;
             _results = items;
-            // Only stop loading if complete? Or keep loading true until done?
-            // "Loading" usually means "Waiting for first result" or "In progress".
-            // If we have results, we can show them.
-            // But if we hide loading indicator, user might think search is finished.
-            // Better to keep _isLoading = true until stream is done?
-            // BUT if stream is progressive, we want to show data.
-            // Let's use !isComplete for loading state?
-            _isLoading = !result.aggregatedResult.isComplete;
+            _isLoading = false;
             _suggestedQuery = suggestion;
           });
 
-          // Reload recent searches after search (once we have some results)
-          if (result.fromCache || result.aggregatedResult.isComplete) {
-            _loadRecentSearches();
-          }
+          _loadRecentSearches();
         },
         onError: (e) {
           if (mounted) {
@@ -316,64 +300,41 @@ class _SearchPageState extends State<SearchPage> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                // "All providers" chip
+                // "All sources" chip
                 _buildFilterChip(
                   label: 'Усі джерела',
-                  isSelected: _selectedProviderId == null,
+                  isSelected: _selectedSourceId == null,
                   count: _searchResult?.totalCount,
                   onSelected: () => _onProviderFilterChanged(null),
                 ),
-                const SizedBox(width: 8),
 
-                // Individual provider chips
-                ...providers.map((provider) {
-                  final result = _aggregatedResult?.providerResults
-                      .where((r) => r.providerId == provider.id)
-                      .firstOrNull;
-                  final count = result?.items.length ?? 0;
-                  final hasError = result?.error != null;
-
+                // One chip per source that actually contributed results.
+                //
+                // Sources that returned nothing, failed, or timed out are not
+                // listed as selectable filters — a chip reading "0" next to an
+                // orange warning icon is noise. Failures are surfaced once in
+                // the banner below instead.
+                ..._visibleSources.map((source) {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: _buildFilterChip(
-                      label: provider.name,
-                      isSelected: _selectedProviderId == provider.id,
-                      count: count,
-                      hasError: hasError,
-                      onSelected: () => _onProviderFilterChanged(provider.id),
+                      label: source.label,
+                      isSelected: _selectedSourceId == source.key,
+                      count: source.count,
+                      onSelected: () => _onProviderFilterChanged(source.key),
                     ),
                   );
                 }),
-
-                // Deduplication toggle (only when "All" selected)
-                if (_selectedProviderId == null) ...[
-                  const SizedBox(width: 16),
-                  FilterChip(
-                    label: const Text('Без дублів'),
-                    selected: _deduplicateResults,
-                    onSelected: (value) {
-                      setState(() {
-                        _deduplicateResults = value;
-                        if (_searchResult != null) {
-                          var items = _searchResult!.rankedItems;
-                          if (value) {
-                            items = _searchService.deduplicateResults(items);
-                          }
-                          _results = items;
-                        }
-                      });
-                    },
-                    avatar: Icon(
-                      _deduplicateResults
-                          ? Icons.filter_alt
-                          : Icons.filter_alt_outlined,
-                      size: 18,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
+
+          // Partial-failure banner: the search worked, but not everywhere.
+          if (_hasSourceFailures)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _buildFailureBanner(),
+            ),
 
           // Search stats
           if (_searchResult != null && !_isLoading)
@@ -392,11 +353,70 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  /// Sources worth offering as a filter: anything with at least one result.
+  List<_SourceChip> get _visibleSources {
+    return [
+      for (final s in _searchResult?.envelope.allSources ?? const [])
+        if (s.hasResults)
+          _SourceChip(
+            key: s.key,
+            label: _displayNameFor(s.key),
+            count: s.count,
+          ),
+    ]..sort((a, b) => b.count.compareTo(a.count));
+  }
+
+  /// Sources that were asked and did not deliver.
+  List<SearchSourceStatus> get _failedSources =>
+      _searchResult?.envelope.failedSources ?? const [];
+
+  bool get _hasSourceFailures => _failedSources.isNotEmpty;
+
+  /// Prefer the registered provider's display name; fall back to the raw key
+  /// so an unregistered source is still identifiable to the user.
+  String _displayNameFor(String sourceKey) {
+    for (final p in _registry.enabled) {
+      if (p.id == sourceKey) return p.name;
+    }
+    return sourceKey;
+  }
+
+  Widget _buildFailureBanner() {
+    final failed = _failedSources;
+    final names = failed.map((s) => _displayNameFor(s.key)).join(', ');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: Colors.orange,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Недоступні джерела: $names',
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+            ),
+          ),
+          TextButton(onPressed: _performSearch, child: const Text('Повторити')),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFilterChip({
     required String label,
     required bool isSelected,
     int? count,
-    bool hasError = false,
     required VoidCallback onSelected,
   }) {
     return FilterChip(
@@ -416,18 +436,8 @@ class _SearchPageState extends State<SearchPage> {
                       ).textTheme.bodySmall?.color?.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: hasError ? Colors.red : null,
-                ),
-              ),
+              child: Text('$count', style: const TextStyle(fontSize: 11)),
             ),
-          ],
-          if (hasError) ...[
-            const SizedBox(width: 4),
-            const Icon(Icons.warning_amber, size: 14, color: Colors.orange),
           ],
         ],
       ),
@@ -440,39 +450,60 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  void _onProviderFilterChanged(String? providerId) {
+  void _onProviderFilterChanged(String? sourceId) {
     setState(() {
-      _selectedProviderId = providerId;
-      if (_searchResult != null) {
-        var items = _searchResult!.rankedItems;
-        if (providerId != null) {
-          items = items.where((i) => i.providerId == providerId).toList();
-        }
-        if (_deduplicateResults && providerId == null) {
-          items = _searchService.deduplicateResults(items);
-        }
-        _results = items;
-      }
+      _selectedSourceId = sourceId;
+      final result = _searchResult;
+      _results = result == null ? const [] : _itemsForCurrentFilter(result);
     });
+  }
+
+  /// Project the server's clustered items through the current source filter.
+  ///
+  /// With no filter selected we show the clustered list as-is. With a source
+  /// selected we keep only the clusters that source contributed to.
+  ///
+  /// Note this filters clusters, it does not re-expand them into per-source
+  /// raw entries: `SearchItemSource` carries only identity
+  /// (`source_key`/`item_id`/`url`), not a full title. Expanding would mean a
+  /// second round trip per source, which is exactly the fan-out we removed.
+  List<MediaItem> _itemsForCurrentFilter(SmartSearchResult result) {
+    final source = _selectedSourceId;
+    if (source == null) return result.rankedItems;
+
+    return [
+      for (final scored in result.scoredItems)
+        if (scored.sources.any((s) => s.sourceKey == source)) scored.item,
+    ];
   }
 
   String _buildSearchStats() {
     if (_searchResult == null) return '';
 
     final sr = _searchResult!;
+    final envelope = sr.envelope;
     final duration = sr.totalDuration.inMilliseconds;
-    final total = sr.totalCount;
-    final aggr = sr.aggregatedResult;
-    final success = aggr.successCount;
-    final providers = _registry.enabled.length;
 
-    // Show cache indicator
-    final cacheText = sr.fromCache ? ' (кеш)' : '';
-
-    if (aggr.failureCount > 0) {
-      return '$total результатів з $success/$providers джерел за $durationмс$cacheText';
+    // Count sources that actually answered, not the number registered.
+    final answered = envelope.answeredCount;
+    final asked = envelope.askedCount;
+    final clusterText = sr.totalCount == 1
+        ? '1 результат'
+        : '${sr.totalCount} результатів';
+    final buffer = StringBuffer('$clusterText з $answered/$asked джерел');
+    if (envelope.tookMs > 0) {
+      buffer.write(' за $duration мс (сервер: ${envelope.tookMs} мс)');
+    } else {
+      buffer.write(' за $duration мс');
     }
-    return '$total результатів з $providers джерел за $durationмс$cacheText';
+
+    // Make heavy filtering visible: without this, a search that matched 400
+    // candidates but kept 6 looks identical to a source with 6 titles total.
+    if (envelope.filteredOut > 0) {
+      buffer.write(' · відсічено ${envelope.filteredOut} нерелевантних');
+    }
+
+    return buffer.toString();
   }
 
   Widget _buildSearchBar() {
@@ -850,4 +881,26 @@ class _SearchPageState extends State<SearchPage> {
       crossAxisCount: _ui.gridColumns,
     );
   }
+}
+
+/// A selectable source filter chip.
+///
+/// Only sources that returned at least one result get one of these. Sources
+/// that failed or returned nothing are represented by the failure banner
+/// instead — a chip labelled "0" invites the user to tap into an empty list.
+class _SourceChip {
+  const _SourceChip({
+    required this.key,
+    required this.label,
+    required this.count,
+  });
+
+  /// The backend's source key, e.g. `uakino`.
+  final String key;
+
+  /// Human-readable name resolved from the provider registry.
+  final String label;
+
+  /// Results this source contributed.
+  final int count;
 }

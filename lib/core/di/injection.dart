@@ -15,7 +15,6 @@ import '../../data/services/video_player_service.dart';
 import '../../data/services/watch_party_service.dart';
 import '../../data/services/oxide_server_service.dart';
 import '../../data/services/auth_service.dart';
-import '../../data/services/search_service.dart';
 import '../../data/services/url_resolver_service.dart';
 import '../../data/services/recommendation_service.dart';
 import '../../data/services/smart_search/smart_search_service.dart';
@@ -123,18 +122,16 @@ Future<void> configureDependencies() async {
     () => ProviderCatalogService(),
   );
 
-  // Search service (depends on registry)
-  getIt.registerLazySingleton<SearchService>(
-    () => SearchService(getIt<ProviderRegistry>()),
-  );
-
-  // Smart search service (depends on SearchService and database)
+  // Smart search service (depends on the provider registry and database).
+  //
+  // The former per-provider SearchService is gone: search is a single request
+  // to the backend's unified /content/search pipeline, which owns query
+  // normalisation, relevance scoring and cross-source clustering.
   getIt.registerLazySingleton<SearchHistoryDao>(
     () => SearchHistoryDao(database),
   );
   getIt.registerLazySingleton<SmartSearchService>(
     () => SmartSearchService(
-      getIt<SearchService>(),
       getIt<ProviderRegistry>(),
       getIt<SearchHistoryDao>(),
     ),

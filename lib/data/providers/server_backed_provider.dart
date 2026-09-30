@@ -9,6 +9,7 @@ import '../../core/utils/logger.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/content_provider.dart';
 import '../models/provider_catalog.dart';
+import '../services/search/search_envelope.dart';
 
 /// Outcome of probing a stream URL with a HEAD (or ranged GET) request.
 ///
@@ -120,14 +121,56 @@ class ServerBackedProvider extends ContentProvider {
 
   String get _base => '${AppConfig.serverApiUrl}/content';
 
+  /// Server-side intelligent search.
+  ///
+  /// Unlike [search], this omits the `provider` parameter, which makes the
+  /// backend run the whole pipeline: one upstream call per segment, relevance
+  /// scoring with a hard cutoff, and cross-provider clustering. The client
+  /// receives an already-ranked, already-deduplicated set and only renders it.
+  ///
+  /// Errors propagate — a transport failure must stay distinguishable from
+  /// a genuine "no results", otherwise the UI shows an empty screen with no
+  /// diagnostic and the user cannot tell a dead backend from an empty catalogue.
+  ///
+  /// [page] is accepted for call-site compatibility but deliberately NOT sent.
+  /// The backend currently reads only `q` and keys its cache on the query plan
+  /// hash alone, so sending `page` would silently return page 1 again for every
+  /// page. Content-type narrowing is therefore applied here, client-side.
+  Future<SearchEnvelope> searchEnvelope(
+    String query, {
+    ContentType? type,
+    int page = 1,
+  }) async {
+    final json = await _api.getJson(
+      '$_base/search',
+      queryParameters: {'q': query},
+    );
+    var envelope = SearchEnvelope.fromJson(json, _mapItem);
+    if (type != null) {
+      envelope = SearchEnvelope(
+        query: envelope.query,
+        canonical: envelope.canonical,
+        tookMs: envelope.tookMs,
+        segments: envelope.segments,
+        items: envelope.items
+            .where((s) => s.item.type == type)
+            .toList(growable: false),
+        filteredOut: envelope.filteredOut,
+        nextPage: envelope.nextPage,
+        hasMore: envelope.hasMore,
+      );
+    }
+    return envelope;
+  }
+
   @override
   Future<List<MediaItem>> search(
     String query, {
     ContentType? type,
     int page = 1,
   }) async {
-    // Errors propagate: a transport failure must not be indistinguishable
-    // from a genuine "no results".
+    // Legacy per-provider path. Kept for callers that genuinely need one
+    // provider; the search UI uses [searchEnvelope] instead.
     final list = await _api.getJsonList(
       '$_base/search',
       queryParameters: {'q': query, 'provider': id},

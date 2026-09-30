@@ -15,7 +15,7 @@
    - Локальна база даних Drift підтримує реактивні потоки (`watchAll()`, `watchContinueWatching()`, `watchByStatus()`).
    - Сервіси підписуються на Drift Streams та транслюють оновлення до UI через `notifyListeners()`.
 3. **Reactive Provider Multi-Search Pipelines**:
-   - `SmartSearchService` та `SearchService` оперують прогресивними асинхронними генераторами та стрімами (`Stream<SmartSearchResult>`), здатними видавати часткові результати в міру відповіді парсерів провайдерів.
+   - `SmartSearchService` надсилає один запит до `/content/search` і повертає `Stream<SmartSearchResult>`, здатний відокремити помилку бекенду від порожнього результату — мертвий бекенд ніколи не показується як «нічого не знайдено».
 4. **Local UI State**:
    - `StatefulWidget` з контролерами скролу, анімацій, табів і текстових полів (`ScrollController`, `TabController`, `TextEditingController`, `FocusNode`).
 
@@ -38,7 +38,6 @@ flowchart TD
         VPS[VideoPlayerService]
         SS[SettingsService]
         SSS[SmartSearchService]
-        SrS[SearchService]
         HS[HistoryService]
         FS[FavoritesService]
         WPS[WatchPartyService]
@@ -102,8 +101,7 @@ flowchart TD
 | [`SettingsService`](file:///e:/Github/oxide_film/lib/data/services/settings_service.dart) | `lib/data/services/settings_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `SettingsState` + `UISettings` | Налаштування теми (Dark/Light/Amoled), мови інтерфейсу, розміру сітки та карток, автооновлення, параметрів плеєра за замовчуванням |
 | [`HistoryService`](file:///e:/Github/oxide_film/lib/data/services/history_service.dart) | `lib/data/services/history_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Збереження та зчитування історії перегляду, фільтрація секції "Продовжити перегляд", дедуплікація, фонова двостороння синхронізація з PocketBase |
 | [`FavoritesService`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart) | `lib/data/services/favorites_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Додавання/видалення з обраного (offline-first), реактивний моніторинг змін у Drift, синхронізація з PocketBase Realtime |
-| [`SmartSearchService`](file:///e:/Github/oxide_film/lib/data/services/smart_search/smart_search_service.dart) | `lib/data/services/smart_search/smart_search_service.dart` | LazySingleton (`getIt`) | `Stream<SmartSearchResult>` + In-Memory Cache | Розумний пошук: авто-транслітерація Cyrillic ↔ Latin, fuzzy-пошук (Levenshtein), ранжування у Isolate (`compute`), збереження історії запитів |
-| [`SearchService`](file:///e:/Github/oxide_film/lib/data/services/search_service.dart) | `lib/data/services/search_service.dart` | LazySingleton (`getIt`) | Async Stream Aggregator (`AggregatedSearchResult`) | Паралельний оверлей-пошук по всіх увімкнених провайдерах з тайм-аутами (10с на джерело), дедуплікація та ізоляція помилок |
+| [SmartSearchService](file:///e:/Github/oxide_film/lib/data/services/smart_search/smart_search_service.dart) | lib/data/services/smart_search/smart_search_service.dart | LazySingleton (getIt) | Stream<SmartSearchResult> | **Один** запит до /content/search на пошук. Нормалізація запиту, скоринг із relevance-cutoff і кластеризація дублікатів виконуються на сервері. Локально лише: історія пошуків, автодоповнення з локальних джерел, підказки про помилки (Levenshtein). |
 | [`WatchPartyService`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart) | `lib/data/services/watch_party_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + WebSockets / WebRTC P2P | Синхронний перегляд фільмів: створення кімнати, передача команд (play/pause/seek/speed), розрахунок часового дрифту (clock drift) та автокорекція затримки, груповий чат |
 | [`AuthService`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart) | `lib/data/services/auth_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `AsyncAuthStore` | Автентифікація користувачів у PocketBase (Email/Password, OAuth2), сесії, отримання профілю та аватарів |
 | [`DownloadService`](file:///e:/Github/oxide_film/lib/data/services/download_service.dart) | `lib/data/services/download_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Завантаження HLS/MP4 стрімів для офлайн-перегляду, керування чергою, пауза/відновлення, збереження у `DownloadsDao` |
@@ -221,7 +219,7 @@ stateDiagram-v2
 
 ---
 
-### 4.2. Пошук та розумне ранжування: `SmartSearchService`
+### 4.2. Пошук: `SmartSearchService`
 
 Стан пошуку передається як реактивний стрім `Stream<SmartSearchResult>`:
 
@@ -230,38 +228,86 @@ classDiagram
     class SmartSearchResult {
         +String originalQuery
         +String normalizedQuery
-        +List~String~ searchVariants
-        +AggregatedSearchResult aggregatedResult
-        +List~MediaItem~ rankedItems
+        +SearchEnvelope envelope
         +Duration totalDuration
         +bool fromCache
-        +int totalCount
-        +static empty(String query) SmartSearchResult
-    }
-
-    class AggregatedSearchResult {
-        +String query
-        +List~ProviderSearchResult~ providerResults
-        +Duration totalDuration
-        +bool isComplete
-        +List~MediaItem~ allItems
-        +int totalCount
-        +int successCount
-        +int failureCount
-    }
-
-    class ProviderSearchResult {
-        +String providerId
-        +String providerName
-        +List~MediaItem~ items
         +String error
-        +Duration searchDuration
-        +bool isSuccess
+        +List~MediaItem~ rankedItems
+        +List~ScoredMediaItem~ scoredItems
+        +int totalCount
+        +int filteredOut
+        +bool hasError
+        +List~SearchSourceStatus~ failedSources
+        +static fromEnvelope(...) SmartSearchResult
+        +static empty(String query) SmartSearchResult
+        +static error(String query, ...) SmartSearchResult
     }
 
-    SmartSearchResult --> AggregatedSearchResult
-    AggregatedSearchResult --> ProviderSearchResult
+    class SearchEnvelope {
+        +String query
+        +String canonical
+        +int tookMs
+        +List~SearchSegment~ segments
+        +List~ScoredMediaItem~ items
+        +int filteredOut
+        +int nextPage
+        +bool hasMore
+        +List~SearchSourceStatus~ allSources
+        +List~SearchSourceStatus~ failedSources
+        +int answeredCount
+        +int askedCount
+    }
+
+    class SearchSegment {
+        +String id
+        +String status
+        +int count
+        +Map~String,SearchSourceStatus~ sources
+        +List~SearchSourceStatus~ failures
+        +List~SearchSourceStatus~ emptySources
+        +bool isFailure
+    }
+
+    class SearchSourceStatus {
+        +String key
+        +SourceStatus status
+        +int count
+        +int? elapsedMs
+        +bool didAnswer
+        +bool isEmpty
+        +bool hasResults
+    }
+
+    class ScoredMediaItem {
+        +MediaItem item
+        +double score
+        +String matchedBy
+        +String clusterKey
+        +List~SearchItemSource~ sources
+    }
+
+    class SearchItemSource {
+        +String providerId
+        +String sourceKey
+        +String itemId
+        +String url
+    }
+
+    SmartSearchResult --> SearchEnvelope
+    SearchEnvelope --> SearchSegment
+    SearchEnvelope --> ScoredMediaItem
+    SearchSegment --> SearchSourceStatus
+    ScoredMediaItem --> SearchItemSource
 ```
+
+> **Зміна контракту (Wave 3b).** `AggregatedSearchResult` / `ProviderSearchResult`
+> видалено разом із `SearchService`. Нормалізація запиту, скоринг із
+> relevance-cutoff і кластеризація дублікатів тепер виконуються **на сервері**
+> (`/content/search`); клієнт лише рендерить `SearchEnvelope`. Клієнтський
+> `SearchService` робив до 24 HTTP-запитів на пошук, не мав жодного
+> relevance-порогу, а його дедуплікація ніколи не спрацьовувала для
+> українських назв: `[^\w\s]` у Dart-регулярці зводить кирилицю до порожнього
+> рядка, бо `\w` — це лише ASCII.
 
 #### Діаграма станів процесу пошуку на сторінці `SearchPage`
 
@@ -389,9 +435,9 @@ sequenceDiagram
 
 ---
 
-### Сценарій 2: Пошук (fuzzy matching) та агрегація результатів з різних провайдерів
+### Сценарій 2: Пошук — один запит до серверного конвеєра
 
-Сценарій демонструє роботу конвеєра розумного пошуку з транслітерацією, захистом від друкарських помилок та поглинанням відмов окремих провайдерів.
+Сценарій демонструє пошук за новою архітектурою: клієнт надсилає **один** запит, а нормалізація, скоринг із відсіканням нерелевантного, кластеризація дублікатів і fan-out між джерелами виконуються на сервері. Клієнт відповідає лише за рендеринг, відсікання джерел-нулів і показ банера часткової відмови.
 
 ```mermaid
 sequenceDiagram
@@ -399,50 +445,36 @@ sequenceDiagram
     actor User as Користувач
     participant UI as SearchPage
     participant Smart as SmartSearchService
-    participant Trans as TransliterationService
-    participant Search as SearchService
-    participant Registry as ProviderRegistry
-    participant Providers as Enabled Providers
-    participant Isolate as Background Compute Isolate
+    participant Provider as ServerBackedProvider (Bandera)
+    participant API as Go /content/search
     participant DB as SearchHistoryDao (Drift)
 
-    User->>UI: Введення запиту: "matrytsya"
-    UI->>Smart: search("matrytsya")
-    Smart->>Trans: normalizeQuery("matrytsya")
-    Trans-->>Smart: "matrytsya"
-    
-    Smart->>Trans: generateSearchVariants("matrytsya")
-    Trans-->>Smart: ["matrytsya", "матриця", "матрица"]
-    
-    rect rgb(255, 250, 240)
-    note over Smart,Providers: Паралельний оверлейний запит через SearchService
-    Smart->>Search: searchMulti(variants)
-    Search->>Registry: enabled
-    par Опитування провайдерів
-        Search->>Providers: Uakino.search("матриця")
-        Providers-->>Search: [Item 1, Item 2]
-    and
-        Search->>Providers: Eneyida.search("матриця")
-        Providers-->>Search: [Item 1, Item 3]
-    and
-        Search->>Providers: Uakino.search("матрица")
-        Providers-->>Search: [Item 4]
-    and
-        Search->>Providers: Нестабільний провайдер
-        Note over Providers,Search: Тайм-аут 10 секунд або 500 Error
-        Search-->>Search: Ізоляція помилки (isSuccess=false)
-    end
+    User->>UI: Введення та відправка запиту: "Матриця"
+    UI->>Smart: search("Матриця")
+
+    note over Smart: Один HTTP-запит на весь пошук.<br/>Немає варіантів, fan-out по провайдерах та isolate-скорингу.
+
+    Smart->>Provider: searchEnvelope("Матриця")
+    Provider->>API: GET /content/search?q=Матриця
+
+    rect rgb(245, 250, 255)
+    note over API: Серверний конвеєр (Go): нормалізація запиту,<br/>fan-out усередині Bandera, скоринг із relevance-cutoff,<br/>кластеризація дублікатів
+    API->>Provider: Bandera /search
+    Provider-->>API: items + meta.statuses
+    API-->>Provider: SearchResponse -> SearchEnvelope
     end
 
-    Search-->>Smart: Stream<AggregatedSearchResult> (часткові пачки)
-    
-    Smart->>Isolate: compute(_processResultsCompute, items, fuzzyThreshold=75)
-    Note over Isolate: Обчислення коефіцієнтів Левенштейна (Ratio / TokenSort) та вилучення дублів
-    Isolate-->>Smart: List~MediaItem~ (ranked & sorted)
-    
-    Smart->>DB: addQuery("matrytsya") (збереження в Drift)
-    Smart-->>UI: SmartSearchResult(rankedItems, aggregatedResult)
-    UI->>UI: Рендеринг карток + чипи провайдерів з лічильниками
+    Provider-->>Smart: SearchEnvelope (items, segments, filtered_out)
+    Smart->>DB: addSearch(...) — збереження в Drift
+    Smart-->>UI: SmartSearchResult (без повторного ранжування)
+
+    alt Усі джерела відповіли
+        UI->>UI: картки + чипи джерел із лічильниками
+    else Частина джерел недоступна
+        UI->>UI: картки + банер "Недоступні джерела: ..." з кнопкою "Повторити"
+    else Запит завершився помилкою
+        UI->>UI: екран помилки (НЕ "нічого не знайдено")
+    end
 ```
 
 ---
@@ -619,8 +651,8 @@ sequenceDiagram
 ## 8. Висновки
 
 1. **Архітектурна однорідність**: Незважаючи на відсутність формальних класів `Bloc`/`Cubit`, кодова база має чітке розділення відповідальності завдяки зв'язці `StatefulWidget` $\rightarrow$ `ChangeNotifier Services / Controllers` $\rightarrow$ `Domain Entities` $\rightarrow$ `Drift DAOs / Provider Registry`.
-2. **Продуктивність UI**: Використання ізольованих нотифікаторів (наприклад, `positionNotifier` у плеєрі та ізолятів `compute()` у розумному пошуку) гарантує відсутність блокування UI-потоку навіть під час інтенсивних операцій.
+2. **Продуктивність UI:** ізольовані нотифікатори (наприклад, `positionNotifier` у плеєрі) гарантують відсутність блокування UI-потоку. Пошук цим нех **не потребує** ізоляторів: скоринг і кластеризація виконуються на сервері, клієнт лише парсить готовий envelope.
 3. **Надійність (Resilience)**:
-   - Відмова окремих провайдерів ізолюється у `SearchService` і не призводить до краху пошукового запиту.
+   - Відмова окремих джерел ізолюється **на сервері**: недоступні джерела потрапляють у `segments[].sources` зі статусом помилки, клієнт показує банер «Недоступні джерела», а решта результатів лишається видимою.
    - Offline-First підхід гарантує повну працездатність додатку без доступу до інтернету (для локальних та завантажених медіафайлів).
    - Двостороння синхронізація з PocketBase реалізована за принципом фонової черги з захистом від зациклення через локальні перевірки.

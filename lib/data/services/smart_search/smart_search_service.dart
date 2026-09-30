@@ -1,13 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:fuzzywuzzy/fuzzywuzzy.dart';
 
 import '../../../core/utils/logger.dart';
 import '../../../domain/entities/entities.dart';
 import '../../database/dao/search_history_dao.dart';
 import '../../providers/provider_registry.dart';
-import '../search_service.dart';
+import '../../providers/server_backed_provider.dart';
+import '../search/search_envelope.dart';
 import 'transliteration_service.dart';
 
 /// Smart search service with fuzzy matching, transliteration, and history
@@ -18,202 +18,136 @@ import 'transliteration_service.dart';
 /// - Search history for autocomplete
 /// - Memory cache for fast suggestions
 /// - Result ranking by relevance
+/// Smart search service.
+///
+/// Search itself is a thin client: one request to the server-side search
+/// pipeline, which normalises the query, scores relevance with a hard cutoff
+/// and clusters cross-provider duplicates. This service keeps the local
+/// concerns — history, autocomplete, and spelling suggestions.
 class SmartSearchService {
   static const String _tag = 'SmartSearch';
 
-  /// Fuzzy matching threshold (0-100)
-  /// 75 = allows 1-2 typos
+  /// Fuzzy matching threshold (0-100) used only for local spelling
+  /// suggestions. Search relevance is computed server-side.
   static const int _fuzzyThreshold = 75;
 
-  /// Deduplication threshold (0-100)
-  /// 92 = тільки майже ідентичні назви зливаються; 85 було надто агресивно
-  /// для серіалів де є "Серія 68", "Серія 112" — вони різні але схожі
-  static const int _deduplicationThreshold = 92;
-
-  final SearchService _searchService;
-  // ignore: unused_field - reserved for future provider-specific logic
   final ProviderRegistry _registry;
   final TransliterationService _transliteration;
   final SearchHistoryDao _historyDao;
 
   /// Memory cache for search results (cleared on app restart)
-  final Map<String, AggregatedSearchResult> _memoryCache = {};
+  /// In-memory cache of server envelopes, used to power autocomplete.
+  ///
+  /// Search itself is not served from here: the backend already caches by
+  /// query-plan hash, so a second client-side cache would only add staleness.
+  final Map<String, SearchEnvelope> _memoryCache = {};
 
   /// Cache TTL (10 minutes)
   static const Duration _cacheTtl = Duration(minutes: 10);
   final Map<String, DateTime> _cacheTimestamps = {};
 
-  SmartSearchService(this._searchService, this._registry, this._historyDao)
+  SmartSearchService(this._registry, this._historyDao)
     : _transliteration = TransliterationService();
 
-  /// Perform smart search with transliteration and fuzzy matching
+  /// Perform a search.
   ///
-  /// 1. Generates search variants (transliterated, translated)
-  /// 2. Searches all variants in parallel
-  /// 3. Merges and deduplicates results
-  /// 4. Ranks by relevance
-  /// 5. Saves to history
+  /// The whole pipeline now lives on the server: one request per segment,
+  /// query normalisation, relevance scoring with a hard cutoff, and
+  /// cross-provider clustering. This method issues a SINGLE request and
+  /// renders what comes back — it no longer generates transliteration
+  /// variants, no longer fans out per provider, no longer dedupes and no
+  /// longer runs an isolate for Levenshtein scoring.
+  ///
+  /// That collapse is deliberate. The old client-side pipeline cost up to
+  /// 24 HTTP requests per keystroke-submit, had no relevance floor at all
+  /// (`fuzzyThreshold` was passed into the isolate and never read), and
+  /// deduplicated with a title normaliser whose `[^\w\s]` reduced every
+  /// Cyrillic title to an empty string — because Dart's `\w` is ASCII-only.
+  /// So duplicate merging silently never ran for Ukrainian content.
   Stream<SmartSearchResult> search(
     String query, {
     ContentType? type,
     int page = 1,
   }) {
-    final normalized = _transliteration.normalizeQuery(query);
-    if (normalized.isEmpty) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
       return Stream.value(SmartSearchResult.empty(query));
     }
 
-    // Check memory cache first (emit immediate value)
-    final cacheKey = '$normalized:$type:$page';
-    if (_isCacheValid(cacheKey)) {
-      // If we have full cache, we can just emit it?
-      // But maybe we want to refresh in background?
-      // For now, if cache hit, emit it as single value stream.
-      // Or we can emit it and THEN search fresh if valid-but-stale?
-      // Existing logic used cache as final.
-      return Stream.fromFuture(() async {
-        Logger.d('Cache hit for "$normalized"', tag: _tag);
-        final cached = _memoryCache[cacheKey]!;
-        final ranked = await compute(_processResultsCompute, {
-          'items': cached.allItems,
-          'query': normalized,
-          'fuzzyThreshold': _fuzzyThreshold,
-          'dedupThreshold': _deduplicationThreshold,
-        });
-        return SmartSearchResult(
-          originalQuery: query,
-          normalizedQuery: normalized,
-          searchVariants: [normalized],
-          aggregatedResult: cached,
-          rankedItems: ranked,
-          totalDuration: Duration.zero,
-          fromCache: true,
-        );
-      }());
+    return Stream.fromFuture(_runSearch(query, type: type, page: page));
+  }
+
+  Future<SmartSearchResult> _runSearch(
+    String query, {
+    ContentType? type,
+    int page = 1,
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final provider = _resolveProvider();
+    if (provider == null) {
+      Logger.w('No server-backed provider available; cannot search', tag: _tag);
+      return SmartSearchResult.empty(query);
     }
 
-    final controller = StreamController<SmartSearchResult>();
-    final stopwatch = Stopwatch()..start();
+    try {
+      final envelope = await provider.searchEnvelope(
+        query,
+        type: type,
+        page: page,
+      );
+      stopwatch.stop();
 
-    // Generate variants
-    final variants = _transliteration.generateSearchVariants(query);
-    Logger.d('Search variants for "$query": $variants', tag: _tag);
-
-    // Track state per variant
-    final variantResults = <String, AggregatedSearchResult>{
-      for (var v in variants)
-        v: AggregatedSearchResult(
-          query: v,
-          providerResults: const [],
-          totalDuration: Duration.zero,
-        ),
-    };
-
-    // Throttling Logic
-    Timer? throttleTimer;
-    bool isDirty = false;
-    int completedStreams = 0;
-
-    Future<void> processAndEmit({bool closeAfter = false}) async {
-      isDirty = false;
-
-      // Combine all results
-      final allProviderResults = variantResults.values
-          .expand((r) => r.providerResults)
-          .toList();
-
-      final combinedAggregated = AggregatedSearchResult(
-        query: query,
-        providerResults: allProviderResults,
-        totalDuration: stopwatch.elapsed,
-        isComplete: completedStreams == variants.length,
+      Logger.i(
+        'Search "${envelope.canonical}": ${envelope.items.length} items, '
+        '${envelope.filteredOut} filtered, ${envelope.tookMs}ms server-side',
+        tag: _tag,
       );
 
-      final allItems = combinedAggregated.allItems;
+      final key = _cacheKeyFor(query);
+      _memoryCache[key] = envelope;
+      _cacheTimestamps[key] = DateTime.now();
+      await _saveToHistory(
+        query,
+        envelope.canonical.isEmpty ? query : envelope.canonical,
+        envelope.items.length,
+      );
 
-      // Run heavy compute in isolate
-      try {
-        final ranked = await compute(_processResultsCompute, {
-          'items': allItems,
-          'query': normalized,
-          'fuzzyThreshold': _fuzzyThreshold,
-          'dedupThreshold': _deduplicationThreshold,
-        });
-
-        if (!controller.isClosed) {
-          final result = SmartSearchResult(
-            originalQuery: query,
-            normalizedQuery: normalized,
-            searchVariants: variants,
-            aggregatedResult: combinedAggregated,
-            rankedItems: ranked,
-            totalDuration: stopwatch.elapsed,
-            fromCache: false,
-          );
-
-          if (completedStreams == variants.length) {
-            _memoryCache[cacheKey] = combinedAggregated;
-            _cacheTimestamps[cacheKey] = DateTime.now();
-
-            Logger.i(
-              'Smart search completed: ${ranked.length} results in ${stopwatch.elapsedMilliseconds}ms',
-              tag: _tag,
-            );
-            await _saveToHistory(query, normalized, ranked.length);
-          }
-
-          controller.add(result);
-        }
-      } catch (e) {
-        Logger.e('Error processing search results', tag: _tag, error: e);
-      } finally {
-        if (closeAfter && !controller.isClosed) {
-          controller.close();
-          stopwatch.stop();
-        }
-      }
+      return SmartSearchResult.fromEnvelope(
+        originalQuery: query,
+        envelope: envelope,
+        totalDuration: stopwatch.elapsed,
+      );
+    } catch (e, st) {
+      stopwatch.stop();
+      Logger.e(
+        'Search failed for "$query"',
+        tag: _tag,
+        error: e,
+        stackTrace: st,
+      );
+      // Surfaced as an error rather than an empty result so the UI can tell a
+      // dead backend from a genuinely empty catalogue.
+      return SmartSearchResult.error(
+        query,
+        totalDuration: stopwatch.elapsed,
+        error: e.toString(),
+      );
     }
-
-    void onUpdate() {
-      if (throttleTimer?.isActive ?? false) {
-        isDirty = true;
-      } else {
-        processAndEmit();
-        throttleTimer = Timer(const Duration(milliseconds: 100), () {
-          if (isDirty) processAndEmit();
-          throttleTimer = null;
-        });
-      }
-    }
-
-    // Launch streams
-    for (final variant in variants) {
-      _searchService
-          .searchStream(variant, type: type, page: page)
-          .listen(
-            (event) {
-              variantResults[variant] = event;
-              onUpdate();
-            },
-            onError: (e) {
-              Logger.w(
-                'Search error for variant $variant',
-                tag: _tag,
-                error: e,
-              );
-            },
-            onDone: () {
-              completedStreams++;
-              if (completedStreams == variants.length) {
-                throttleTimer?.cancel(); // Cancel pending
-                processAndEmit(closeAfter: true); // Final emit
-              }
-            },
-          );
-    }
-
-    return controller.stream;
   }
+
+  /// The provider that can serve the server-side envelope.
+  ///
+  /// Bandera is the one provider that fronts an aggregator, so it is the
+  /// only sensible target. Falling back to "any server-backed provider" would
+  /// reintroduce per-provider fan-out against scrapers, which is exactly the
+  /// ban surface we closed.
+  ServerBackedProvider? _resolveProvider() {
+    final bandera = _registry.getById('bandera');
+    if (bandera is ServerBackedProvider) return bandera;
+    return null;
+  }
+
+  String _cacheKeyFor(String query) => query.toLowerCase().trim();
 
   /// Get quick suggestions from history and memory cache
   Future<List<SearchSuggestion>> getSuggestions(
@@ -260,35 +194,11 @@ class SmartSearchService {
       }
     }
 
-    // 3. Get live suggestions from providers (fast timeout)
-    if (suggestions.length < limit) {
-      try {
-        final liveSuggestions = await _searchService.getSuggestions(
-          query,
-          maxPerProvider: 2,
-          maxTotal: limit - suggestions.length,
-        );
-
-        for (final item in liveSuggestions) {
-          if (suggestions.length >= limit) break;
-
-          // Add as title suggestion
-          if (!suggestions.any(
-            (s) => s.text.toLowerCase() == item.title.toLowerCase(),
-          )) {
-            suggestions.add(
-              SearchSuggestion(
-                text: item.title,
-                type: SuggestionType.live,
-                mediaItem: item,
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        Logger.w('Failed to get live suggestions: $e', tag: _tag);
-      }
-    }
+    // Live provider suggestions are intentionally gone. They fanned out to the
+    // DLE scrapers on every keystroke, which is the exact request pattern that
+    // gets a client IP blocked. Autocomplete is served from local history and
+    // the envelopes this device has already fetched; the backend, not the
+    // phone, is the right place to add remote type-ahead if it is ever needed.
 
     return suggestions.take(limit).toList();
   }
@@ -354,15 +264,6 @@ class SmartSearchService {
   // Private methods
   // =========================================================================
 
-  bool _isCacheValid(String key) {
-    if (!_memoryCache.containsKey(key)) return false;
-
-    final timestamp = _cacheTimestamps[key];
-    if (timestamp == null) return false;
-
-    return DateTime.now().difference(timestamp) < _cacheTtl;
-  }
-
   Future<void> _saveToHistory(
     String query,
     String normalizedQuery,
@@ -378,134 +279,89 @@ class SmartSearchService {
       Logger.w('Failed to save search history: $e', tag: _tag);
     }
   }
-
-  /// Process results in isolate (deduplication + ranking)
-  static List<MediaItem> _processResultsCompute(Map<String, dynamic> args) {
-    final items = args['items'] as List<MediaItem>;
-    final query = args['query'] as String;
-    final fuzzyThreshold = args['fuzzyThreshold'] as int;
-    final dedupThreshold = args['dedupThreshold'] as int;
-
-    // 1. Deduplicate
-    final unique = <MediaItem>[];
-    final seenTitles = <String>[];
-
-    for (final item in items) {
-      final normalizedTitle = item.title.toLowerCase().trim();
-      bool isDuplicate = false;
-      for (final seen in seenTitles) {
-        final similarity = ratio(normalizedTitle, seen);
-        if (similarity >= dedupThreshold) {
-          isDuplicate = true;
-          break;
-        }
-      }
-      if (!isDuplicate) {
-        unique.add(item);
-        seenTitles.add(normalizedTitle);
-      }
-    }
-
-    // 2. Rank
-    final scored = unique.map((item) {
-      final score = _calculateRelevanceScoreStatic(item, query, fuzzyThreshold);
-      return _ScoredItem(item, score);
-    }).toList();
-
-    scored.sort((a, b) => b.score.compareTo(a.score));
-    return scored.map((s) => s.item).toList();
-  }
-
-  static double _calculateRelevanceScoreStatic(
-    MediaItem item,
-    String query,
-    int fuzzyThreshold,
-  ) {
-    var score = 0.0;
-    final normalizedTitle = item.title.toLowerCase().trim();
-    final normalizedQuery = query.toLowerCase().trim();
-
-    // Точний збіг назви — максимальний пріоритет
-    if (normalizedTitle == normalizedQuery) {
-      score += 150;
-    } else if (normalizedTitle.startsWith(normalizedQuery)) {
-      score += 80;
-    } else if (normalizedTitle.contains(normalizedQuery)) {
-      score += 40;
-    }
-
-    // Fuzzy similarity
-    final similarity = ratio(normalizedTitle, normalizedQuery);
-    score += similarity * 0.5;
-
-    // Рейтинг
-    if (item.rating != null) {
-      score += item.rating! * 2;
-    }
-
-    // Бонус за свіжий контент (але слабший ніж раніше)
-    if (item.year != null) {
-      final yearsOld = DateTime.now().year - item.year!;
-      if (yearsOld < 5) {
-        score += (5 - yearsOld) * 1.5;
-      }
-    }
-
-    // Невеликий бонус за наявність постеру
-    if (item.posterUrl != null && item.posterUrl!.isNotEmpty) {
-      score += 5;
-    }
-
-    // Штраф за заголовки-серії типу "Серія 101 Великолепный" — вони менш релевантні
-    // як результат пошуку назви серіалу, ніж сам серіал
-    if (normalizedTitle.contains('серия') ||
-        normalizedTitle.contains('серія') ||
-        RegExp(r'^(episode|ep\.?\s*\d+|\d+\s*серия|\d+\s*серія)').hasMatch(normalizedTitle)) {
-      score -= 15;
-    }
-
-    return score;
-  }
 }
 
 /// Result of smart search
 class SmartSearchResult {
   final String originalQuery;
   final String normalizedQuery;
-  final List<String> searchVariants;
-  final AggregatedSearchResult aggregatedResult;
-  final List<MediaItem> rankedItems;
+  final SearchEnvelope envelope;
   final Duration totalDuration;
   final bool fromCache;
+  final String? error;
 
   const SmartSearchResult({
     required this.originalQuery,
     required this.normalizedQuery,
-    required this.searchVariants,
-    required this.aggregatedResult,
-    required this.rankedItems,
+    required this.envelope,
     required this.totalDuration,
-    required this.fromCache,
+    this.fromCache = false,
+    this.error,
   });
+
+  /// Build from the server envelope. Ranking and dedup are already done
+  /// server-side, so [rankedItems] is a straight projection of
+  /// [envelope.items] — the client never reorders or re-merges.
+  factory SmartSearchResult.fromEnvelope({
+    required String originalQuery,
+    required SearchEnvelope envelope,
+    required Duration totalDuration,
+    bool fromCache = false,
+  }) {
+    return SmartSearchResult(
+      originalQuery: originalQuery,
+      normalizedQuery: envelope.canonical.isEmpty
+          ? originalQuery
+          : envelope.canonical,
+      envelope: envelope,
+      totalDuration: totalDuration,
+      fromCache: fromCache,
+    );
+  }
 
   factory SmartSearchResult.empty(String query) {
     return SmartSearchResult(
       originalQuery: query,
       normalizedQuery: query,
-      searchVariants: [],
-      aggregatedResult: AggregatedSearchResult(
-        query: query,
-        providerResults: [],
-        totalDuration: Duration.zero,
-      ),
-      rankedItems: [],
+      envelope: SearchEnvelope.empty(query),
       totalDuration: Duration.zero,
-      fromCache: false,
     );
   }
 
-  bool get isEmpty => rankedItems.isEmpty;
-  int get totalCount => rankedItems.length;
+  /// A failure that the UI must show as a failure, not as "no results".
+  factory SmartSearchResult.error(
+    String query, {
+    required Duration totalDuration,
+    required String error,
+  }) {
+    return SmartSearchResult(
+      originalQuery: query,
+      normalizedQuery: query,
+      envelope: SearchEnvelope.empty(query),
+      totalDuration: totalDuration,
+      error: error,
+    );
+  }
+
+  /// Scored items, already ranked and clustered by the server.
+  List<ScoredMediaItem> get scoredItems => envelope.items;
+
+  /// Plain items for the card grid.
+  List<MediaItem> get rankedItems => envelope.items.map((s) => s.item).toList();
+
+  bool get isEmpty => envelope.items.isEmpty;
+
+  /// True when the search failed rather than finding nothing.
+  bool get hasError => error != null;
+
+  int get totalCount => envelope.items.length;
+
+  /// Candidates the server dropped for low relevance. Shown in the UI so a
+  /// heavily filtered search is visibly different from an empty catalogue.
+  int get filteredOut => envelope.filteredOut;
+
+  /// Sources that could not be reached, for the "N sources unavailable" banner.
+  List<SearchSourceStatus> get failedSources => envelope.failedSources;
 }
 
 /// Search suggestion type
@@ -528,12 +384,4 @@ class SearchSuggestion {
     this.searchCount,
     this.mediaItem,
   });
-}
-
-/// Helper class for sorting
-class _ScoredItem {
-  final MediaItem item;
-  final double score;
-
-  _ScoredItem(this.item, this.score);
 }
