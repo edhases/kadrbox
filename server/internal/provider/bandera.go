@@ -1,29 +1,22 @@
 package provider
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
 )
 
-const (
-	BanderaDefaultBaseURL = "https://bbe.lme.isroot.in/api/v2"
-	BanderaDefaultSources = "bambooua,makhno,animeon,franko,starlight"
-)
-
+// BanderaProvider є агрегатором українського контенту (Lampa/Bandera Online API).
 type BanderaProvider struct {
-	httpClient *http.Client
-	baseURL    string
-	sources    string
+	client  *BanderaClient
+	sources string
 }
 
 func NewBanderaProvider() *BanderaProvider {
@@ -31,22 +24,13 @@ func NewBanderaProvider() *BanderaProvider {
 }
 
 func NewBanderaProviderWithConfig(baseURL, sources string, client *http.Client) *BanderaProvider {
-	if baseURL == "" {
-		baseURL = BanderaDefaultBaseURL
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	bClient := NewBanderaClient(baseURL, client)
 	if sources == "" {
 		sources = BanderaDefaultSources
 	}
-	if client == nil {
-		client = &http.Client{
-			Timeout: 15 * time.Second,
-		}
-	}
 	return &BanderaProvider{
-		httpClient: client,
-		baseURL:    baseURL,
-		sources:    sources,
+		client:  bClient,
+		sources: sources,
 	}
 }
 
@@ -59,259 +43,116 @@ func (p *BanderaProvider) Name() string {
 }
 
 func (p *BanderaProvider) BaseURL() string {
-	return p.baseURL
+	return p.client.baseURL
 }
 
 func (p *BanderaProvider) Describe() domain.ProviderInfo {
 	return domain.ProviderInfo{
 		ID:                   p.ID(),
 		Name:                 p.Name(),
-		BaseURL:              p.baseURL,
-		ShowOnHome:           true,
+		BaseURL:              p.BaseURL(),
+		ShowOnHome:           false, // Поки GetPopular не є справжнім рейтингом, вимикаємо показ на головній
+		SearchEnabledDefault: true,
 		HasFixedStreams:      false,
 		ContentTypes:         []string{"movie", "series", "anime"},
-		SearchEnabledDefault: true,
 	}
 }
 
-// BBE Search API Structures
-type bbeSearchResponse struct {
-	OK    bool            `json:"ok"`
-	Items []bbeSearchItem `json:"items"`
+func generateStableContentID(source, title string, year int, ref json.RawMessage) string {
+	h := sha1.New()
+	h.Write([]byte(source))
+	h.Write([]byte(":"))
+	h.Write([]byte(title))
+	h.Write([]byte(":"))
+	h.Write([]byte(strconv.Itoa(year)))
+	if len(ref) > 0 {
+		h.Write([]byte(":"))
+		h.Write(ref)
+	}
+	return "bo_" + source + "_" + hex.EncodeToString(h.Sum(nil))[:10]
 }
 
-type bbeSearchItem struct {
-	Source    string          `json:"source"`
-	Title     string          `json:"title"`
-	TitleEn   string          `json:"title_en"`
-	Poster    string          `json:"poster"`
-	Type      string          `json:"type"`
-	Year      json.RawMessage `json:"year"`
-	Ref       json.RawMessage `json:"ref"`
-	GroupKey  string          `json:"group_key"`
-}
-
-// BanderaItemPayload зберігається у MediaItem.URL та серіалізується у json
-type BanderaItemPayload struct {
-	Source string          `json:"source"`
-	Ref    json.RawMessage `json:"ref"`
-	Type   string          `json:"type,omitempty"`
-	Title  string          `json:"title,omitempty"`
-	Poster string          `json:"poster,omitempty"`
-	Year   int             `json:"year,omitempty"`
-}
-
+// Search виконує пошук у Bandera Online
 func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
-	reqURL := fmt.Sprintf("%s/search?sources=%s&title=%s", p.baseURL, url.QueryEscape(p.sources), url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	items, err := p.client.Search(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("create search request: %w", err)
+		return nil, fmt.Errorf("bandera search (%s): %w", query, err)
 	}
 
-	req.Header.Set("User-Agent", "OxideFilm/1.0 (Bandera)")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("search request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("search returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var searchResp bbeSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, fmt.Errorf("decode search response: %w", err)
-	}
-
-	var items []domain.MediaItem
-	for i, item := range searchResp.Items {
-		itemType := item.Type
-		if itemType == "" {
-			itemType = "movie"
-		}
-
-		yearInt := parseYearFromRaw(item.Year)
+	var results []domain.MediaItem
+	for _, item := range items {
+		year := ParseFlexibleYear(item.Year)
+		stableID := generateStableContentID(item.Source, item.Title, year, item.Ref)
 
 		payload := BanderaItemPayload{
-			Source: item.Source,
-			Ref:    item.Ref,
-			Type:   itemType,
-			Title:  item.Title,
-			Poster: item.Poster,
-			Year:   yearInt,
+			ID:        stableID,
+			Source:    item.Source,
+			Ref:       item.Ref,
+			Type:      item.Type.String(),
+			Title:     item.Title,
+			Poster:    item.Poster.String(),
+			Year:      year,
+			IsItemRef: true,
 		}
+
 		payloadBytes, err := json.Marshal(payload)
 		if err != nil {
 			continue
 		}
-		itemURL := string(payloadBytes)
 
-		// Унікальний ID
-		itemID := fmt.Sprintf("bo_%s_%d", item.Source, i)
-		var refMap map[string]interface{}
-		if err := json.Unmarshal(item.Ref, &refMap); err == nil {
-			if idVal, ok := refMap["id"]; ok {
-				itemID = fmt.Sprintf("bo_%s_%v", item.Source, idVal)
-			} else if hrefVal, ok := refMap["href"].(string); ok && hrefVal != "" {
-				itemID = fmt.Sprintf("bo_%s_%s", item.Source, hrefVal)
-			}
+		mediaType := item.Type.String()
+		if mediaType == "" {
+			mediaType = "movie"
 		}
 
-		items = append(items, domain.MediaItem{
-			ID:            itemID,
+		results = append(results, domain.MediaItem{
+			ID:            stableID,
 			ProviderID:    p.ID(),
 			Title:         item.Title,
-			OriginalTitle: item.TitleEn,
-			PosterURL:     item.Poster,
-			Year:          yearInt,
-			Type:          itemType,
-			URL:           itemURL,
+			OriginalTitle: item.TitleEn.String(),
+			PosterURL:     item.Poster.String(),
+			Year:          year,
+			Type:          mediaType,
+			URL:           string(payloadBytes),
 		})
 	}
 
-	return items, nil
+	return results, nil
 }
 
+// GetPopular виконує пошук типових назв як фолбек популярного
 func (p *BanderaProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
-	// BBE API v2 не має окремого каталогу популярного.
-	// Виконуємо кілька паралельних запитів по популярних термінах і об'єднуємо результати.
-	var queries []string
-	switch contentType {
-	case "series":
-		queries = []string{"серіал", "серіали", "сезон"}
-	case "anime":
-		queries = []string{"аніме", "anime"}
-	case "cartoon":
-		queries = []string{"мультфільм", "мультсеріал"}
-	case "dorama":
-		queries = []string{"дорама", "dorama"}
-	default:
-		// movie або all — беремо загальні популярні
-		queries = []string{"фільм", "бойовик", "комедія", "драма"}
-	}
-
-	// Ротація за page щоб різні сторінки давали різні результати
+	queries := []string{"фільм", "серіал", "мультфільм", "2024", "2023"}
 	if page < 1 {
 		page = 1
 	}
-	query := queries[(page-1)%len(queries)]
-
-	return p.Search(ctx, query)
+	q := queries[(page-1)%len(queries)]
+	return p.Search(ctx, q)
 }
 
+// GetNew перенаправляє на GetPopular
+func (p *BanderaProvider) GetNew(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
+	return p.GetPopular(ctx, contentType, page)
+}
+
+// GetByCategory перенаправляє на Search за назвою категорії
 func (p *BanderaProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
 	if category == "" {
 		return p.GetPopular(ctx, contentType, page)
 	}
-	// category може бути жанром ("Драма", "drama", "action" тощо)
 	return p.Search(ctx, category)
 }
 
-
-// BBE Content API Structures
-type bbeContentRequest struct {
-	Source string          `json:"source"`
-	Ref    json.RawMessage `json:"ref"`
-}
-
-type bbeContentResponse struct {
-	OK      bool              `json:"ok"`
-	Source  string            `json:"source"`
-	Type    string            `json:"type"`
-	Info    *bbeContentInfo   `json:"info"`
-	Streams []bbeMovieStream  `json:"streams"`
-	Voices  []bbeVoiceover    `json:"voices"`
-	Seasons []bbeSimpleSeason `json:"seasons"`
-}
-
-type bbeContentInfo struct {
-	ID          interface{} `json:"id"`
-	Title       *string     `json:"title"`
-	TitleEn     *string     `json:"title_en"`
-	Description *string     `json:"description"`
-	ReleaseDate *string     `json:"release_date"`
-	EpisodeTime *string     `json:"episode_time"`
-	Trailer     *string     `json:"trailer"`
-	Rating      *string     `json:"rating"`
-	Genres      []string    `json:"genres"`
-	Image       string      `json:"image"`
-}
-
-type bbeMovieStream struct {
-	Title string          `json:"title"`
-	Ref   json.RawMessage `json:"ref"`
-}
-
-type bbeVoiceover struct {
-	ID          string            `json:"id"`
-	DisplayName string            `json:"display_name"`
-	Seasons     []bbeVoiceSeason  `json:"seasons"`
-	Episodes    []bbeVoiceEpisode `json:"episodes"`
-}
-
-type bbeVoiceSeason struct {
-	Title    interface{}       `json:"title"`
-	Episodes []bbeVoiceEpisode `json:"episodes"`
-}
-
-type bbeVoiceEpisode struct {
-	Number int             `json:"number"`
-	Title  *string         `json:"title"`
-	Ref    json.RawMessage `json:"ref"`
-}
-
-type bbeSimpleSeason struct {
-	Title      string `json:"title"`
-	SeasonSlug string `json:"season_slug"`
-}
-
-// Stream Ref Wrapper зберігає ref епізоду або фільму разом із source
-type BanderaStreamRef struct {
-	Source string          `json:"source"`
-	Ref    json.RawMessage `json:"ref"`
-}
-
+// GetDetails розбирає карточку контенту, формує сезони, серії та озвучки
 func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*domain.MediaDetails, error) {
 	var payload BanderaItemPayload
 	if err := json.Unmarshal([]byte(itemURL), &payload); err != nil {
 		return nil, fmt.Errorf("invalid item url payload: %w", err)
 	}
 
-	reqBody, err := json.Marshal(bbeContentRequest{
-		Source: payload.Source,
-		Ref:    payload.Ref,
-	})
+	contentResp, err := p.client.GetContent(ctx, payload.Source, payload.Ref)
 	if err != nil {
-		return nil, fmt.Errorf("marshal content request: %w", err)
-	}
-
-	contentURL := fmt.Sprintf("%s/content", p.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, contentURL, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("create content request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "OxideFilm/1.0 (Bandera)")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("content request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("content returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var contentResp bbeContentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&contentResp); err != nil {
-		return nil, fmt.Errorf("decode content response: %w", err)
+		return nil, fmt.Errorf("bandera get content: %w", err)
 	}
 
 	title := payload.Title
@@ -321,41 +162,36 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 	year := payload.Year
 	duration := ""
 	trailerURL := ""
-	genres := []string{}
+	var genres []string
 	var rating float64
 
 	if contentResp.Info != nil {
-		if contentResp.Info.Title != nil && *contentResp.Info.Title != "" {
-			title = *contentResp.Info.Title
+		if contentResp.Info.Title.String() != "" {
+			title = contentResp.Info.Title.String()
 		}
-		if contentResp.Info.TitleEn != nil && *contentResp.Info.TitleEn != "" {
-			originalTitle = *contentResp.Info.TitleEn
+		if contentResp.Info.TitleEn.String() != "" {
+			originalTitle = contentResp.Info.TitleEn.String()
 		}
-		if contentResp.Info.Description != nil {
-			description = *contentResp.Info.Description
+		if contentResp.Info.Description.String() != "" {
+			description = contentResp.Info.Description.String()
 		}
-		if contentResp.Info.Image != "" {
-			posterURL = contentResp.Info.Image
+		if contentResp.Info.Image.String() != "" {
+			posterURL = contentResp.Info.Image.String()
 		}
-		if contentResp.Info.ReleaseDate != nil && *contentResp.Info.ReleaseDate != "" {
-			if y, err := strconv.Atoi(strings.TrimSpace(*contentResp.Info.ReleaseDate)); err == nil && y > 1900 {
-				year = y
+		if y := ParseFlexibleYear(contentResp.Info.Year); y > 0 {
+			year = y
+		} else if contentResp.Info.ReleaseDate.String() != "" {
+			rd := contentResp.Info.ReleaseDate.String()
+			if len(rd) >= 4 {
+				if parsedY, err := strconv.Atoi(rd[:4]); err == nil && parsedY >= 1900 && parsedY <= 2100 {
+					year = parsedY
+				}
 			}
 		}
-		if contentResp.Info.EpisodeTime != nil {
-			duration = *contentResp.Info.EpisodeTime
-		}
-		if contentResp.Info.Trailer != nil {
-			trailerURL = *contentResp.Info.Trailer
-		}
-		if len(contentResp.Info.Genres) > 0 {
-			genres = contentResp.Info.Genres
-		}
-		if contentResp.Info.Rating != nil && *contentResp.Info.Rating != "" {
-			if r, err := strconv.ParseFloat(strings.TrimSpace(*contentResp.Info.Rating), 64); err == nil {
-				rating = r
-			}
-		}
+		duration = contentResp.Info.EpisodeTime.String()
+		trailerURL = contentResp.Info.Trailer.String()
+		genres = contentResp.Info.Genres
+		rating = contentResp.Info.Rating.Float64()
 	}
 
 	resolvedType := payload.Type
@@ -369,80 +205,63 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 	var voiceovers []domain.Voiceover
 	var seasons []domain.Season
 
-	// Якщо є voices (серіали або мультиваріантні джерела)
+	// Якщо є голоси/озвучки (серіали або багатоваріантний дубляж)
 	if len(contentResp.Voices) > 0 {
 		for _, v := range contentResp.Voices {
-			voiceName := v.DisplayName
-			if voiceName == "" {
-				voiceName = v.ID
+			vName := v.DisplayName.String()
+			if vName == "" {
+				vName = v.ID.String()
 			}
 			voiceovers = append(voiceovers, domain.Voiceover{
-				ID:   v.ID,
-				Name: voiceName,
+				ID:   v.ID.String(),
+				Name: vName,
 			})
 		}
 
-		// Беремо перший voiceover як дефолтний для побудови дерева Seasons / Episodes
-		defaultVoice := contentResp.Voices[0]
-		if len(defaultVoice.Seasons) > 0 {
-			for idx, s := range defaultVoice.Seasons {
-				seasonNum := idx + 1
-				switch t := s.Title.(type) {
-				case float64:
-					seasonNum = int(t)
-				case string:
-					if n, err := strconv.Atoi(t); err == nil {
-						seasonNum = n
-					}
-				}
-
+		// Для першої версії будуємо сезони з першої доступної озвучки (Крок 3 розширить це до per-voice)
+		primaryVoice := contentResp.Voices[0]
+		if len(primaryVoice.Seasons) > 0 {
+			for sIdx, s := range primaryVoice.Seasons {
+				sNum := ParseSeasonNumber(s.Title, sIdx+1)
 				var episodes []domain.Episode
 				for _, ep := range s.Episodes {
-					epTitle := ""
-					if ep.Title != nil {
-						epTitle = *ep.Title
-					}
+					epTitle := ep.Title.String()
 					if epTitle == "" {
-						epTitle = fmt.Sprintf("Серія %d", ep.Number)
+						epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
 					}
-
-					epRefBytes, _ := json.Marshal(BanderaStreamRef{
-						Source: payload.Source,
-						Ref:    ep.Ref,
+					streamRefBytes, _ := json.Marshal(BanderaStreamRef{
+						Source:      payload.Source,
+						Ref:         ep.Ref,
+						IsStreamRef: true,
 					})
-
 					episodes = append(episodes, domain.Episode{
-						Number: ep.Number,
+						Number: ep.Number.Int(),
 						Title:  epTitle,
-						URL:    string(epRefBytes),
+						URL:    string(streamRefBytes),
 					})
 				}
-
 				seasons = append(seasons, domain.Season{
-					Number:   seasonNum,
-					Title:    fmt.Sprintf("Сезон %d", seasonNum),
+					Number:   sNum,
+					Title:    fmt.Sprintf("Сезон %d", sNum),
 					Episodes: episodes,
 				})
 			}
-		} else if len(defaultVoice.Episodes) > 0 {
-			// Якщо епізоди безпосередньо у voiceover
+		} else if len(primaryVoice.Episodes) > 0 {
 			var episodes []domain.Episode
-			for _, ep := range defaultVoice.Episodes {
-				epTitle := ""
-				if ep.Title != nil {
-					epTitle = *ep.Title
-				}
+			for _, ep := range primaryVoice.Episodes {
+				epTitle := ep.Title.String()
 				if epTitle == "" {
-					epTitle = fmt.Sprintf("Серія %d", ep.Number)
+					epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
 				}
-				epRefBytes, _ := json.Marshal(BanderaStreamRef{
-					Source: payload.Source,
-					Ref:    ep.Ref,
+				streamRefBytes, _ := json.Marshal(BanderaStreamRef{
+					Source:      payload.Source,
+					Ref:         ep.Ref,
+					IsStreamRef: true,
 				})
 				episodes = append(episodes, domain.Episode{
-					Number: ep.Number,
+					Number: ep.Number.Int(),
 					Title:  epTitle,
-					URL:    string(epRefBytes),
+					URL:    string(streamRefBytes),
 				})
 			}
 			seasons = append(seasons, domain.Season{
@@ -452,9 +271,9 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 			})
 		}
 	} else if len(contentResp.Streams) > 0 {
-		// Для фільмів зі streams
+		// Для фільмів зі списком стрімів
 		for i, st := range contentResp.Streams {
-			vName := st.Title
+			vName := st.Title.String()
 			if vName == "" {
 				vName = fmt.Sprintf("Джерело %d", i+1)
 			}
@@ -465,9 +284,14 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 		}
 	}
 
-	details := &domain.MediaDetails{
+	stableID := payload.ID
+	if stableID == "" {
+		stableID = generateStableContentID(payload.Source, title, year, payload.Ref)
+	}
+
+	return &domain.MediaDetails{
 		MediaItem: domain.MediaItem{
-			ID:            payload.Source + "_" + strconv.Itoa(year) + "_" + title,
+			ID:            stableID,
 			ProviderID:    p.ID(),
 			Title:         title,
 			OriginalTitle: originalTitle,
@@ -483,223 +307,127 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 		TrailerURL:  trailerURL,
 		Seasons:     seasons,
 		Voiceovers:  voiceovers,
+	}, nil
+}
+
+// GetStreams повертає стріми для відтворення.
+// Динамічно визначає, чи передано готовий StreamRef чи карточку контенту.
+func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
+	var targetSource string
+	var targetStreamRef json.RawMessage
+	var itemSubtitles []BanderaSubtitleItem
+
+	// 1. Отримуємо метадані джерел (inputs.stream) з кешу /sources
+	sourcesMeta, _ := p.client.GetSources(ctx)
+
+	// 2. Спробуємо розпарсити як прямий BanderaStreamRef
+	var directRef BanderaStreamRef
+	var itemPayload BanderaItemPayload
+
+	isDirectStream := false
+	if err := json.Unmarshal([]byte(itemURL), &directRef); err == nil && directRef.IsStreamRef {
+		isDirectStream = true
+		targetSource = directRef.Source
+		targetStreamRef = directRef.Ref
+	} else if err := json.Unmarshal([]byte(itemURL), &directRef); err == nil && len(directRef.Ref) > 0 && directRef.Source != "" {
+		// Перевіримо через inputs.stream джерела, чи це посилання на стрім!
+		meta := sourcesMeta[directRef.Source]
+		if IsStreamRef(meta, directRef.Ref) {
+			isDirectStream = true
+			targetSource = directRef.Source
+			targetStreamRef = directRef.Ref
+		}
 	}
 
-	return details, nil
-}
-
-// BBE Stream API Structures
-type bbeStreamRequest struct {
-	Source string          `json:"source"`
-	Ref    json.RawMessage `json:"ref"`
-}
-
-type bbeStreamResponse struct {
-	OK      bool              `json:"ok"`
-	Source  string            `json:"source"`
-	Streams []bbeStreamSource `json:"streams"`
-}
-
-type bbeStreamSource struct {
-	URL     string `json:"url"`
-	Quality string `json:"quality"`
-}
-
-func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
-	var streamRef BanderaStreamRef
-
-	// Перевіряємо чи itemURL сам по собі є BanderaStreamRef
-	if err := json.Unmarshal([]byte(itemURL), &streamRef); err == nil && len(streamRef.Ref) > 0 && streamRef.Source != "" {
-		// Якщо передано конкретний stream ref (наприклад, з URL епізоду)
-	} else {
-		// Якщо передано базовий itemURL медіа — запитуємо /content
-		var payload BanderaItemPayload
-		if err := json.Unmarshal([]byte(itemURL), &payload); err != nil {
+	// 3. Якщо це не прямий stream ref — значить це карточка контенту (фільм/серіал), робимо /content
+	if !isDirectStream {
+		if err := json.Unmarshal([]byte(itemURL), &itemPayload); err != nil {
 			return nil, fmt.Errorf("invalid item url: %w", err)
 		}
+		targetSource = itemPayload.Source
 
-		contentReqBody, err := json.Marshal(bbeContentRequest{
-			Source: payload.Source,
-			Ref:    payload.Ref,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("marshal content request: %w", err)
-		}
-
-		contentURL := fmt.Sprintf("%s/content", p.baseURL)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, contentURL, bytes.NewReader(contentReqBody))
-		if err != nil {
-			return nil, fmt.Errorf("create content request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", "OxideFilm/1.0 (Bandera)")
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := p.httpClient.Do(req)
+		contentResp, err := p.client.GetContent(ctx, itemPayload.Source, itemPayload.Ref)
 		if err != nil {
 			return nil, fmt.Errorf("content request for stream: %w", err)
 		}
-		defer resp.Body.Close()
-
-		var contentResp bbeContentResponse
-		if err := json.NewDecoder(resp.Body).Decode(&contentResp); err != nil {
-			return nil, fmt.Errorf("decode content response: %w", err)
-		}
 
 		if len(contentResp.Streams) > 0 {
-			// Якщо це фільм зі списком streams
+			// Якщо це фільм
 			streamIdx := 0
 			if voiceID != "" {
 				if idx, err := strconv.Atoi(voiceID); err == nil && idx < len(contentResp.Streams) {
 					streamIdx = idx
 				}
 			}
-			streamRef = BanderaStreamRef{
-				Source: payload.Source,
-				Ref:    contentResp.Streams[streamIdx].Ref,
-			}
+			st := contentResp.Streams[streamIdx]
+			targetStreamRef = st.Ref
+			itemSubtitles = st.Subtitles
 		} else if len(contentResp.Voices) > 0 {
-			// Якщо це серіал або мультиваріант
-			chosenVoice := contentResp.Voices[0]
-			if voiceID != "" {
-				for _, v := range contentResp.Voices {
-					if v.ID == voiceID {
-						chosenVoice = v
-						break
-					}
-				}
-			}
-
-			found := false
-			if len(chosenVoice.Seasons) > 0 {
-				for sIdx, s := range chosenVoice.Seasons {
-					sNum := sIdx + 1
-					switch t := s.Title.(type) {
-					case float64:
-						sNum = int(t)
-					case string:
-						if n, err := strconv.Atoi(t); err == nil {
-							sNum = n
-						}
-					}
-
-					if season > 0 && sNum != season {
-						continue
-					}
-
-					for _, ep := range s.Episodes {
-						if episode > 0 && ep.Number != episode {
-							continue
-						}
-						streamRef = BanderaStreamRef{
-							Source: payload.Source,
-							Ref:    ep.Ref,
-						}
-						found = true
-						break
-					}
-					if found {
-						break
-					}
-				}
-			} else if len(chosenVoice.Episodes) > 0 {
-				for _, ep := range chosenVoice.Episodes {
-					if episode > 0 && ep.Number != episode {
-						continue
-					}
-					streamRef = BanderaStreamRef{
-						Source: payload.Source,
-						Ref:    ep.Ref,
-					}
-					found = true
-					break
-				}
-			}
-
+			// Якщо це серіал
+			ref, subs, found := SelectEpisodeRef(contentResp.Voices, season, episode, voiceID)
 			if !found {
 				return nil, fmt.Errorf("no matching stream found for season %d episode %d voice %s", season, episode, voiceID)
 			}
+			targetStreamRef = ref
+			itemSubtitles = subs
 		} else {
 			return nil, fmt.Errorf("no streams or voices found in content response")
 		}
 	}
 
-	streamReqBody, err := json.Marshal(bbeStreamRequest{
-		Source: streamRef.Source,
-		Ref:    streamRef.Ref,
-	})
+	// 4. Валідація: чи містить targetStreamRef хоч один ключ із streamKeys відповідного джерела.
+	// Це запобігає надсиланню невалідного запиту в мережу та поверненню 400 MISSING_URL.
+	meta := sourcesMeta[targetSource]
+	if err := ValidateStreamRef(meta, targetStreamRef); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnresolvablePlayer, err)
+	}
+
+	// 5. Запитуємо /stream (ніколи не мемоізується, бо URL можуть бути підписаними)
+	streamResp, err := p.client.GetStream(ctx, targetSource, targetStreamRef)
 	if err != nil {
-		return nil, fmt.Errorf("marshal stream request: %w", err)
+		return nil, fmt.Errorf("stream request failed: %w", err)
 	}
 
-	streamURL := fmt.Sprintf("%s/stream", p.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, streamURL, bytes.NewReader(streamReqBody))
-	if err != nil {
-		return nil, fmt.Errorf("create stream request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "OxideFilm/1.0 (Bandera)")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("stream request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("stream returned status %d: %s", resp.StatusCode, string(body))
+	if !streamResp.OK && streamResp.Error.String() != "" {
+		return nil, fmt.Errorf("stream api error (%s): %s", streamResp.ErrorCode, streamResp.Error)
 	}
 
-	var streamResp bbeStreamResponse
-	if err := json.NewDecoder(resp.Body).Decode(&streamResp); err != nil {
-		return nil, fmt.Errorf("decode stream response: %w", err)
-	}
-
+	// 6. Формуємо стріми з урахуванням правил proxy та заголовків
 	var streams []domain.StreamSource
-	headers := map[string]string{
-		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-	}
-
 	for _, s := range streamResp.Streams {
-		if s.URL == "" {
+		rawURL := s.URL.String()
+		if rawURL == "" {
 			continue
 		}
-		quality := s.Quality
-		if quality == "" {
-			quality = "auto"
+
+		cleanURL, parsedQuality := ParsePackedStreamURL(rawURL)
+		quality := s.Quality.String()
+		if quality == "" || quality == "auto" {
+			quality = parsedQuality
 		}
+
+		playableURL, directURL, requiresProxy := WrapStreamURL(targetSource, "inner", cleanURL)
+		headers := BuildStreamHeaders(playableURL, requiresProxy)
+
 		streams = append(streams, domain.StreamSource{
 			Quality:       quality,
-			URL:           s.URL,
-			DirectURL:     s.URL,
-			RequiresProxy: false,
+			URL:           playableURL,
+			DirectURL:     directURL,
+			RequiresProxy: requiresProxy,
 			Headers:       headers,
 		})
+	}
+
+	// 7. Об'єднуємо субтитри
+	subtitles := MergeSubtitles(streamResp.Subtitles, itemSubtitles)
+
+	if len(streams) == 0 {
+		return nil, errors.New("no playable streams returned by provider")
 	}
 
 	return &domain.ContentStreamsResponse{
 		ProviderID: p.ID(),
 		Streams:    streams,
-		Subtitles:  []domain.SubtitleSource{},
+		Subtitles:  subtitles,
 	}, nil
-}
-
-func parseYearFromRaw(raw json.RawMessage) int {
-	if len(raw) == 0 {
-		return 0
-	}
-	var num int
-	if err := json.Unmarshal(raw, &num); err == nil {
-		return num
-	}
-	var str string
-	if err := json.Unmarshal(raw, &str); err == nil {
-		str = strings.TrimSpace(str)
-		if n, err := strconv.Atoi(str); err == nil {
-			return n
-		}
-	}
-	return 0
 }
