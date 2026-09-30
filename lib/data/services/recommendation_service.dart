@@ -121,12 +121,18 @@ class RecommendationService extends ChangeNotifier {
         ..sort((a, b) => b.value.compareTo(a.value));
       final topGenres = sortedGenres.take(3).map((e) => e.key).toList();
 
-      Logger.d('Top genres for recommendations: ${topGenres.join(', ')}', tag: _tag);
+      Logger.d(
+        'Top genres for recommendations: ${topGenres.join(', ')}',
+        tag: _tag,
+      );
 
       for (final genre in topGenres) {
         final provider = providers[Random().nextInt(providers.length)];
         try {
-          final slug = ProviderGenreMappings.getSlugForProvider(provider.id, genre);
+          final slug = ProviderGenreMappings.getSlugForProvider(
+            provider.id,
+            genre,
+          );
           final items = await provider.getByCategory(slug, page: 1);
           results.addAll(items.take(10));
         } catch (e) {
@@ -154,7 +160,10 @@ class RecommendationService extends ChangeNotifier {
           final items = await provider.getPopular(type: contentType, page: 1);
           results.addAll(items.take(8));
         } catch (e) {
-          Logger.w('Failed to fetch popular for type $topType from ${provider.name}: $e', tag: _tag);
+          Logger.w(
+            'Failed to fetch popular for type $topType from ${provider.name}: $e',
+            tag: _tag,
+          );
         }
       }
     }

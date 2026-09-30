@@ -66,18 +66,26 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _syncNow() async {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·Р В°РЎвЂ РЎвЂ“РЎРЏ...')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·Р В°РЎвЂ РЎвЂ“РЎРЏ...',
+        ),
+      ),
+    );
 
     await _historyService.syncNow();
     await _favoritesService.syncNow();
 
     if (mounted) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·Р В°РЎвЂ РЎвЂ“РЎР‹ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р ВµР Р…Р С•')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·Р В°РЎвЂ РЎвЂ“РЎР‹ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р ВµР Р…Р С•',
+          ),
+        ),
+      );
     }
   }
 
@@ -87,18 +95,24 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkCard,
-        title: const Text('Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·Р В°РЎвЂ РЎвЂ“РЎРЏ'),
+        title: const Text(
+          'Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·Р В°РЎвЂ РЎвЂ“РЎРЏ',
+        ),
         content: const Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Р вЂ™Р В°РЎв‚¬РЎвЂ“ Р Т‘Р В°Р Р…РЎвЂ“ Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР Р…Р С• РЎРѓР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·РЎС“РЎР‹РЎвЂљРЎРЉРЎРѓРЎРЏ:'),
+            Text(
+              'Р вЂ™Р В°РЎв‚¬РЎвЂ“ Р Т‘Р В°Р Р…РЎвЂ“ Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР Р…Р С• РЎРѓР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·РЎС“РЎР‹РЎвЂљРЎРЉРЎРѓРЎРЏ:',
+            ),
             SizedBox(height: 12),
             Row(
               children: [
                 Icon(Icons.check_circle, color: Colors.green, size: 20),
                 SizedBox(width: 8),
-                Text('Р вЂ РЎРѓРЎвЂљР С•РЎР‚РЎвЂ“РЎРЏ Р С—Р ВµРЎР‚Р ВµР С–Р В»РЎРЏР Т‘РЎвЂ“Р Р†'),
+                Text(
+                  'Р вЂ РЎРѓРЎвЂљР С•РЎР‚РЎвЂ“РЎРЏ Р С—Р ВµРЎР‚Р ВµР С–Р В»РЎРЏР Т‘РЎвЂ“Р Р†',
+                ),
               ],
             ),
             SizedBox(height: 8),
@@ -114,7 +128,9 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 Icon(Icons.check_circle, color: Colors.green, size: 20),
                 SizedBox(width: 8),
-                Text('Р СџР С•Р В·Р С‘РЎвЂ РЎвЂ“РЎРЏ Р С—Р ВµРЎР‚Р ВµР С–Р В»РЎРЏР Т‘РЎС“'),
+                Text(
+                  'Р СџР С•Р В·Р С‘РЎвЂ РЎвЂ“РЎРЏ Р С—Р ВµРЎР‚Р ВµР С–Р В»РЎРЏР Т‘РЎС“',
+                ),
               ],
             ),
           ],
@@ -133,7 +149,9 @@ class _SettingsPageState extends State<SettingsPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryColor,
               ),
-              child: const Text('Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·РЎС“Р Р†Р В°РЎвЂљР С‘ Р В·Р В°РЎР‚Р В°Р В·'),
+              child: const Text(
+                'Р РЋР С‘Р Р…РЎвЂ¦РЎР‚Р С•Р Р…РЎвЂ“Р В·РЎС“Р Р†Р В°РЎвЂљР С‘ Р В·Р В°РЎР‚Р В°Р В·',
+              ),
             ),
         ],
       ),
@@ -895,15 +913,23 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await _dataTransferService.exportData();
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Р В Р ВµР В·Р ВµРЎР‚Р Р†Р Р…РЎС“ Р С”Р С•Р С—РЎвЂ“РЎР‹ Р В·Р В±Р ВµРЎР‚Р ВµР В¶Р ВµР Р…Р С•')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Р В Р ВµР В·Р ВµРЎР‚Р Р†Р Р…РЎС“ Р С”Р С•Р С—РЎвЂ“РЎР‹ Р В·Р В±Р ВµРЎР‚Р ВµР В¶Р ВµР Р…Р С•',
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Р СџР С•Р СР С‘Р В»Р С”Р В° Р ВµР С”РЎРѓР С—Р С•РЎР‚РЎвЂљРЎС“: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Р СџР С•Р СР С‘Р В»Р С”Р В° Р ВµР С”РЎРѓР С—Р С•РЎР‚РЎвЂљРЎС“: $e',
+            ),
+          ),
+        );
       }
     }
   }
@@ -912,15 +938,23 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await _dataTransferService.importData();
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Р вЂќР В°Р Р…РЎвЂ“ РЎС“РЎРѓР С—РЎвЂ“РЎв‚¬Р Р…Р С• Р Р†РЎвЂ“Р Т‘Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С•')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Р вЂќР В°Р Р…РЎвЂ“ РЎС“РЎРѓР С—РЎвЂ“РЎв‚¬Р Р…Р С• Р Р†РЎвЂ“Р Т‘Р Р…Р С•Р Р†Р В»Р ВµР Р…Р С•',
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Р СџР С•Р СР С‘Р В»Р С”Р В° РЎвЂ“Р СР С—Р С•РЎР‚РЎвЂљРЎС“: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Р СџР С•Р СР С‘Р В»Р С”Р В° РЎвЂ“Р СР С—Р С•РЎР‚РЎвЂљРЎС“: $e',
+            ),
+          ),
+        );
       }
     }
   }

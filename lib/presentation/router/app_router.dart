@@ -38,6 +38,20 @@ class AppRouter {
     }
   }
 
+  /// Safely decode mediaId path parameter.
+  ///
+  /// GoRouter already decodes path parameters in recent versions.
+  /// Calling Uri.decodeComponent unconditionally throws FormatException
+  /// ("Illegal percent encoding in URI") whenever the parameter already
+  /// contains a '%' character (e.g. "100% Вовк" or JSON payload).
+  static String safeDecodeMediaId(String raw) {
+    try {
+      return Uri.decodeComponent(raw);
+    } catch (_) {
+      return raw;
+    }
+  }
+
   static final GoRouter router = GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
@@ -147,12 +161,7 @@ class AppRouter {
             pageBuilder: (context, state) {
               final providerId = state.pathParameters['providerId']!;
               final rawMediaId = state.pathParameters['mediaId']!;
-              String mediaId;
-              try {
-                mediaId = Uri.decodeComponent(rawMediaId);
-              } catch (_) {
-                mediaId = rawMediaId;
-              }
+              final mediaId = safeDecodeMediaId(rawMediaId);
               return _buildPageWithThemeTransition(
                 context: context,
                 state: state,
@@ -177,7 +186,9 @@ class AppRouter {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('РќРµРјР°С” URL РґР»СЏ РІС–РґС‚РІРѕСЂРµРЅРЅСЏ'),
+                        const Text(
+                          'РќРµРјР°С” URL РґР»СЏ РІС–РґС‚РІРѕСЂРµРЅРЅСЏ',
+                        ),
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: () => context.go('/'),

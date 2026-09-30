@@ -44,8 +44,10 @@ void main() {
       expect(uakino.id, 'uakino');
       expect(uakino.showOnHome, isTrue);
       expect(uakino.enabled, isTrue);
-      expect(uakino.supportedTypes,
-          containsAll([ContentType.movie, ContentType.series]));
+      expect(
+        uakino.supportedTypes,
+        containsAll([ContentType.movie, ContentType.series]),
+      );
     });
 
     test('skips entries without id and tolerates missing fields', () {
@@ -67,8 +69,10 @@ void main() {
       final restored = ProviderCatalog.fromJson(catalog.toJson());
 
       expect(restored.version, catalog.version);
-      expect(restored.providers.map((e) => e.id),
-          catalog.providers.map((e) => e.id));
+      expect(
+        restored.providers.map((e) => e.id),
+        catalog.providers.map((e) => e.id),
+      );
     });
   });
 

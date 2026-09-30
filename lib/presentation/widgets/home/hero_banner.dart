@@ -13,10 +13,7 @@ import '../common/skeleton.dart';
 class HeroBanner extends StatefulWidget {
   final MediaItem item;
 
-  const HeroBanner({
-    super.key,
-    required this.item,
-  });
+  const HeroBanner({super.key, required this.item});
 
   @override
   State<HeroBanner> createState() => _HeroBannerState();
@@ -437,7 +434,9 @@ class _HeroBannerState extends State<HeroBanner> {
                               _isFavorite
                                   ? Icons.favorite
                                   : Icons.favorite_border,
-                              color: _isFavorite ? Colors.redAccent : Colors.white,
+                              color: _isFavorite
+                                  ? Colors.redAccent
+                                  : Colors.white,
                               size: 20,
                             ),
                             label: Text(
@@ -449,8 +448,9 @@ class _HeroBannerState extends State<HeroBanner> {
                               ),
                             ),
                             style: OutlinedButton.styleFrom(
-                              backgroundColor:
-                                  Colors.white.withValues(alpha: 0.12),
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.12,
+                              ),
                               side: BorderSide(
                                 color: Colors.white.withValues(alpha: 0.25),
                               ),

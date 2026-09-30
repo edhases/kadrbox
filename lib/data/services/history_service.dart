@@ -243,7 +243,8 @@ class HistoryService extends ChangeNotifier {
       }
     } catch (e) {
       final msg = e.toString();
-      if (msg.contains('HTTP_401') || msg.contains('invalid or expired token')) {
+      if (msg.contains('HTTP_401') ||
+          msg.contains('invalid or expired token')) {
         debugPrint('⚠️ Cloud pull: token expired, skipping sync');
       } else {
         debugPrint('⚠️ Failed to pull from cloud: $e');
@@ -280,7 +281,8 @@ class HistoryService extends ChangeNotifier {
         } catch (e) {
           final msg = e.toString();
           // Якщо токен протух — зупиняємо весь батч, не пробуємо решту
-          if (msg.contains('HTTP_401') || msg.contains('invalid or expired token')) {
+          if (msg.contains('HTTP_401') ||
+              msg.contains('invalid or expired token')) {
             debugPrint('Cloud sync: token expired, stopping batch sync');
             tokenExpired = true;
           } else {

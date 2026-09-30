@@ -30,29 +30,47 @@ void main() {
       expect(service.ukrainianToLatin('єнот'), 'ienot');
     });
 
-    test('generateSearchVariants preserves original and adds latin for Cyrillic', () {
-      final variants = service.generateSearchVariants('Дюна');
-      expect(variants, contains('дюна'));
-      expect(variants, contains('diuna'));
-      expect(variants.length, 2);
-    });
+    test(
+      'generateSearchVariants preserves original and adds latin for Cyrillic',
+      () {
+        final variants = service.generateSearchVariants('Дюна');
+        expect(variants, contains('дюна'));
+        expect(variants, contains('diuna'));
+        expect(variants.length, 2);
+      },
+    );
 
-    test('generateSearchVariants does NOT corrupt Latin queries with pseudo-dictionaries', () {
-      // "bad" should NOT turn into "берега", "prison" should NOT turn into "в'язниця"
-      final variants = service.generateSearchVariants('breaking bad');
-      expect(variants, ['breaking bad']);
-      expect(variants.contains('пуститися берега'), isFalse);
-    });
+    test(
+      'generateSearchVariants does NOT corrupt Latin queries with pseudo-dictionaries',
+      () {
+        // "bad" should NOT turn into "берега", "prison" should NOT turn into "в'язниця"
+        final variants = service.generateSearchVariants('breaking bad');
+        expect(variants, ['breaking bad']);
+        expect(variants.contains('пуститися берега'), isFalse);
+      },
+    );
 
-    test('normalizeQuery strips unwanted symbols while preserving Cyrillic & Latin', () {
-      expect(service.normalizeQuery('  Дюна: Частина 2!  '), 'дюна частина 2');
-      expect(service.normalizeQuery('Dune: Part Two (2024)'), 'dune part two 2024');
-    });
+    test(
+      'normalizeQuery strips unwanted symbols while preserving Cyrillic & Latin',
+      () {
+        expect(
+          service.normalizeQuery('  Дюна: Частина 2!  '),
+          'дюна частина 2',
+        );
+        expect(
+          service.normalizeQuery('Dune: Part Two (2024)'),
+          'dune part two 2024',
+        );
+      },
+    );
 
-    test('areSimilarQueries matches Ukrainian and its Latin transliteration', () {
-      expect(service.areSimilarQueries('Дюна', 'diuna'), isTrue);
-      expect(service.areSimilarQueries('Кіно', 'kino'), isTrue);
-      expect(service.areSimilarQueries('Дюна', 'матриця'), isFalse);
-    });
+    test(
+      'areSimilarQueries matches Ukrainian and its Latin transliteration',
+      () {
+        expect(service.areSimilarQueries('Дюна', 'diuna'), isTrue);
+        expect(service.areSimilarQueries('Кіно', 'kino'), isTrue);
+        expect(service.areSimilarQueries('Дюна', 'матриця'), isFalse);
+      },
+    );
   });
 }

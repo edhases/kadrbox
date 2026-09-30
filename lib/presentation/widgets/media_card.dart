@@ -153,7 +153,8 @@ class _MediaCardState extends State<MediaCard> {
     );
 
     return Hero(
-      tag: 'media_poster_${widget.heroNamespace}_${widget.item.providerId}_${widget.item.id}',
+      tag:
+          'media_poster_${widget.heroNamespace}_${widget.item.providerId}_${widget.item.id}',
       child: localPath != null
           ? Image.file(
               File(localPath),
@@ -224,7 +225,8 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildGradientOverlay() {
-    if (_ui.cardInfoStyle == CardInfoStyle.hidden) return const SizedBox.shrink();
+    if (_ui.cardInfoStyle == CardInfoStyle.hidden)
+      return const SizedBox.shrink();
 
     return Positioned(
       left: 0,
@@ -249,7 +251,8 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildInfoOverlay() {
-    if (_ui.cardInfoStyle == CardInfoStyle.hidden) return const SizedBox.shrink();
+    if (_ui.cardInfoStyle == CardInfoStyle.hidden)
+      return const SizedBox.shrink();
 
     final parts = <String>[];
     if (widget.item.year != null && _ui.showYears) {
@@ -318,9 +321,7 @@ class _MediaCardState extends State<MediaCard> {
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.15),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -328,7 +329,9 @@ class _MediaCardState extends State<MediaCard> {
                 const Icon(Icons.star_rounded, size: 12, color: Colors.amber),
                 const SizedBox(width: 3),
                 Text(
-                  rawRating > 10 ? (rawRating / 10).toStringAsFixed(1) : rawRating.toStringAsFixed(1),
+                  rawRating > 10
+                      ? (rawRating / 10).toStringAsFixed(1)
+                      : rawRating.toStringAsFixed(1),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 10,
@@ -356,9 +359,7 @@ class _MediaCardState extends State<MediaCard> {
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.15),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
             ),
             child: Text(
               widget.item.providerId.toUpperCase(),
@@ -390,9 +391,7 @@ class _MediaCardState extends State<MediaCard> {
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.15),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -428,9 +427,7 @@ class _MediaCardState extends State<MediaCard> {
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.15),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
             ),
             child: Text(
               '${widget.item.year}',
@@ -457,4 +454,3 @@ class _MediaCardState extends State<MediaCard> {
     );
   }
 }
-

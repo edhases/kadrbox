@@ -185,7 +185,9 @@ class _ProviderPageState extends State<ProviderPage>
         setState(() => _loadingByType[type] = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё СЃС‚РѕСЂС–РЅРєСѓ: $e'),
+            content: Text(
+              'РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё СЃС‚РѕСЂС–РЅРєСѓ: $e',
+            ),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -240,8 +242,12 @@ class _ProviderPageState extends State<ProviderPage>
   Widget build(BuildContext context) {
     if (_provider == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ')),
-        body: const Center(child: Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ')),
+        appBar: AppBar(
+          title: const Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ'),
+        ),
+        body: const Center(
+          child: Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ'),
+        ),
       );
     }
 
