@@ -1,9 +1,10 @@
-/// Service for transliterating text between Ukrainian and Latin scripts
+/// Service for transliterating Ukrainian text to Latin script
 ///
-/// Supports bidirectional conversion and automatic script detection.
-/// Uses Ukrainian transliteration standard (Passport/ISO 9).
+/// Uses official Ukrainian transliteration standard (KMU 2010 / ISO 9).
+/// Removes semantic English-Ukrainian pseudo-dictionaries and lossy Latin->Cyrillic
+/// character replacement to prevent query corruption during search.
 class TransliterationService {
-  // Ukrainian to Latin mapping (Passport standard)
+  // Ukrainian to Latin mapping (KMU 2010 / Passport standard)
   static const Map<String, String> _ukToLat = {
     'а': 'a',
     'б': 'b',
@@ -38,135 +39,14 @@ class TransliterationService {
     'ь': '',
     'ю': 'iu',
     'я': 'ia',
-    // Russian letters that might appear
+    // Russian letters that might appear in mixed metadata
     'ы': 'y',
     'э': 'e',
     'ё': 'io',
     'ъ': '',
   };
 
-  // Latin to Ukrainian mapping (reverse, simplified)
-  // Note: This is lossy - multiple Latin combinations map to same Ukrainian
-  static const Map<String, String> _latToUk = {
-    'shch': 'щ',
-    'sch': 'щ',
-    'zh': 'ж',
-    'kh': 'х',
-    'ts': 'ц',
-    'ch': 'ч',
-    'sh': 'ш',
-    'ia': 'я',
-    'ya': 'я',
-    'ie': 'є',
-    'ye': 'є',
-    'iu': 'ю',
-    'yu': 'ю',
-    'yi': 'ї',
-    'io': 'йо',
-    'yo': 'йо',
-    'a': 'а',
-    'b': 'б',
-    'c': 'ц',
-    'd': 'д',
-    'e': 'е',
-    'f': 'ф',
-    'g': 'ґ',
-    'h': 'г',
-    'i': 'і',
-    'j': 'й',
-    'k': 'к',
-    'l': 'л',
-    'm': 'м',
-    'n': 'н',
-    'o': 'о',
-    'p': 'п',
-    'q': 'к',
-    'r': 'р',
-    's': 'с',
-    't': 'т',
-    'u': 'у',
-    'v': 'в',
-    'w': 'в',
-    'x': 'кс',
-    'y': 'и',
-    'z': 'з',
-  };
-
-  // Common English movie/TV terms to Ukrainian
-  static const Map<String, String> _englishToUkrainian = {
-    'vampire': 'вампір',
-    'vampires': 'вампіри',
-    'diaries': 'щоденники',
-    'diary': 'щоденник',
-    'originals': 'первородні',
-    'game': 'гра',
-    'thrones': 'престоли',
-    'house': 'дім',
-    'dragon': 'дракон',
-    'dragons': 'дракони',
-    'ring': 'кільце',
-    'rings': 'кільця',
-    'lord': 'володар',
-    'king': 'король',
-    'queen': 'королева',
-    'war': 'війна',
-    'wars': 'війни',
-    'star': 'зоря',
-    'stars': 'зорі',
-    'love': 'кохання',
-    'death': 'смерть',
-    'life': 'життя',
-    'dark': 'темний',
-    'light': 'світло',
-    'night': 'ніч',
-    'day': 'день',
-    'stranger': 'незнайомець',
-    'things': 'речі',
-    'breaking': 'пуститися',
-    'bad': 'берега',
-    'walking': 'ходячі',
-    'dead': 'мерці',
-    'prison': 'в\'язниця',
-    'break': 'втеча',
-    'friends': 'друзі',
-    'family': 'сім\'я',
-    'money': 'гроші',
-    'heist': 'пограбування',
-    'squid': 'кальмар',
-    'wednesday': 'венздей',
-    'bridgerton': 'бріджертон',
-    'bridgertons': 'бріджертони',
-    'witcher': 'відьмак',
-    'mandalorian': 'мандалорець',
-    'peaky': 'гострі',
-    'blinders': 'козирки',
-    'euphoria': 'ейфорія',
-    'arcane': 'аркейн',
-    'avatar': 'аватар',
-    'spider': 'павук',
-    'man': 'людина',
-    'iron': 'залізна',
-    'batman': 'бетмен',
-    'superman': 'супермен',
-    'avengers': 'месники',
-    'guardians': 'вартові',
-    'galaxy': 'галактика',
-    'fast': 'форсаж',
-    'furious': 'скажений',
-    'mission': 'місія',
-    'impossible': 'неможлива',
-    'matrix': 'матриця',
-    'inception': 'початок',
-    'interstellar': 'інтерстеллар',
-    'titanic': 'титанік',
-    'frozen': 'крижане',
-    'heart': 'серце',
-    'lion': 'лев',
-    'beauty': 'красуня',
-    'beast': 'чудовисько',
-  };
-
-  /// Detect if text is primarily Cyrillic (Ukrainian/Russian)
+  /// Detect if text is primarily Cyrillic (Ukrainian/Cyrillic block)
   bool isCyrillic(String text) {
     if (text.isEmpty) return false;
 
@@ -197,68 +77,24 @@ class TransliterationService {
     return buffer.toString();
   }
 
-  /// Transliterate Latin text to Ukrainian
-  String latinToUkrainian(String text) {
-    var result = text.toLowerCase();
-
-    // First, replace multi-character sequences (longest first)
-    final sortedKeys = _latToUk.keys.toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
-
-    for (final key in sortedKeys) {
-      result = result.replaceAll(key, _latToUk[key]!);
-    }
-
-    return result;
-  }
-
-  /// Translate common English words to Ukrainian equivalents
-  String translateEnglishTerms(String text) {
-    var result = text.toLowerCase();
-
-    // Sort by length (longest first) to avoid partial replacements
-    final sortedKeys = _englishToUkrainian.keys.toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
-
-    for (final key in sortedKeys) {
-      // Use word boundaries to avoid partial matches
-      final pattern = RegExp(r'\b' + RegExp.escape(key) + r'\b');
-      result = result.replaceAll(pattern, _englishToUkrainian[key]!);
-    }
-
-    return result;
-  }
-
   /// Generate search variants for a query
   ///
-  /// Returns list of possible interpretations of the query:
-  /// - Original (normalized)
-  /// - Transliterated version
-  /// - English terms translated
+  /// Returns list of valid interpretations of the query:
+  /// - Original normalized query
+  /// - For Cyrillic queries: clean Latin transliteration for latin-indexed providers
   List<String> generateSearchVariants(String query) {
-    final normalized = query.toLowerCase().trim();
+    final normalized = normalizeQuery(query);
+    if (normalized.isEmpty) return const [];
     final variants = <String>{normalized};
 
-    if (isLatin(normalized)) {
-      // Latin input - try to convert to Ukrainian
-      variants.add(latinToUkrainian(normalized));
-
-      // Also try translating English terms
-      final translated = translateEnglishTerms(normalized);
-      if (translated != normalized) {
-        variants.add(translated);
+    if (isCyrillic(normalized)) {
+      final latinVariant = ukrainianToLatin(normalized);
+      if (latinVariant.isNotEmpty && latinVariant != normalized) {
+        variants.add(latinVariant);
       }
-
-      // Try both: translate then transliterate remaining
-      final mixed = latinToUkrainian(translateEnglishTerms(normalized));
-      variants.add(mixed);
-    } else if (isCyrillic(normalized)) {
-      // Cyrillic input - also try Latin version for some providers
-      variants.add(ukrainianToLatin(normalized));
     }
 
-    // Remove empty and duplicate variants
-    return variants.where((v) => v.isNotEmpty).toList();
+    return variants.toList();
   }
 
   /// Normalize query for consistent comparison
@@ -266,28 +102,27 @@ class TransliterationService {
   /// - Lowercase
   /// - Trim whitespace
   /// - Collapse multiple spaces
-  /// - Remove special characters (keep alphanumeric and spaces)
+  /// - Retain alphanumeric characters (Unicode Ukrainian/Cyrillic & Latin) and spaces
   String normalizeQuery(String query) {
     return query
         .toLowerCase()
         .trim()
         .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll(RegExp(r'[^\w\s\u0400-\u04FF]'), '');
+        .replaceAll(RegExp(r'[^\w\s\u0400-\u04FF]', unicode: true), '');
   }
 
-  /// Check if two strings are likely the same after normalization
+  /// Check if two strings are likely referring to the same title
   bool areSimilarQueries(String a, String b) {
     final normalA = normalizeQuery(a);
     final normalB = normalizeQuery(b);
 
     if (normalA == normalB) return true;
 
-    // Check if one is transliteration of another
-    if (isLatin(a) && isCyrillic(b)) {
-      return normalizeQuery(latinToUkrainian(a)) == normalB;
-    }
     if (isCyrillic(a) && isLatin(b)) {
-      return normalA == normalizeQuery(latinToUkrainian(b));
+      return normalizeQuery(ukrainianToLatin(a)) == normalB;
+    }
+    if (isLatin(a) && isCyrillic(b)) {
+      return normalA == normalizeQuery(ukrainianToLatin(b));
     }
 
     return false;
