@@ -23,6 +23,55 @@ class DataTransferService {
 
   /// Export data to JSON file
   Future<void> exportData() async {
+    final file = await _writeBackupFile();
+
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      // Desktop: Save dialog
+      final String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Зберегти резервну копію',
+        fileName: file.path.split(Platform.pathSeparator).last,
+        allowedExtensions: ['json'],
+        type: FileType.custom,
+      );
+
+      if (outputFile != null) {
+        await file.copy(outputFile);
+        Logger.i('Backup saved to $outputFile', tag: 'DataTransfer');
+      }
+    } else {
+      // Mobile: Share sheet
+      await Share.shareXFiles([XFile(file.path)], text: 'Oxide Backup');
+    }
+  }
+
+  /// Share backup file via system share sheet (mobile) or save dialog (desktop).
+  /// Unlike [exportData], never silently saves: always returns the file path.
+  Future<String> shareBackup() async {
+    final file = await _writeBackupFile();
+
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      final String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Зберегти резервну копію',
+        fileName: file.path.split(Platform.pathSeparator).last,
+        allowedExtensions: ['json'],
+        type: FileType.custom,
+      );
+      if (outputFile != null) {
+        await file.copy(outputFile);
+        Logger.i('Backup saved to $outputFile', tag: 'DataTransfer');
+        return outputFile;
+      }
+      throw Exception('Збереження скасовано');
+    }
+
+    await Share.shareXFiles([XFile(file.path)], text: 'Oxide Backup');
+    return file.path;
+  }
+
+  /// Build the backup JSON and write it to a temp file.
+  Future<File> _writeBackupFile() async {
     try {
       final history = _historyService.history;
       final favorites = _favoritesService.favorites;
@@ -38,29 +87,10 @@ class DataTransferService {
       final fileName =
           'oxide_backup_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.json';
 
-      // On mobile/desktop, save to temp and share/save
       final tempDir = await getTemporaryDirectory();
       final file = File('${tempDir.path}/$fileName');
       await file.writeAsString(jsonString);
-
-      if (!kIsWeb &&
-          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-        // Desktop: Save dialog
-        final String? outputFile = await FilePicker.platform.saveFile(
-          dialogTitle: 'Зберегти резервну копію',
-          fileName: fileName,
-          allowedExtensions: ['json'],
-          type: FileType.custom,
-        );
-
-        if (outputFile != null) {
-          await file.copy(outputFile);
-          Logger.i('Backup saved to $outputFile', tag: 'DataTransfer');
-        }
-      } else {
-        // Mobile: Share sheet
-        await Share.shareXFiles([XFile(file.path)], text: 'Oxide Backup');
-      }
+      return file;
     } catch (e, stack) {
       Logger.e(
         'Export failed',

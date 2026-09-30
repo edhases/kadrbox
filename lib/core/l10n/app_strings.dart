@@ -257,6 +257,19 @@ class AppStrings {
   String get noProviders => _t('Немає провайдерів', 'No providers');
   String get addContentSources =>
       _t('Додайте джерела контенту', 'Add content sources');
+  String get providersMain => _t('Основні провайдери', 'Main providers');
+  String get providersSeparate => _t('Окремі провайдери', 'Separate providers');
+  String get providersSeparateDesc => _t(
+    'Мають власні розділи в каталозі та за замовчуванням вимкнені в загальному пошуку',
+    'Have their own catalog sections and are excluded from global search by default',
+  );
+  String get includeInGlobalSearch =>
+      _t('Включити в загальний пошук', 'Include in global search');
+  String get fixedStreamsNote => _t(
+    'Якість і дубляж обираються при запуску',
+    'Quality and dubbing are picked at playback start',
+  );
+  String get backupShared => _t('Копію надіслано', 'Backup shared');
   String exportSuccess(String path) => _t('Збережено: $path', 'Saved: $path');
   String get importSuccess =>
       _t('Дані успішно імпортовано!', 'Data imported successfully!');

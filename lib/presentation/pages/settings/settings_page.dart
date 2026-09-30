@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../../../core/l10n/app_strings.dart';
@@ -707,7 +707,7 @@ class _SettingsPageState extends State<SettingsPage> {
         Padding(
           padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
           child: Text(
-            'Основні провайдери',
+            _s.providersMain,
             style: TextStyle(
               color: AppTheme.textMuted,
               fontSize: 12,
@@ -731,11 +731,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
       // Separate providers section (HDRezka, YouTube)
       if (separateProviders.isNotEmpty) ...[
-        const Divider(height: 24),
         Padding(
-          padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
+          padding: const EdgeInsets.only(left: 16, top: 12, bottom: 4),
           child: Text(
-            'Окремі провайдери',
+            _s.providersSeparate,
             style: TextStyle(
               color: AppTheme.textMuted,
               fontSize: 12,
@@ -746,7 +745,7 @@ class _SettingsPageState extends State<SettingsPage> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Text(
-            'Ці провайдери мають власні розділи в каталозі та за замовчуванням вимкнені в загальному пошуку',
+            _s.providersSeparateDesc,
             style: TextStyle(
               color: AppTheme.textMuted.withValues(alpha: 0.7),
               fontSize: 11,
@@ -762,7 +761,8 @@ class _SettingsPageState extends State<SettingsPage> {
             name: provider.name,
             url: provider.baseUrl,
             iconUrl: provider.iconUrl,
-            providerId: provider.id,
+            searchLabel: _s.includeInGlobalSearch,
+            fixedNote: _s.fixedStreamsNote,
             isEnabled: isEnabled,
             isSearchEnabled: isSearchEnabled,
             hasFixedStreams: ProviderRegistry.hasFixedStreams(provider),
@@ -833,7 +833,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _openGitHub() async {
-    const url = 'https://github.com/oxide-film/oxide-film';
+    const url = 'https://github.com/edhases/oxide_film';
     final uri = Uri.parse(url);
     try {
       if (await canLaunchUrl(uri)) {
@@ -856,10 +856,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _clearCache() async {
     try {
-      await CachedNetworkImage.evictFromCache('');
+      await DefaultCacheManager().emptyCache();
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();
-      debugPrint('Cache cleared successfully');
     } catch (e) {
       debugPrint('Error clearing cache: $e');
     }
@@ -900,7 +899,20 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _shareData() async {
-    await _showExportDialog();
+    try {
+      final path = await _dataTransferService.shareBackup();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('${_s.backupShared}: $path')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('${_s.error}: $e')));
+      }
+    }
   }
 
   Future<void> _pickDownloadFolder() async {
@@ -1005,12 +1017,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// Tile for separate providers (HDRezka, YouTube) with additional settings
+/// Tile for separate providers (HDRezka, YouTube) with additional settings.
+/// Uses the same visual language as [ProviderTile]: theme accent switches,
+/// no per-provider colors, no nested cards.
 class _SeparateProviderTile extends StatelessWidget {
   final String name;
   final String url;
   final String? iconUrl;
-  final String providerId;
+  final String searchLabel;
+  final String fixedNote;
   final bool isEnabled;
   final bool isSearchEnabled;
   final bool hasFixedStreams;
@@ -1021,7 +1036,8 @@ class _SeparateProviderTile extends StatelessWidget {
     required this.name,
     required this.url,
     this.iconUrl,
-    required this.providerId,
+    required this.searchLabel,
+    required this.fixedNote,
     required this.isEnabled,
     required this.isSearchEnabled,
     required this.hasFixedStreams,
@@ -1029,120 +1045,69 @@ class _SeparateProviderTile extends StatelessWidget {
     required this.onSearchEnabledChanged,
   });
 
-  Color _getProviderColor(BuildContext context) {
-    switch (providerId) {
-      case 'hdrezka':
-        return Colors.orange;
-      case 'youtube':
-        return Colors.red;
-      default:
-        return Theme.of(context).colorScheme.primary;
-    }
-  }
-
-  IconData get _providerIcon {
-    switch (providerId) {
-      case 'hdrezka':
-        return Icons.play_circle_filled;
-      case 'youtube':
-        return Icons.play_arrow;
-      default:
-        return Icons.video_library;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final providerColor = _getProviderColor(context);
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isEnabled
-              ? providerColor.withValues(alpha: 0.3)
-              : AppTheme.borderColor,
+    final muted = Theme.of(context).textTheme.bodySmall?.color;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ProviderTile(
+          name: name,
+          url: url,
+          iconUrl: iconUrl,
+          isEnabled: isEnabled,
+          onChanged: onEnabledChanged,
         ),
-      ),
-      child: Column(
-        children: [
-          // Main toggle
-          ListTile(
-            leading: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: providerColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(_providerIcon, color: providerColor, size: 22),
-            ),
-            title: Text(
-              name,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isEnabled ? providerColor : AppTheme.textMuted,
-              ),
-            ),
-            subtitle: Column(
+        if (isEnabled)
+          Padding(
+            padding: const EdgeInsets.only(left: 68, right: 16, bottom: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  url,
-                  style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                Row(
+                  children: [
+                    Icon(Icons.search, size: 18, color: muted),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        searchLabel,
+                        style: TextStyle(fontSize: 13, color: muted),
+                      ),
+                    ),
+                    Switch(
+                      value: isSearchEnabled,
+                      onChanged: onSearchEnabledChanged,
+                    ),
+                  ],
                 ),
                 if (hasFixedStreams)
-                  Text(
-                    '⚠️ Якість/дубляж фіксуються при запуску',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.orange.shade700,
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, bottom: 6),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 14,
+                          color: muted?.withValues(alpha: 0.7),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            fixedNote,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: muted?.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
             ),
-            trailing: Switch(
-              value: isEnabled,
-              onChanged: onEnabledChanged,
-              activeThumbColor: providerColor,
-            ),
           ),
-
-          // Search toggle (only if provider is enabled)
-          if (isEnabled)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundColor.withValues(alpha: 0.5),
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(12),
-                  bottomRight: Radius.circular(12),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.search, size: 18, color: AppTheme.textMuted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Включити в загальний пошук',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                  Switch(
-                    value: isSearchEnabled,
-                    onChanged: onSearchEnabledChanged,
-                    activeThumbColor: providerColor,
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 }
