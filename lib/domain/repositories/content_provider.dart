@@ -2,7 +2,7 @@ import '../entities/entities.dart';
 
 /// Abstract interface for content providers (sources)
 ///
-/// Each provider (HDRezka, UAKino, YouTube, etc.) must implement this interface
+/// Each provider (UAKino, Eneyida, etc.) must implement this interface
 abstract class ContentProvider {
   /// Unique identifier for this provider
   String get id;
@@ -24,6 +24,15 @@ abstract class ContentProvider {
 
   /// Whether this provider is currently enabled
   bool get isEnabled;
+
+  /// Whether this provider should appear on the home page / in general categories.
+  ///
+  /// Providers with a dedicated page return `false` here. Default `true`.
+  bool get showOnHome => true;
+
+  /// Whether this provider's streams are fixed (quality/voiceover cannot be
+  /// changed after playback starts). Default `false`.
+  bool get hasFixedStreams => false;
 
   /// Content types supported by this provider
   List<ContentType> get supportedTypes;

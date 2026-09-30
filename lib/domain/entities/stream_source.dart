@@ -6,7 +6,7 @@ enum StreamType {
   hls, // HLS .m3u8 playlist
   dash, // DASH .mpd manifest
   torrent, // Magnet link / torrent
-  youtubeEmbed, // YouTube video (embedded via iframe, ToS-compliant)
+  iframe, // HTML player page — NOT playable by libmpv, must never be opened
 }
 
 /// Quality of video stream

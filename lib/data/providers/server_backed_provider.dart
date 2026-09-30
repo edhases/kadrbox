@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get_it/get_it.dart';
 
 import '../../core/config/app_config.dart';
@@ -6,6 +8,62 @@ import '../../core/utils/logger.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/content_provider.dart';
 import '../models/provider_catalog.dart';
+
+/// Outcome of probing a stream URL with a HEAD (or ranged GET) request.
+///
+/// A probe answers one question: will libmpv get media bytes, or an HTML
+/// page? `Failed to recognize file format.` in the field almost always means
+/// the server handed back markup.
+enum StreamProbeResult {
+  /// `.m3u8` playlist — playable as HLS.
+  hls,
+
+  /// `.mpd` manifest — playable as DASH.
+  dash,
+
+  /// A media container (or an extension-less URL that serves one).
+  direct,
+
+  /// The URL serves HTML — a player page, captcha or login wall.
+  iframe,
+
+  /// 401/403 — missing Referer/UA or an expired token.
+  forbidden,
+
+  /// 404/410/5xx — the resource is gone.
+  dead,
+
+  /// DNS/TCP/TLS/timeout failure.
+  unreachable,
+
+  /// Probe could not run at all (unsupported URL, client error).
+  unknown,
+}
+
+/// A probed stream: what it turned out to be, plus why.
+class StreamProbe {
+  const StreamProbe({
+    required this.url,
+    required this.result,
+    this.httpStatus,
+    this.contentType,
+  });
+
+  final String url;
+  final StreamProbeResult result;
+  final int? httpStatus;
+  final String? contentType;
+
+  /// True when this URL is safe to hand to libmpv.
+  bool get isPlayable =>
+      result == StreamProbeResult.hls ||
+      result == StreamProbeResult.dash ||
+      result == StreamProbeResult.direct;
+
+  @override
+  String toString() =>
+      'StreamProbe(${result.name}, status=$httpStatus, type=$contentType)';
+}
 
 /// Content provider backed by the Oxide backend (server-side parsing).
 ///
@@ -16,6 +74,16 @@ import '../models/provider_catalog.dart';
 /// Search/details/streams are proxied through `/api/v1/content/*`.
 /// Catalog/popular listings are not supported server-side yet,
 /// so [getPopular]/[getNew]/[getByCategory] return empty lists.
+///
+/// ## Error contract
+///
+/// [search], [getStreams], [getPopular], [getNew] and [getByCategory] propagate
+/// transport and server errors (`NetworkException` / `ServerException` from
+/// `ApiClient`) instead of returning `[]`. An empty list therefore means
+/// "the server answered successfully with no results", which is a
+/// distinguishable state. Callers that aggregate several providers must wrap
+/// these calls in a try/catch (search_service, home_page, category_page,
+/// provider_page and recommendation_service already do).
 class ServerBackedProvider extends ContentProvider {
   static const _tag = 'ServerBackedProvider';
 
@@ -41,6 +109,12 @@ class ServerBackedProvider extends ContentProvider {
   bool get isEnabled => true;
 
   @override
+  bool get showOnHome => entry.showOnHome;
+
+  @override
+  bool get hasFixedStreams => entry.hasFixedStreams;
+
+  @override
   List<ContentType> get supportedTypes => entry.supportedTypes;
 
   String get _base => '${AppConfig.serverApiUrl}/content';
@@ -51,24 +125,21 @@ class ServerBackedProvider extends ContentProvider {
     ContentType? type,
     int page = 1,
   }) async {
-    try {
-      final list = await _api.getJsonList(
-        '$_base/search',
-        queryParameters: {'q': query, 'provider': id},
-      );
-      final items = list
-          .whereType<Map>()
-          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-          .where((i) => i.title.isNotEmpty)
-          .toList();
-      if (type != null) {
-        return items.where((i) => i.type == type).toList();
-      }
-      return items;
-    } catch (e) {
-      Logger.w('Server search failed for $id: $e', tag: _tag);
-      return [];
+    // Errors propagate: a transport failure must not be indistinguishable
+    // from a genuine "no results".
+    final list = await _api.getJsonList(
+      '$_base/search',
+      queryParameters: {'q': query, 'provider': id},
+    );
+    final items = list
+        .whereType<Map>()
+        .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+        .where((i) => i.title.isNotEmpty)
+        .toList();
+    if (type != null) {
+      return items.where((i) => i.type == type).toList();
     }
+    return items;
   }
 
   @override
@@ -86,41 +157,31 @@ class ServerBackedProvider extends ContentProvider {
     int? season,
     int? episode,
   }) async {
-    try {
-      final params = <String, dynamic>{'provider': this.id, 'url': id};
-      if (season != null) params['season'] = season;
-      if (episode != null) params['episode'] = episode;
-      final res = await _api.getJson('$_base/streams', queryParameters: params);
-      final streams = res['streams'];
-      if (streams is! List) return [];
-      return streams
-          .whereType<Map>()
-          .map((e) => _mapStream(Map<String, dynamic>.from(e)))
-          .toList();
-    } catch (e) {
-      Logger.w('Server streams failed for $id: $e', tag: _tag);
-      return [];
-    }
+    final params = <String, dynamic>{'provider': this.id, 'url': id};
+    if (season != null) params['season'] = season;
+    if (episode != null) params['episode'] = episode;
+    final res = await _api.getJson('$_base/streams', queryParameters: params);
+    final streams = res['streams'];
+    if (streams is! List) return [];
+    return streams
+        .whereType<Map>()
+        .map((e) => _mapStream(Map<String, dynamic>.from(e)))
+        .toList();
   }
 
   @override
   Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async {
-    try {
-      final params = <String, dynamic>{'provider': id, 'page': page};
-      if (type != null) params['type'] = type.name;
-      final list = await _api.getJsonList(
-        '$_base/popular',
-        queryParameters: params,
-      );
-      return list
-          .whereType<Map>()
-          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-          .where((i) => i.title.isNotEmpty)
-          .toList();
-    } catch (e) {
-      Logger.w('Server getPopular failed for $id: $e', tag: _tag);
-      return [];
-    }
+    final params = <String, dynamic>{'provider': id, 'page': page};
+    if (type != null) params['type'] = type.name;
+    final list = await _api.getJsonList(
+      '$_base/popular',
+      queryParameters: params,
+    );
+    return list
+        .whereType<Map>()
+        .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+        .where((i) => i.title.isNotEmpty)
+        .toList();
   }
 
   @override
@@ -133,29 +194,32 @@ class ServerBackedProvider extends ContentProvider {
     ContentType? type,
     int page = 1,
   }) async {
-    try {
-      final params = <String, dynamic>{
-        'provider': id,
-        'category': category,
-        'page': page,
-      };
-      if (type != null) params['type'] = type.name;
-      final list = await _api.getJsonList(
-        '$_base/category',
-        queryParameters: params,
-      );
-      return list
-          .whereType<Map>()
-          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-          .where((i) => i.title.isNotEmpty)
-          .toList();
-    } catch (e) {
-      Logger.w('Server getByCategory failed for $id ($category): $e', tag: _tag);
-      return [];
-    }
+    final params = <String, dynamic>{
+      'provider': id,
+      'category': category,
+      'page': page,
+    };
+    if (type != null) params['type'] = type.name;
+    final list = await _api.getJsonList(
+      '$_base/category',
+      queryParameters: params,
+    );
+    return list
+        .whereType<Map>()
+        .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+        .where((i) => i.title.isNotEmpty)
+        .toList();
   }
 
-  // -- mapping ---------------------------------------------------------------
+  // --- mapping ---------------------------------------------------------------
+
+  /// Test seam for [_mapStreamType].
+  @visibleForTesting
+  StreamType mapStreamTypeForTest(String url) => _mapStreamType(url);
+
+  /// Test seam for [_mapStream].
+  @visibleForTesting
+  StreamSource mapStreamForTest(Map<String, dynamic> json) => _mapStream(json);
 
   /// Server item URL is used as the app-side id (details/streams need the URL).
   MediaItem _mapItem(Map<String, dynamic> json) {
@@ -206,18 +270,36 @@ class ServerBackedProvider extends ContentProvider {
   }
 
   StreamSource _mapStream(Map<String, dynamic> json) {
-    final direct = json['direct_url'] as String?;
-    final url =
-        (direct?.isNotEmpty == true ? direct : json['url']) as String? ?? '';
+    // Guarded: `url` may arrive as a non-String (number, null, object) and an
+    // unguarded `as String?` cast inside `.toLowerCase()` throws a TypeError
+    // that swallows the whole stream list.
+    final direct = _asString(json['direct_url']);
+    final url = (direct != null && direct.isNotEmpty)
+        ? direct
+        : (_asString(json['url']) ?? '');
     final headers = json['headers'];
+    final language = _asString(json['language']);
+    final voiceover =
+        _asString(json['voiceover']) ??
+        _asString(json['audio']) ??
+        _asString(json['dub']);
     return StreamSource(
       url: url,
-      quality: _mapQuality(json['quality'] as String?),
+      quality: _mapQuality(_asString(json['quality'])),
       type: _mapStreamType(url),
+      language: language,
+      voiceover: voiceover,
       headers: headers is Map
           ? headers.map((k, v) => MapEntry(k.toString(), v.toString()))
           : null,
     );
+  }
+
+  /// Type-safe String coercion for values coming from the backend.
+  static String? _asString(Object? value) {
+    if (value == null) return null;
+    if (value is String) return value;
+    return value.toString();
   }
 
   ContentType _mapType(String? t) => ContentType.values.firstWhere(
@@ -236,11 +318,385 @@ class ServerBackedProvider extends ContentProvider {
     return StreamQuality.unknown;
   }
 
+  /// Extensions that are unambiguously playable media.
+  static const Set<String> _mediaExtensions = {
+    '.m3u8',
+    '.mpd',
+    '.mp4',
+    '.m4v',
+    '.mkv',
+    '.webm',
+    '.mov',
+    '.avi',
+    '.ts',
+    '.m4s',
+    '.mp3',
+    '.aac',
+    '.flac',
+    '.ogg',
+  };
+
+  /// Path segments that mark a URL as a player page rather than media.
+  static const List<String> _playerPathMarkers = [
+    '/embed',
+    '/player',
+    '/iframe',
+    '/watch',
+    '/video_frame',
+    '/videoplayer',
+  ];
+
+  /// Classifies a stream URL into a [StreamType].
+  ///
+  /// Parses `Uri.parse(url).path` rather than the raw string: the previous
+  /// `endsWith`/`contains` approach could not tell an HTML page from media,
+  /// missed extension-less HLS endpoints, and treated `.m3u8` appearing in a
+  /// query string as HLS.
   StreamType _mapStreamType(String url) {
-    final u = url.toLowerCase();
-    if (u.endsWith('.m3u8') || u.contains('.m3u8?')) return StreamType.hls;
-    if (u.endsWith('.mpd') || u.contains('.mpd?')) return StreamType.dash;
-    if (u.startsWith('magnet:')) return StreamType.torrent;
+    if (url.isEmpty) return StreamType.direct;
+
+    final lower = url.toLowerCase();
+    if (lower.startsWith('magnet:')) return StreamType.torrent;
+
+    final path = _pathOf(url);
+    final ext = _extensionOf(path);
+
+    // Player-page shapes are HTML by definition — never classify as playable
+    // even if they happen to contain a media-looking substring.
+    if (_looksLikePlayerPage(path)) return StreamType.iframe;
+
+    // Check the *path* extension only, so `?next=/x.m3u8` cannot win.
+    if (ext == '.m3u8') return StreamType.hls;
+    if (ext == '.mpd') return StreamType.dash;
+    if (_mediaExtensions.contains(ext)) return StreamType.direct;
+
+    // A trailing slash on a path that is not `/` means a directory/HTML page.
+    if (path.endsWith('/')) return StreamType.iframe;
+
+    // Extension-less: could be HLS or a player page. Leave it as direct and
+    // let the probe decide on demand.
     return StreamType.direct;
+  }
+
+  /// Path component of [url], or an empty string when it cannot be parsed.
+  static String _pathOf(String url) {
+    try {
+      return Uri.parse(url).path.toLowerCase();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Lowercased extension of [path] including the dot, or '' when there is
+  /// none. Multi-part extensions like `.tar.gz` are not special-cased here.
+  static String _extensionOf(String path) {
+    final slash = path.lastIndexOf('/');
+    final lastSegment = slash >= 0 ? path.substring(slash + 1) : path;
+    final dot = lastSegment.lastIndexOf('.');
+    if (dot <= 0 || dot == lastSegment.length - 1) return '';
+    return lastSegment.substring(dot);
+  }
+
+  /// True when [path] has the shape of an HTML player page.
+  static bool _looksLikePlayerPage(String path) {
+    if (path.isEmpty) return false;
+    if (path.endsWith('/')) return true;
+    for (final marker in _playerPathMarkers) {
+      if (path.contains(marker)) return true;
+    }
+    return false;
+  }
+
+  // --- stream probing -------------------------------------------------------
+
+  /// Per-session probe cache, keyed by URL.
+  ///
+  /// A stream is probed at most once per app run.
+  static final Map<String, StreamProbe> _probeCache = {};
+
+  /// Returns a cached probe result, or null when this URL was never probed.
+  static StreamProbe? cachedProbe(String url) => _probeCache[url];
+
+  /// Probes [stream] to find out what the URL really serves.
+  ///
+  /// Lazy and on-demand only — never called while rendering a list. Call it
+  /// from the error path or from a user-triggered "check sources" action.
+  ///
+  /// Returns null when the URL is already unambiguously media by extension
+  /// (probing those is pure cost).
+  Future<StreamProbe?> probeStream(StreamSource stream) async {
+    final url = stream.url;
+    if (url.isEmpty) return null;
+
+    final cached = _probeCache[url];
+    if (cached != null) return cached;
+
+    // Skip the probe entirely when the extension already tells us the truth.
+    if (_mapStreamType(url) != StreamType.direct ||
+        _extensionOf(_pathOf(url)).isNotEmpty) {
+      Logger.d('Probe skipped, extension is conclusive: $url', tag: _tag);
+      return null;
+    }
+
+    final probe = await _probeUrl(url, stream.headers);
+    _probeCache[url] = probe;
+    Logger.i('Probe $url -> $probe', tag: _tag);
+    return probe;
+  }
+
+  Future<StreamProbe> _probeUrl(
+    String url,
+    Map<String, String>? headers,
+  ) async {
+    try {
+      final uri = Uri.parse(url);
+      if (!uri.hasScheme || uri.host.isEmpty) {
+        return StreamProbe(url: url, result: StreamProbeResult.unknown);
+      }
+
+      final response = await _api.dio.head<Object?>(
+        url,
+        options: Options(
+          headers: {...?headers},
+          responseType: ResponseType.bytes,
+          followRedirects: true,
+          validateStatus: (s) => s != null && s < 400,
+        ),
+      );
+      return _classifyProbe(
+        url,
+        response.statusCode ?? 0,
+        _contentTypeOf(response),
+      );
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+
+      // Some CDNs reject HEAD outright (405) — fall back to a ranged GET.
+      if (status == 405 ||
+          status == 501 ||
+          status == null && _isMethodIssue(e)) {
+        return _probeUrlWithGet(url, headers, e);
+      }
+      if (status != null) {
+        return _classifyProbe(url, status, _contentTypeOf(e.response));
+      }
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.unreachable,
+        httpStatus: null,
+      );
+    } catch (e) {
+      Logger.w('Probe failed for $url: $e', tag: _tag);
+      return StreamProbe(url: url, result: StreamProbeResult.unknown);
+    }
+  }
+
+  Future<StreamProbe> _probeUrlWithGet(
+    String url,
+    Map<String, String>? headers,
+    DioException headError,
+  ) async {
+    try {
+      final response = await _api.dio.get<List<int>>(
+        url,
+        options: Options(
+          headers: {...?headers, 'Range': 'bytes=0-1023'},
+          responseType: ResponseType.bytes,
+          followRedirects: true,
+          validateStatus: (s) => s != null && s < 400,
+        ),
+      );
+      final status = response.statusCode ?? 0;
+      final probe = _classifyProbe(url, status, _contentTypeOf(response));
+      if (probe.result != StreamProbeResult.unknown) return probe;
+      // No Content-Type: sniff the first bytes for known magic numbers.
+      return _classifyByMagicNumber(url, status, response.data);
+    } catch (e) {
+      // If the GET also failed, classify from that failure.
+      if (e is DioException && e.response != null) {
+        return _classifyProbe(
+          url,
+          e.response!.statusCode ?? 0,
+          _contentTypeOf(e.response),
+        );
+      }
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.unreachable,
+        httpStatus: headError.response?.statusCode,
+      );
+    }
+  }
+
+  static bool _isMethodIssue(DioException e) {
+    final m = (e.message ?? '').toLowerCase();
+    return m.contains('405') || m.contains('method');
+  }
+
+  static String? _contentTypeOf(Response<dynamic>? response) {
+    final ct = response?.headers.value('content-type');
+    if (ct == null || ct.isEmpty) return null;
+    return ct.toLowerCase();
+  }
+
+  /// Maps an HTTP status + Content-Type onto a [StreamProbeResult].
+  static StreamProbe _classifyProbe(
+    String url,
+    int status,
+    String? contentType,
+  ) {
+    if (status == 401 || status == 403) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.forbidden,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (status == 404 || status == 410 || status >= 500) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.dead,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (status == 405 || status == 501) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.unknown,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (status < 200 || status >= 400) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.dead,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+
+    final ct = contentType ?? '';
+    if (ct.contains('mpegurl') || ct.contains('m3u8')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.hls,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (ct.contains('dash+xml')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.dash,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (ct.contains('text/html') ||
+        ct.contains('application/xhtml') ||
+        ct.contains('text/plain') && ct.contains('html')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.iframe,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (ct.startsWith('video/') || ct.startsWith('audio/')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.direct,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+    if (ct.contains('octet-stream')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.direct,
+        httpStatus: status,
+        contentType: contentType,
+      );
+    }
+
+    // 2xx with no usable Content-Type — caller may sniff bytes.
+    return StreamProbe(
+      url: url,
+      result: StreamProbeResult.unknown,
+      httpStatus: status,
+      contentType: contentType,
+    );
+  }
+
+  /// Identifies container/manifest formats from the first bytes of a body.
+  static StreamProbe _classifyByMagicNumber(
+    String url,
+    int status,
+    List<int>? bytes,
+  ) {
+    if (bytes == null || bytes.isEmpty) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.unknown,
+        httpStatus: status,
+      );
+    }
+
+    final head = String.fromCharCodes(bytes.take(64)).trimLeft().toLowerCase();
+
+    if (head.startsWith('#extm3u')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.hls,
+        httpStatus: status,
+      );
+    }
+    if (head.startsWith('<?xml') || head.contains('<mpd')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.dash,
+        httpStatus: status,
+      );
+    }
+    if (head.startsWith('<!doctype html') || head.startsWith('<html')) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.iframe,
+        httpStatus: status,
+      );
+    }
+    // ISO base media (ftyp) — mp4/m4v/mov/m4a.
+    if (bytes.length > 12 &&
+        bytes[4] == 0x66 &&
+        bytes[5] == 0x74 &&
+        bytes[6] == 0x79 &&
+        bytes[7] == 0x70) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.direct,
+        httpStatus: status,
+      );
+    }
+    // Matroska/WebM EBML header.
+    if (bytes.length > 3 &&
+        bytes[0] == 0x1A &&
+        bytes[1] == 0x45 &&
+        bytes[2] == 0xDF &&
+        bytes[3] == 0xA3) {
+      return StreamProbe(
+        url: url,
+        result: StreamProbeResult.direct,
+        httpStatus: status,
+      );
+    }
+
+    return StreamProbe(
+      url: url,
+      result: StreamProbeResult.unknown,
+      httpStatus: status,
+    );
   }
 }

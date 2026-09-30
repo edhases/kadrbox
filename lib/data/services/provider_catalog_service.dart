@@ -22,8 +22,15 @@ import '../providers/server_backed_provider.dart';
 /// Offline: falls back to the last cached catalog and sets [isStale].
 class ProviderCatalogService extends ChangeNotifier {
   static const _tag = 'ProviderCatalog';
-  static const _cacheKey = 'provider_catalog_json';
-  static const _versionKey = 'provider_catalog_version';
+  // Cache keys are versioned: the v1 snapshot may still contain providers that
+  // no longer exist locally (e.g. hdrezka), and [_applyCatalog] auto-registers a
+  // working ServerBackedProvider for any unknown id. A stale snapshot would thus
+  // resurrect a removed provider on every offline start — bypassing the backend
+  // DISABLED_PROVIDERS kill-switch, since the snapshot carries its own
+  // `enabled: true` and replaces the flag map wholesale. Bumping the key makes
+  // the first launch after this release fall back to the static catalog below.
+  static const _cacheKey = 'provider_catalog_json_v2';
+  static const _versionKey = 'provider_catalog_version_v2';
 
   final ProviderRegistry _registry;
   final SharedPreferences _prefs;
@@ -167,17 +174,6 @@ class ProviderCatalogService extends ChangeNotifier {
         showOnHome: true,
         hasFixedStreams: false,
         contentTypes: ['movie', 'series', 'anime'],
-        searchEnabledDefault: true,
-        enabled: true,
-        healthy: true,
-      ),
-      const ProviderCatalogEntry(
-        id: 'hdrezka',
-        name: 'HDRezka',
-        baseUrl: 'https://hdrezka.ag',
-        showOnHome: false,
-        hasFixedStreams: true,
-        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
         searchEnabledDefault: true,
         enabled: true,
         healthy: true,

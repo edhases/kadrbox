@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/logger.dart';
 import '../../../data/providers/provider_registry.dart';
-import '../../../data/providers/youtube_provider.dart';
 import '../../../data/services/settings_service.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/content_provider.dart';
@@ -16,7 +15,7 @@ import '../../widgets/filter_sheet.dart';
 
 const _tag = 'ProviderPage';
 
-/// Dedicated page for a single provider (HDRezka, YouTube)
+/// Dedicated page for a single separate provider
 class ProviderPage extends StatefulWidget {
   final String providerId;
 
@@ -186,7 +185,7 @@ class _ProviderPageState extends State<ProviderPage>
         setState(() => _loadingByType[type] = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Не вдалося завантажити сторінку: $e'),
+            content: Text('РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё СЃС‚РѕСЂС–РЅРєСѓ: $e'),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -219,10 +218,6 @@ class _ProviderPageState extends State<ProviderPage>
 
   Color get _providerColor {
     switch (widget.providerId) {
-      case 'hdrezka':
-        return Colors.orange;
-      case 'youtube':
-        return Colors.red;
       default:
         return AppTheme.primaryColor;
     }
@@ -230,10 +225,6 @@ class _ProviderPageState extends State<ProviderPage>
 
   IconData get _providerIcon {
     switch (widget.providerId) {
-      case 'hdrezka':
-        return Icons.play_circle_filled;
-      case 'youtube':
-        return Icons.play_arrow;
       default:
         return Icons.video_library;
     }
@@ -245,18 +236,12 @@ class _ProviderPageState extends State<ProviderPage>
     return false;
   }
 
-  /// Check if provider requires search (no catalog available)
-  bool get _requiresSearch {
-    if (_provider is YouTubeProvider) return YouTubeProvider.requiresSearch;
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_provider == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Провайдер не знайдено')),
-        body: const Center(child: Text('Провайдер не знайдено')),
+        appBar: AppBar(title: const Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ')),
+        body: const Center(child: Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ')),
       );
     }
 
@@ -296,7 +281,7 @@ class _ProviderPageState extends State<ProviderPage>
                 context.go('/');
               }
             },
-            tooltip: 'Назад',
+            tooltip: 'РќР°Р·Р°Рґ',
           ),
           const SizedBox(width: 8),
           Icon(_providerIcon, color: _providerColor),
@@ -353,7 +338,7 @@ class _ProviderPageState extends State<ProviderPage>
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Якість та дубляж фіксуються при запуску відео і не можуть бути змінені під час перегляду',
+              'РЇРєС–СЃС‚СЊ С‚Р° РґСѓР±Р»СЏР¶ С„С–РєСЃСѓСЋС‚СЊСЃСЏ РїСЂРё Р·Р°РїСѓСЃРєСѓ РІС–РґРµРѕ С– РЅРµ РјРѕР¶СѓС‚СЊ Р±СѓС‚Рё Р·РјС–РЅРµРЅС– РїС–Рґ С‡Р°СЃ РїРµСЂРµРіР»СЏРґСѓ',
               style: TextStyle(fontSize: 12, color: Colors.orange.shade700),
             ),
           ),
@@ -436,7 +421,7 @@ class _ProviderPageState extends State<ProviderPage>
             const Icon(Icons.error_outline, size: 64, color: Colors.red),
             const SizedBox(height: 16),
             Text(
-              'Помилка завантаження',
+              'РџРѕРјРёР»РєР° Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
@@ -444,7 +429,7 @@ class _ProviderPageState extends State<ProviderPage>
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () => _loadContent(type),
-              child: const Text('Спробувати знову'),
+              child: const Text('РЎРїСЂРѕР±СѓРІР°С‚Рё Р·РЅРѕРІСѓ'),
             ),
           ],
         ),
@@ -452,39 +437,6 @@ class _ProviderPageState extends State<ProviderPage>
     }
 
     if (items.isEmpty) {
-      // For providers that require search, show search hint
-      if (_requiresSearch) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.search, size: 64, color: _providerColor),
-              const SizedBox(height: 16),
-              Text(
-                'Використовуйте пошук',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'YouTube не дозволяє перегляд каталогу.\nВикористовуйте глобальний пошук для знаходження відео.',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () => context.go('/search'),
-                icon: const Icon(Icons.search),
-                label: const Text('Перейти до пошуку'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _providerColor,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -492,12 +444,12 @@ class _ProviderPageState extends State<ProviderPage>
             Icon(_getTypeIcon(type), size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             Text(
-              'Нічого не знайдено',
+              'РќС–С‡РѕРіРѕ РЅРµ Р·РЅР°Р№РґРµРЅРѕ',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Спробуйте змінити фільтри',
+              'РЎРїСЂРѕР±СѓР№С‚Рµ Р·РјС–РЅРёС‚Рё С„С–Р»СЊС‚СЂРё',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],

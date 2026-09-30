@@ -77,7 +77,7 @@ func getEnv(key, defaultVal string) string {
 	return defaultVal
 }
 
-// GetDisabledProviders парсить DISABLED_PROVIDERS ("uaflix, hdrezka") у список ID.
+// GetDisabledProviders парсить DISABLED_PROVIDERS (напр. "uakino, lavakino") у список ID.
 func (c *Config) GetDisabledProviders() []string {
 	var out []string
 	for _, id := range strings.Split(c.DisabledProviders, ",") {

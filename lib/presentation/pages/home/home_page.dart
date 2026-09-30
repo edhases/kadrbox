@@ -92,7 +92,9 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _settings.removeListener(_onSettingsChanged);
     try {
-      GetIt.instance<ProviderCatalogService>().removeListener(_onCatalogChanged);
+      GetIt.instance<ProviderCatalogService>().removeListener(
+        _onCatalogChanged,
+      );
     } catch (_) {}
     _scrollController.dispose();
     super.dispose();
@@ -311,14 +313,10 @@ class _HomePageState extends State<HomePage> {
 
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
-        LogicalKeySet(
-          LogicalKeyboardKey.control,
-          LogicalKeyboardKey.keyK,
-        ): const SearchIntent(),
-        LogicalKeySet(
-          LogicalKeyboardKey.meta,
-          LogicalKeyboardKey.keyK,
-        ): const SearchIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyK):
+            const SearchIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyK):
+            const SearchIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -657,9 +655,7 @@ class _HomePageState extends State<HomePage> {
           ),
 
           // Categories & Source filter pills directly under the top header
-          SliverToBoxAdapter(
-            child: _buildCategoryPillsBar(),
-          ),
+          SliverToBoxAdapter(child: _buildCategoryPillsBar()),
 
           // Active quick filter chips
           if (_filter.hasActiveFilters)
@@ -689,9 +685,7 @@ class _HomePageState extends State<HomePage> {
 
           // Hero Banner (Top featured item)
           if (heroItem != null)
-            SliverToBoxAdapter(
-              child: HeroBanner(item: heroItem),
-            ),
+            SliverToBoxAdapter(child: HeroBanner(item: heroItem)),
 
           // Continue Watching Section
           if (!_filter.hasActiveFilters)
@@ -746,9 +740,21 @@ class _HomePageState extends State<HomePage> {
       (null, 'Всі', Icons.grid_view_rounded),
       (ContentType.movie, ContentType.movie.displayName, Icons.movie_outlined),
       (ContentType.series, ContentType.series.displayName, Icons.tv_outlined),
-      (ContentType.cartoon, ContentType.cartoon.displayName, Icons.animation_outlined),
-      (ContentType.anime, ContentType.anime.displayName, Icons.auto_awesome_outlined),
-      (ContentType.dorama, ContentType.dorama.displayName, Icons.filter_vintage_outlined),
+      (
+        ContentType.cartoon,
+        ContentType.cartoon.displayName,
+        Icons.animation_outlined,
+      ),
+      (
+        ContentType.anime,
+        ContentType.anime.displayName,
+        Icons.auto_awesome_outlined,
+      ),
+      (
+        ContentType.dorama,
+        ContentType.dorama.displayName,
+        Icons.filter_vintage_outlined,
+      ),
     ];
 
     final homeProviders = _registry.homeProviders;
@@ -770,15 +776,9 @@ class _HomePageState extends State<HomePage> {
                 _loadContent();
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: null,
-                  child: Text('Всі джерела'),
-                ),
+                const PopupMenuItem(value: null, child: Text('Всі джерела')),
                 ...homeProviders.map(
-                  (p) => PopupMenuItem(
-                    value: p.id,
-                    child: Text(p.name),
-                  ),
+                  (p) => PopupMenuItem(value: p.id, child: Text(p.name)),
                 ),
               ],
               child: FilterChip(
@@ -868,30 +868,6 @@ class _HomePageState extends State<HomePage> {
               ),
             );
           }),
-
-          // HDRezka dedicated button
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ActionChip(
-              avatar: const Icon(
-                Icons.play_circle_filled,
-                size: 16,
-                color: Colors.orange,
-              ),
-              label: const Text('HDREZKA'),
-              labelStyle: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.orange,
-              ),
-              backgroundColor: Colors.orange.withValues(alpha: 0.15),
-              side: BorderSide(color: Colors.orange.withValues(alpha: 0.4)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              onPressed: () => context.push('/provider/hdrezka'),
-            ),
-          ),
         ],
       ),
     );
@@ -1071,7 +1047,11 @@ class _HomePageState extends State<HomePage> {
         const SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Skeleton(width: double.infinity, height: 340, borderRadius: 20),
+            child: Skeleton(
+              width: double.infinity,
+              height: 340,
+              borderRadius: 20,
+            ),
           ),
         ),
 

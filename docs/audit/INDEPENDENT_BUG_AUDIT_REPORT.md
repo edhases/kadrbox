@@ -53,7 +53,6 @@
 | **BUG-GO-14** | `server/db` | **MEDIUM** | Небезпечне багаторазове виконання міграцій без блокування та таблиці обліку | Database Integrity |
 | **BUG-GO-15** | `server/email` | **MEDIUM** | Синхронне блокування HTTP-запитів реєстрації зовнішнім Resend API | Latency / DoS |
 | **BUG-GO-16** | `server/http` | **MEDIUM** | Мертвий код CacheRepository у `ContentHandler` (відсутність кешування) | Performance |
-| **BUG-GO-17** | `server/provider`| **LOW** | HDRezka `GetStreams` повертає HTML-посилання замість розпарсеного потоку | Provider Quality |
 | **BUG-GO-18** | `server/postgres`| **LOW** | Неможливість скинути `bio` та `avatar_url` на порожнє значення у `UpdateProfile` | Logic Flaw |
 | **BUG-FL-01** | `lib/services` | **CRITICAL** | Контрактний розрив регістру полів (camelCase vs snake_case) у Cloud Sync | Contract Mismatch |
 | **BUG-FL-02** | `lib/services` | **CRITICAL** | Помилка синхронізації обраного: неможливо видалити фільм із сервера ("Zombie Favorites") | Data Integrity |
@@ -367,15 +366,6 @@ AllowedOrigins: []string{
   Поле `cacheRepo` передається в конструктор `ContentHandler`, але жодного разу не використовується в методах `Search`, `GetDetails` або `GetStreams`. Весь функціонал кешування метаданих фільмів у Postgres є "мертвим" кодом.
 - **Спосіб виправлення:**
   Інтегрувати `cacheRepo.Get` та `cacheRepo.Set` перед зверненням до провайдерів.
-
----
-
-#### BUG-GO-17 [LOW]: Заглушка `GetStreams` у `HdrezkaProvider`
-- **Файл та рядки:** [hdrezka.go](file:///e:/Github/oxide_film/server/internal/provider/hdrezka.go#L103-L122)
-- **У чому полягає проблема:**
-  Метод `GetStreams` повертає `itemURL` сторінки як пряме посилання на відео (`DirectURL: itemURL`), що не є медіапотоком m3u8/mp4. Функція `DecodeStreamURL` присутня, але не викликається.
-- **Спосіб виправлення:**
-  Реалізувати парсинг CDN-стрімів з AJAX-ендпоінту HDRezka або повертати коректну помилку.
 
 ---
 

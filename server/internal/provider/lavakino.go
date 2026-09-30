@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -328,69 +327,29 @@ func (p *LavakinoProvider) GetDetails(ctx context.Context, itemURL string) (*dom
 	}, nil
 }
 
-// GetStreams знаходить плеєри (hdvbua, ashdi, zenith) та розбирає прямі стріми
+// GetStreams знаходить плеєр (hdvbua, ashdi, zenith) та розбирає прямі стріми.
+//
+// Раніше тут був резервний варіант, який додавав URL самого iframe як
+// «потік». Це HTML-сторінка, тож libmpv її не демокує («Failed to recognize
+// file format.») — тобто резервний варіант давав гарантовану помилку
+// відтворення замість відсутності джерела. Крім того, `return` усередині
+// goquery `.Each` виходить лише з поточної ітерації, тож наступні iframe
+// додавали ще й такі самі непридатні URL.
+//
+// Тепер: спільний resolveStreamsFromItemPage ранжує iframe (пропускає
+// коментарі, рекламу, about:blank), бере перший придатний плеєр, розбирає
+// його через ResolvePlayerHTML (стратегії PlayerJS / sources / Hls.loadSource
+// / base64) і повертає порожній список + ErrUnresolvablePlayer, якщо
+// придатного медіа немає. Referer тепер береться з медіа-URL, а не з
+// домену агрегатора, і додається Origin.
 func (p *LavakinoProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
 	html, err := p.client.Get(ctx, itemURL, p.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("lavakino get streams html: %w", err)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return nil, fmt.Errorf("parse stream html: %w", err)
-	}
+	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
+	defer cancel()
 
-	var streams []domain.StreamSource
-	reFile := regexp.MustCompile(`file\s*:\s*["']([^"']+)["']`)
-
-	doc.Find("iframe").Each(func(i int, s *goquery.Selection) {
-		src, exists := s.Attr("src")
-		if !exists || src == "" || strings.Contains(src, "trailer") || strings.Contains(src, "youtube") {
-			return
-		}
-		if strings.HasPrefix(src, "//") {
-			src = "https:" + src
-		} else if !strings.HasPrefix(src, "http") {
-			src = p.baseURL + src
-		}
-
-		// Спробуємо отримати сторінку плеєра для розбору прямих потоків (PlayerJS / m3u8)
-		frameHTML, err := p.client.Get(ctx, src, p.baseURL+"/")
-		if err == nil {
-			fileMatch := reFile.FindStringSubmatch(frameHTML)
-			if len(fileMatch) > 1 {
-				fileURL := fileMatch[1]
-				if strings.Contains(fileURL, ".m3u8") || strings.Contains(fileURL, ".mp4") {
-					streams = append(streams, domain.StreamSource{
-						Quality:       "Auto / 1080p",
-						URL:           fileURL,
-						DirectURL:     fileURL,
-						RequiresProxy: false,
-						Headers: map[string]string{
-							"Referer":    src,
-							"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-						},
-					})
-					return
-				}
-			}
-		}
-
-		// Резервний варіант: посилання на сам iframe плеєр
-		streams = append(streams, domain.StreamSource{
-			Quality:       fmt.Sprintf("Плеєр %d", len(streams)+1),
-			URL:           src,
-			DirectURL:     src,
-			RequiresProxy: false,
-			Headers: map[string]string{
-				"Referer":    p.baseURL + "/",
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-			},
-		})
-	})
-
-	return &domain.ContentStreamsResponse{
-		ProviderID: p.ID(),
-		Streams:    streams,
-	}, nil
+	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html)
 }

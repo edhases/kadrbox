@@ -12,7 +12,11 @@ void main() {
     registry = ProviderRegistry();
   });
 
-  ServerBackedProvider makeProvider(String id, String name, {bool home = true}) {
+  ServerBackedProvider makeProvider(
+    String id,
+    String name, {
+    bool home = true,
+  }) {
     return ServerBackedProvider(
       ProviderCatalogEntry(
         id: id,
@@ -74,12 +78,46 @@ void main() {
       expect(animeProviders.length, 2);
     });
 
-    test('homeProviders should exclude separate providers', () {
-      registry.register(makeProvider('uakino', 'UAKino', home: true));
-      registry.register(makeProvider('hdrezka', 'HDRezka', home: false));
+    test(
+      'homeProviders should exclude providers whose catalog says showOnHome=false',
+      () {
+        registry.register(makeProvider('uakino', 'UAKino', home: true));
+        registry.register(makeProvider('dedicated', 'Dedicated', home: false));
 
-      expect(registry.homeProviders.map((p) => p.id), contains('uakino'));
-      expect(registry.homeProviders.map((p) => p.id), isNot(contains('hdrezka')));
+        expect(registry.homeProviders.map((p) => p.id), contains('uakino'));
+        expect(
+          registry.homeProviders.map((p) => p.id),
+          isNot(contains('dedicated')),
+        );
+      },
+    );
+
+    test(
+      'backend catalog snapshot overrides the provider-owned showOnHome flag',
+      () {
+        registry.register(makeProvider('uakino', 'UAKino', home: true));
+        registry.register(makeProvider('lavakino', 'Lavakino', home: true));
+
+        registry.applyBackendCatalog(
+          enabled: const {'uakino': true, 'lavakino': true},
+          showOnHome: const {'uakino': true, 'lavakino': false},
+          fixedStreams: const {'uakino': false, 'lavakino': false},
+        );
+
+        expect(registry.homeProviders.map((p) => p.id), ['uakino']);
+      },
+    );
+
+    test('hasFixed falls back to the provider catalog flag', () {
+      final fixed = makeProvider('fixedstreams', 'FixedStreams');
+      expect(registry.hasFixed(fixed), isFalse);
+
+      registry.applyBackendCatalog(
+        enabled: const {'fixedstreams': true},
+        showOnHome: const {'fixedstreams': true},
+        fixedStreams: const {'fixedstreams': true},
+      );
+      expect(registry.hasFixed(fixed), isTrue);
     });
 
     test('unregister should remove provider', () {

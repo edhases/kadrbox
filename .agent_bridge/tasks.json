@@ -1,0 +1,40 @@
+{
+  "active_task": "wave-3a-bandera",
+  "tasks": [
+    {
+      "id": "wave-2-stabilization",
+      "title": "Збереження хвилі 2 (видалення HDRezka, YouTube, новий resolve.go)",
+      "status": "pending_commit",
+      "owner": "antigravity"
+    },
+    {
+      "id": "wave-3a-bandera",
+      "title": "Рефакторинг Bandera, виправлення GetStreams та підтримка per-voice озвучок",
+      "status": "in_progress",
+      "owner": "antigravity",
+      "reviewer": "opencode",
+      "subtasks": [
+        "Додати Episode.streamRef у Flutter (media_details.dart)",
+        "Розпарсити em['url'] у server_backed_provider.dart",
+        "Розбити bandera.go моноліт (types.go, bandera_client.go, select.go, normalize.go)",
+        "Виправити розпізнавання BanderaItemPayload vs BanderaStreamRef у GetStreams",
+        "Підтримка всіх озвучок (per-voice season/episode trees)",
+        "Субтитри в domain.SubtitleSource",
+        "Proxy правила (uaflix+zetvideo direct, ashdi/sniplyo/creavio через proxy)",
+        "Golden-фікстури для верифікації"
+      ]
+    },
+    {
+      "id": "server-failsafes",
+      "title": "Серверні запобіжники: 422 замість 500 для ErrUnresolvablePlayer, WriteTimeout, recover()",
+      "status": "planned",
+      "owner": "antigravity"
+    },
+    {
+      "id": "wave-3b-search",
+      "title": "Виправлення кирилиці в пошуку, видалення шкідливого словника, серверний fan-out",
+      "status": "planned",
+      "owner": "antigravity"
+    }
+  ]
+}

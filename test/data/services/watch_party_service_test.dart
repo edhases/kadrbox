@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
-import 'package:oxide_film/data/services/services.dart';
 import 'package:oxide_film/data/services/watch_party_service.dart';
 import 'package:oxide_film/data/services/oxide_server_service.dart';
+import 'package:oxide_film/data/services/settings_service.dart';
 
 // Manual Mocks
 class MockWatchPartyBackend implements WatchPartyBackend {

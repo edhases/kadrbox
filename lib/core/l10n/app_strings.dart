@@ -115,10 +115,6 @@ class AppStrings {
   String get noSources => _t('Немає джерел', 'No sources');
   String resumedFrom(String time) =>
       _t('Продовжено з $time', 'Resumed from $time');
-  String get regionBlocked => _t(
-    'На жаль, це відео недоступне для вашого регіону. Спробуйте увімкнути VPN.',
-    'Sorry, this video is not available in your region. Try enabling VPN.',
-  );
 
   // ============================================================================
   // DETAILS

@@ -3,7 +3,6 @@ import 'package:injectable/injectable.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../network/api_client.dart';
 import '../../data/providers/provider_registry.dart';
-import '../../data/providers/youtube_provider.dart';
 import '../../data/database/app_database.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/favorites_service.dart';
@@ -124,9 +123,6 @@ Future<void> configureDependencies() async {
     () => ProviderCatalogService(),
   );
 
-  // Register content providers
-  _registerProviders();
-
   // Search service (depends on registry)
   getIt.registerLazySingleton<SearchService>(
     () => SearchService(getIt<ProviderRegistry>()),
@@ -158,12 +154,4 @@ Future<void> configureDependencies() async {
       mediaItemsDao: MediaItemsDao(database),
     ),
   );
-}
-
-void _registerProviders() {
-  final registry = getIt<ProviderRegistry>();
-  final apiClient = getIt<ApiClient>();
-
-  // YouTube: Embed-only client-side provider (ToS compliant, no direct stream extraction)
-  registry.register(YouTubeProvider(apiClient));
 }

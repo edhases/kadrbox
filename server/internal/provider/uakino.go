@@ -340,41 +340,22 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 	}, nil
 }
 
-// GetStreams знаходить плеєр та генерує посилання на потік із правильними Referer/User-Agent
+// GetStreams знаходить плеєр у iframe та резолвить його у прямий медіа-потік.
+//
+// Раніше метод повертав URL самого iframe. Це HTML-сторінка, яку libmpv не може
+// демодулювати ("Failed to recognize file format."), тобто 100% відмова відтворення.
+// Тепер iframe лише завантажується і розбирається через ResolvePlayerHTML; якщо
+// жоден потік не розпізнано — повертається порожній список + ErrUnresolvablePlayer.
 func (p *UakinoProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
 	html, err := p.client.Get(ctx, itemURL, p.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("uakino get streams html: %w", err)
 	}
 
-	// Пошук iframe плеєра (наприклад Ashdi, PlayerJS тощо)
-	iframeRe := regexp.MustCompile(`<iframe[^>]+src=["']([^"']+)["']`)
-	matches := iframeRe.FindStringSubmatch(html)
+	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
+	defer cancel()
 
-	var streams []domain.StreamSource
-	if len(matches) > 1 {
-		iframeURL := matches[1]
-		if strings.HasPrefix(iframeURL, "//") {
-			iframeURL = "https:" + iframeURL
-		}
-
-		// Резолвінг потоку з iframe
-		streams = append(streams, domain.StreamSource{
-			Quality:       "Auto / 1080p",
-			URL:           iframeURL,
-			DirectURL:     iframeURL,
-			RequiresProxy: false,
-			Headers: map[string]string{
-				"Referer":    p.baseURL + "/",
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-			},
-		})
-	}
-
-	return &domain.ContentStreamsResponse{
-		ProviderID: p.ID(),
-		Streams:    streams,
-	}, nil
+	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html)
 }
 
 func parseYear(text string) int {

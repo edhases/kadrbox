@@ -42,14 +42,6 @@ void main() {
       expect(slug, isNotEmpty);
     });
 
-    test('should return correct slug for HDRezka', () {
-      final slug = ProviderGenreMappings.getSlugForProvider(
-        'hdrezka',
-        'Комедія',
-      );
-      expect(slug, isNotEmpty);
-    });
-
     test('should use ContentGenres.toSlug for unknown provider', () {
       // For unknown providers, it uses ContentGenres.toSlug which maps 'Бойовик' -> 'action'
       final slug = ProviderGenreMappings.getSlugForProvider(

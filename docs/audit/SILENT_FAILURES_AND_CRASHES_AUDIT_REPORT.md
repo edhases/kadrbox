@@ -256,7 +256,6 @@ try {
   - `server/internal/provider/client.go:49-60`, `77-88`
   - `server/internal/provider/uakino.go:40-86`
   - `server/internal/provider/eneyida.go:38-75`
-  - `server/internal/provider/hdrezka.go:38-73`
 - **Сценарій виникнення:**
   1. `TLSClient.Get()` та `TLSClient.PostForm()` виконують запит до провайдера.
   2. Якщо провайдер повертає `403 Forbidden` (капча/блокування Cloudflare), `502 Bad Gateway` або `429 Too Many Requests`, клієнт **НЕ перевіряє** `resp.StatusCode`.

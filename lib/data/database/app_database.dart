@@ -229,7 +229,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   static QueryExecutor _openConnection() {
     return driftDatabase(
@@ -265,6 +265,33 @@ class AppDatabase extends _$AppDatabase {
         if (from < 9) {
           await m.addColumn(downloads, downloads.localPosterPath);
           await m.addColumn(downloads, downloads.duration);
+        }
+
+        // Migration: purge rows of removed providers (data-only, no schema change).
+        // `media_card.dart` renders `item.providerId.toUpperCase()` generically, so
+        // leftover `hdrezka` rows would still render a literal "HDREZKA" badge and
+        // still route to `/details/hdrezka/...` — a page that no longer exists.
+        if (from < 10) {
+          for (final providerId in const [
+            'hdrezka',
+            'search_enabled_hdrezka',
+          ]) {
+            await (delete(
+              enabledProviders,
+            )..where((t) => t.providerId.equals(providerId))).go();
+          }
+          await (delete(
+            favorites,
+          )..where((t) => t.providerId.equals('hdrezka'))).go();
+          await (delete(
+            watchHistory,
+          )..where((t) => t.providerId.equals('hdrezka'))).go();
+          await (delete(
+            downloads,
+          )..where((t) => t.providerId.equals('hdrezka'))).go();
+          await (delete(
+            storedMediaItems,
+          )..where((t) => t.providerId.equals('hdrezka'))).go();
         }
       },
     );

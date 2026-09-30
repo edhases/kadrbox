@@ -9,7 +9,7 @@
 **Oxide Film** — це сучасний мультиплатформовий клієнт (Windows, Android, Linux) для агрегації, каталогізації, пошуку та потокового відтворення медіаконтенту (фільми, серіали, мультфільми, аніме). 
 
 ### Ключові цілі та концепція:
-- **Уніфікований доступ до контенту**: Агрегація каталогів з провайдерів україномовного та міжнародного сегменту (UAKino, Eneyida, UaFlix, UASerials, HDRezka, YouTube) через модульні скрапери та парсери.
+- **Уніфікований доступ до контенту**: Агрегація каталогів з провайдерів україномовного та міжнародного сегменту (UAKino, Eneyida, UaFlix, UASerials, YouTube) через модульні скрапери та парсери.
 - **Offline-First & Local-First**: Повноцінна функціональність без обов'язкової наявності облікового запису або постійної мережі — локальна база даних зберігає історію, закладки, кеш метаданих та завантаження.
 - **Хмарна синхронізація та P2P/Watch Party**: Опційна авторизація на бекенді PocketBase для синхронізації між пристроями та синхронного спільного перегляду (Watch Party) через PocketBase Realtime SSE або P2P WebRTC (PeerDart).
 - **Високопродуктивне кросплатформне відеовідтворення**: Використання нативного рушія libmpv через екосистему `media_kit`, що гарантує плавне апаратне декодування, підтримку різноманітних аудіо/відео кодеків, вибір субтитрів, аудіодоріжок і зміну якості потоку.
@@ -64,7 +64,7 @@ flowchart TD
 
     subgraph DataLayer ["Data Layer (Implementations & Sources)"]
         RepoImpl["UnifiedContentRepositoryImpl"]
-        Providers["Content Providers (Uakino, Hdrezka, Eneyida, etc.)"]
+        Providers["Content Providers (Uakino, Eneyida, etc.)"]
         Parsers["HTML/JSON Scrapers & Parsers"]
         LocalDB["Drift AppDatabase & DAOs"]
         CloudServices["PocketBaseService, WatchPartyService, SyncService"]
@@ -100,7 +100,7 @@ flowchart TD
 ### 3.2. Data Layer (`lib/data/`)
 Реалізація інтерфейсів предметної області, взаємодія з локальною базою даних, файловою системою та зовнішнім світом:
 - **Providers & Parsers** ([`lib/data/providers/`](file:///e:/Github/oxide_film/lib/data/providers/), [`lib/data/parsers/`](file:///e:/Github/oxide_film/lib/data/parsers/)):
-  - Реалізації `ContentProvider` для сайтів: `UakinoProvider`, `EneyidaProvider`, `UaflixProvider`, `UaserialsProvider`, `HdrezkaProvider`, `YouTubeProvider`.
+  - Реалізації `ContentProvider` для сайтів: `UakinoProvider`, `EneyidaProvider`, `UaflixProvider`, `UaserialsProvider`, `YouTubeProvider`.
   - Спеціалізовані HTML-парсери на базі `beautiful_soup_dart`.
 - **Database & DAOs** ([`lib/data/database/`](file:///e:/Github/oxide_film/lib/data/database/)):
   - [`AppDatabase`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart): Схема SQLite з таблицями `AppSettings`, `EnabledProviders`, `Favorites`, `WatchHistory`, `Downloads`, `SearchHistoryTable`, `StoredMediaItems`.
@@ -182,7 +182,7 @@ sequenceDiagram
 4. **Сервіси предметної області та DAOs**:
    - `SettingsService`, `FavoritesService`, `HistoryService`, `DownloadService`, `WatchPartyService`, `TMDbService`, `RecommendationService`.
 5. **Реєстр контент-провайдерів (`ProviderRegistry`)**:
-   - Провайдери реєструються як плагіни: `UakinoProvider`, `EneyidaProvider`, `UaflixProvider`, `UaserialsProvider`, `HdrezkaProvider`, `YouTubeProvider`.
+   - Провайдери реєструються як плагіни: `UakinoProvider`, `EneyidaProvider`, `UaflixProvider`, `UaserialsProvider`, `YouTubeProvider`.
 6. **Уніфікований репозиторій**:
    - `UnifiedContentRepository` зв'язує провайдери та локальні таблиці Drift.
 
@@ -270,7 +270,7 @@ sequenceDiagram
     participant UI as DetailsPage / PlayerPage
     participant PC as PlayerController
     participant Repos as UnifiedContentRepository
-    participant Prov as UakinoProvider / HdrezkaProvider
+    participant Prov as UakinoProvider / EneyidaProvider
     participant DB as AppDatabase (Drift)
     participant Engine as MediaKit (libmpv)
 

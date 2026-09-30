@@ -38,13 +38,19 @@ class PlayerControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (controller.state.hasError) return const SizedBox.shrink();
+    // NOTE: the bar deliberately still renders while an error is showing.
+    // It used to `return SizedBox.shrink()`, which removed the quality /
+    // track / URL inspection affordance exactly when it is most useful.
+    // Instead it renders disabled (dimmed, non-interactive) so the user can
+    // still see what was being played and pick a different source.
+    final hasError = controller.state.hasError;
 
     return AnimatedOpacity(
-      opacity: showControls ? 1.0 : 0.0,
+      opacity: showControls ? (hasError ? 0.45 : 1.0) : 0.0,
       duration: const Duration(milliseconds: 300),
       child: IgnorePointer(
-        ignoring: !showControls,
+        // Hidden controls or an active error both block input.
+        ignoring: !showControls || hasError,
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(

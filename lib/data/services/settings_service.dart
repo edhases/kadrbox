@@ -16,13 +16,13 @@ enum AppThemeMode {
   String get displayName {
     switch (this) {
       case AppThemeMode.dark:
-        return 'Темна';
+        return 'Р СћР ВµР СР Р…Р В°';
       case AppThemeMode.amoled:
         return 'AMOLED';
       case AppThemeMode.light:
-        return 'Світла';
+        return 'Р РЋР Р†РЎвЂ“РЎвЂљР В»Р В°';
       case AppThemeMode.system:
-        return 'Системна';
+        return 'Р РЋР С‘РЎРѓРЎвЂљР ВµР СР Р…Р В°';
     }
   }
 
@@ -47,7 +47,7 @@ enum DefaultQuality {
   String get displayName {
     switch (this) {
       case DefaultQuality.auto:
-        return 'Авто';
+        return 'Р С’Р Р†РЎвЂљР С•';
       case DefaultQuality.q480p:
         return '480p';
       case DefaultQuality.q720p:
@@ -77,9 +77,9 @@ enum PlayerType {
   String get displayName {
     switch (this) {
       case PlayerType.internal:
-        return 'Вбудований';
+        return 'Р вЂ™Р В±РЎС“Р Т‘Р С•Р Р†Р В°Р Р…Р С‘Р в„–';
       case PlayerType.external:
-        return 'Зовнішній';
+        return 'Р вЂ”Р С•Р Р†Р Р…РЎвЂ“РЎв‚¬Р Р…РЎвЂ“Р в„–';
     }
   }
 
@@ -475,11 +475,11 @@ class SettingsService extends ChangeNotifier {
   }
 
   // ============================================================================
-  // SEPARATE PROVIDER SEARCH SETTINGS (HDRezka, YouTube)
+  // SEPARATE PROVIDER SEARCH SETTINGS
   // ============================================================================
 
   /// Check if search is enabled for a separate provider (default: false)
-  /// Separate providers (HDRezka, YouTube) are excluded from global search by default
+  /// Separate providers are excluded from global search by default
   bool isSearchEnabledForProvider(String providerId) {
     final key = 'search_enabled_$providerId';
     // For separate providers, default is false (not included in global search)

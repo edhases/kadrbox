@@ -90,7 +90,9 @@ class _CategoryPageState extends State<CategoryPage>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     try {
-      GetIt.instance<ProviderCatalogService>().removeListener(_onCatalogChanged);
+      GetIt.instance<ProviderCatalogService>().removeListener(
+        _onCatalogChanged,
+      );
     } catch (_) {}
     super.dispose();
   }
@@ -133,7 +135,7 @@ class _CategoryPageState extends State<CategoryPage>
         await GetIt.instance<ProviderCatalogService>().sync();
       } catch (_) {}
 
-      // Get only home providers (excludes HDRezka/YouTube which have dedicated buttons)
+      // Get only home providers (excludes providers with dedicated pages)
       final providers = _registry.getHomeProvidersByContentType(type);
       Logger.d(
         'Loading $type content from ${providers.length} home providers: '
@@ -317,17 +319,17 @@ class _CategoryPageState extends State<CategoryPage>
                 context.go('/');
               }
             },
-            tooltip: 'Назад',
+            tooltip: 'Р В Р’В Р РЋРЎС™Р В Р’В Р вЂ™Р’В°Р В Р’В Р вЂ™Р’В·Р В Р’В Р вЂ™Р’В°Р В Р’В Р СћРІР‚В',
           ),
           const SizedBox(width: 8),
           const Icon(Icons.category),
           const SizedBox(width: 8),
           const Text(
-            'Каталог',
+            'Р В Р’В Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В°Р В Р Р‹Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В°Р В Р’В Р вЂ™Р’В»Р В Р’В Р РЋРІР‚СћР В Р’В Р РЋРІР‚вЂњ',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const Spacer(),
-          // Separate provider buttons (HDRezka, YouTube)
+          // Separate provider buttons
           ..._buildSeparateProviderButtons(),
           const SizedBox(width: 8),
           FilterButton(
@@ -361,7 +363,7 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  /// Build buttons for separate providers (HDRezka, YouTube)
+  /// Build buttons for separate providers
   List<Widget> _buildSeparateProviderButtons() {
     final separateProviders = _registry.separateProviders;
     if (separateProviders.isEmpty) return [];
@@ -455,7 +457,7 @@ class _CategoryPageState extends State<CategoryPage>
             const Icon(Icons.error_outline, size: 64, color: Colors.red),
             const SizedBox(height: 16),
             Text(
-              'Помилка завантаження',
+              'Р В Р’В Р РЋРЎСџР В Р’В Р РЋРІР‚СћР В Р’В Р РЋР’ВР В Р’В Р РЋРІР‚ВР В Р’В Р вЂ™Р’В»Р В Р’В Р РЋРІР‚СњР В Р’В Р вЂ™Р’В° Р В Р’В Р вЂ™Р’В·Р В Р’В Р вЂ™Р’В°Р В Р’В Р В РІР‚В Р В Р’В Р вЂ™Р’В°Р В Р’В Р В РІР‚В¦Р В Р Р‹Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В°Р В Р’В Р вЂ™Р’В¶Р В Р’В Р вЂ™Р’ВµР В Р’В Р В РІР‚В¦Р В Р’В Р В РІР‚В¦Р В Р Р‹Р В Р РЏ',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
@@ -463,7 +465,7 @@ class _CategoryPageState extends State<CategoryPage>
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () => _loadContent(type),
-              child: const Text('Спробувати знову'),
+              child: const Text('Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚вЂќР В Р Р‹Р В РІР‚С™Р В Р’В Р РЋРІР‚СћР В Р’В Р вЂ™Р’В±Р В Р Р‹Р РЋРІР‚СљР В Р’В Р В РІР‚В Р В Р’В Р вЂ™Р’В°Р В Р Р‹Р Р†Р вЂљРЎв„ўР В Р’В Р РЋРІР‚В Р В Р’В Р вЂ™Р’В·Р В Р’В Р В РІР‚В¦Р В Р’В Р РЋРІР‚СћР В Р’В Р В РІР‚В Р В Р Р‹Р РЋРІР‚Сљ'),
             ),
           ],
         ),
@@ -478,12 +480,12 @@ class _CategoryPageState extends State<CategoryPage>
             Icon(_getTypeIcon(type), size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             Text(
-              'Нічого не знайдено',
+              'Р В Р’В Р РЋРЎС™Р В Р Р‹Р Р†Р вЂљРІР‚СљР В Р Р‹Р Р†Р вЂљР Р‹Р В Р’В Р РЋРІР‚СћР В Р’В Р РЋРІР‚вЂњР В Р’В Р РЋРІР‚Сћ Р В Р’В Р В РІР‚В¦Р В Р’В Р вЂ™Р’Вµ Р В Р’В Р вЂ™Р’В·Р В Р’В Р В РІР‚В¦Р В Р’В Р вЂ™Р’В°Р В Р’В Р Р†РІР‚С›РІР‚вЂњР В Р’В Р СћРІР‚ВР В Р’В Р вЂ™Р’ВµР В Р’В Р В РІР‚В¦Р В Р’В Р РЋРІР‚Сћ',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Спробуйте змінити фільтри',
+              'Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚вЂќР В Р Р‹Р В РІР‚С™Р В Р’В Р РЋРІР‚СћР В Р’В Р вЂ™Р’В±Р В Р Р‹Р РЋРІР‚СљР В Р’В Р Р†РІР‚С›РІР‚вЂњР В Р Р‹Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’Вµ Р В Р’В Р вЂ™Р’В·Р В Р’В Р РЋР’ВР В Р Р‹Р Р†Р вЂљРІР‚СљР В Р’В Р В РІР‚В¦Р В Р’В Р РЋРІР‚ВР В Р Р‹Р Р†Р вЂљРЎв„ўР В Р’В Р РЋРІР‚В Р В Р Р‹Р Р†Р вЂљРЎвЂєР В Р Р‹Р Р†Р вЂљРІР‚СљР В Р’В Р вЂ™Р’В»Р В Р Р‹Р В Р вЂ°Р В Р Р‹Р Р†Р вЂљРЎв„ўР В Р Р‹Р В РІР‚С™Р В Р’В Р РЋРІР‚В',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],
@@ -604,7 +606,7 @@ class _CategoryPageState extends State<CategoryPage>
   }
 }
 
-/// Button for separate providers (HDRezka, YouTube)
+/// Button for separate providers
 class _SeparateProviderButton extends StatelessWidget {
   final ContentProvider provider;
   final VoidCallback onTap;
@@ -650,10 +652,6 @@ class _SeparateProviderButton extends StatelessWidget {
 
   IconData _getProviderIcon(String providerId) {
     switch (providerId) {
-      case 'hdrezka':
-        return Icons.play_circle_filled;
-      case 'youtube':
-        return Icons.play_arrow;
       default:
         return Icons.video_library;
     }
@@ -661,10 +659,6 @@ class _SeparateProviderButton extends StatelessWidget {
 
   Color _getProviderColor(BuildContext context, String providerId) {
     switch (providerId) {
-      case 'hdrezka':
-        return Colors.orange;
-      case 'youtube':
-        return Colors.red;
       default:
         return Theme.of(context).colorScheme.primary;
     }

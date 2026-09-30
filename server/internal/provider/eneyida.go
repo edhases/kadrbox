@@ -316,36 +316,20 @@ func (p *EneyidaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 	}, nil
 }
 
+// GetStreams знаходить плеєр у iframe та резолвить його у прямий медіа-потік.
+//
+// Раніше метод повертав URL самого iframe — це HTML, який libmpv не демодулює
+// ("Failed to recognize file format."). Тепер iframe розбирається через
+// ResolvePlayerHTML, і за відсутності розпізнаного потоку повертається
+// порожній список + ErrUnresolvablePlayer (а не HTML-сторінка для mpv).
 func (p *EneyidaProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
 	html, err := p.client.Get(ctx, itemURL, p.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("eneyida get streams: %w", err)
 	}
 
-	iframeRe := regexp.MustCompile(`<iframe[^>]+src=["']([^"']+)["']`)
-	matches := iframeRe.FindStringSubmatch(html)
+	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
+	defer cancel()
 
-	var streams []domain.StreamSource
-	if len(matches) > 1 {
-		iframeURL := matches[1]
-		if strings.HasPrefix(iframeURL, "//") {
-			iframeURL = "https:" + iframeURL
-		}
-
-		streams = append(streams, domain.StreamSource{
-			Quality:       "Auto",
-			URL:           iframeURL,
-			DirectURL:     iframeURL,
-			RequiresProxy: false,
-			Headers: map[string]string{
-				"Referer":    p.baseURL + "/",
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-			},
-		})
-	}
-
-	return &domain.ContentStreamsResponse{
-		ProviderID: p.ID(),
-		Streams:    streams,
-	}, nil
+	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html)
 }

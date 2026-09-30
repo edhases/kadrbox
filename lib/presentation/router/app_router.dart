@@ -29,7 +29,7 @@ import '../widgets/player/mini_player_overlay.dart';
 class AppRouter {
   static bool _isFirstLaunch() {
     try {
-      // Already signed in — onboarding is irrelevant.
+      // Already signed in вЂ” onboarding is irrelevant.
       if (GetIt.instance<OxideServerService>().isAuthenticated) return false;
       final prefs = GetIt.instance<SharedPreferences>();
       return !OnboardingPage.isSeen(prefs);
@@ -105,7 +105,7 @@ class AppRouter {
                     const SizedBox(height: 16),
                     TextButton(
                       onPressed: () => context.go('/'),
-                      child: const Text('Скасувати'),
+                      child: const Text('РЎРєР°СЃСѓРІР°С‚Рё'),
                     ),
                   ],
                 ),
@@ -130,7 +130,7 @@ class AppRouter {
             },
           ),
 
-          // Single provider page (HDRezka, YouTube)
+          // Single separate provider page
           GoRoute(
             path: '/provider/:providerId',
             name: 'provider',
@@ -173,11 +173,11 @@ class AppRouter {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('Немає URL для відтворення'),
+                        const Text('РќРµРјР°С” URL РґР»СЏ РІС–РґС‚РІРѕСЂРµРЅРЅСЏ'),
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: () => context.go('/'),
-                          child: const Text('На головну'),
+                          child: const Text('РќР° РіРѕР»РѕРІРЅСѓ'),
                         ),
                       ],
                     ),

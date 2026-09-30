@@ -13,6 +13,7 @@ import 'player_chat_overlay.dart';
 import 'player_controller.dart';
 import 'player_controls.dart';
 import 'player_gesture_layer.dart';
+import 'playback_error.dart';
 import '../../widgets/player/pip_controls.dart';
 import '../../widgets/common/app_error_widget.dart';
 
@@ -415,9 +416,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                               },
                             ),
                         ],
-                      )
-                    else
-                      _buildErrorWidget(state.errorMessage),
+                      ),
+
+                    // Error Layer — below the chrome layers so the control bar stays
+                    // visible; both the gesture and controls layers stop
+                    // accepting input while `hasError` is set (see
+                    // PlayerControls), leaving the error buttons clickable.
+                    if (state.hasError) _buildErrorWidget(state.error),
 
                     // Buffering Layer
                     if (state.isBuffering && !state.hasError)
@@ -425,18 +430,24 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         child: CircularProgressIndicator(color: Colors.white),
                       ),
 
-                    // Gesture Layer — не рендерити при помилці,
-                    // щоб кнопки error widget отримували кліки
-                    if (!_videoPlayerService.isNativePiP && !state.hasError)
-                      PlayerGestureLayer(
-                        controller: controller,
-                        onTap: _toggleControls,
-                        onDoubleTap: controller.toggleFullscreen,
-                        child: Container(color: Colors.transparent),
+                    // Gesture Layer — kept mounted in the error state so the chrome
+                    // (quality/track/URL inspection) is still reachable. It
+                    // ignores input while `hasError` is set so the error
+                    // buttons underneath win hit-testing.
+                    if (!_videoPlayerService.isNativePiP)
+                      IgnorePointer(
+                        ignoring: state.hasError,
+                        child: PlayerGestureLayer(
+                          controller: controller,
+                          onTap: _toggleControls,
+                          onDoubleTap: controller.toggleFullscreen,
+                          child: Container(color: Colors.transparent),
+                        ),
                       ),
 
-                    // Controls Layer — теж не потрібен при помилці
-                    if (!_videoPlayerService.isNativePiP && !state.hasError)
+                    // Controls Layer — same reasoning; PlayerControls renders
+                    // but is non-interactive while an error is showing.
+                    if (!_videoPlayerService.isNativePiP)
                       PlayerControls(
                         controller: controller,
                         showControls: _showControls,
@@ -465,8 +476,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                             WatchPartyState.connected)
                       _buildWatchPartyFloatingUI(),
 
-                    // Visibility Toggle — не потрібний при помилці
-                    if (!_videoPlayerService.isNativePiP && !state.hasError)
+                    // Visibility Toggle — reachable in the error state too
+                    if (!_videoPlayerService.isNativePiP)
                       Positioned(
                         top: 60 + MediaQuery.paddingOf(context).top,
                         right: 16,
@@ -505,32 +516,103 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildErrorWidget(String? error) {
+  /// Host of [url], or an empty string when it cannot be parsed.
+  static String _hostOf(String url) {
+    try {
+      final u = Uri.parse(url);
+      return u.host;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Human-readable label for an alternative source.
+  ///
+  /// Previously this was `voiceover ?? quality.displayName`, which rendered as
+  /// the identical "Авто" for every source with unknown quality — the
+  /// duplicate-chips bug in the audit.
+  static String _sourceLabel(StreamSource source) {
+    final parts = <String>[
+      if (source.voiceover != null && source.voiceover!.trim().isNotEmpty)
+        source.voiceover!.trim(),
+      if (source.quality != StreamQuality.unknown) source.quality.displayName,
+    ];
+    if (parts.isEmpty) return 'Джерело';
+    return parts.join(' • ');
+  }
+
+  Widget _buildErrorWidget(PlaybackError? error) {
     final controller = _videoPlayerService.controller;
     if (controller == null) return const SizedBox();
 
-    return Container(
-      color: Colors.black,
-      child: AppErrorWidget.playback(
-        message: error,
-        onRetry: controller.retryPlayback,
-        onBack: () => context.pop(),
-        alternativeActions: widget.streams != null && widget.streams!.length > 1
-            ? widget.streams!
-                  .where((s) => s.url != controller.state.currentUrl)
-                  .take(3)
-                  .map(
-                    (stream) => ActionChip(
-                      label: Text(
-                        stream.voiceover ?? stream.quality.displayName,
-                      ),
-                      onPressed: () => controller.switchStreamWithRetry(stream),
+    final all = widget.streams ?? const <StreamSource>[];
+
+    // De-duplicate by resolved URL: the backend frequently returns the same
+    // CDN URL under several quality/voiceover labels.
+    final seenUrls = <String>{controller.state.currentUrl};
+    final alternatives = <StreamSource>[];
+    for (final s in all) {
+      if (!seenUrls.add(s.url)) continue;
+      alternatives.add(s);
+    }
+
+    return Positioned.fill(
+      child: Container(
+        // Opaque behind the error copy only — the control bar above/below
+        // stays visible so quality/track/URL inspection remains available.
+        color: Colors.black,
+        child: AppErrorWidget.playback(
+          title: error?.title ?? 'Помилка відтворення',
+          message: error?.message,
+          onRetry: controller.retryPlayback,
+          onBack: () => context.pop(),
+          details: error?.toDiagnosticString(logTail: Logger.recentText),
+          onCopyDetails: () => Logger.i(
+            'User copied playback diagnostics for '
+            '${error?.url ?? controller.state.currentUrl}',
+            tag: 'PlayerPage',
+          ),
+          alternativeActions: alternatives.isEmpty
+              ? null
+              : alternatives.take(6).map((stream) {
+                  // A source classified as an HTML page cannot be played by
+                  // libmpv — render it disabled with an explanation rather
+                  // than offering it as a retry target.
+                  final isIframe = stream.type == StreamType.iframe;
+                  final host = _hostOf(stream.url);
+                  final chip = ActionChip(
+                    avatar: Icon(
+                      isIframe ? Icons.html : Icons.play_circle_outline,
+                      size: 18,
+                      color: isIframe ? Colors.orange : null,
                     ),
-                  )
-                  .toList()
-            : null,
+                    label: Text(
+                      host.isEmpty
+                          ? _sourceLabel(stream)
+                          : '${_sourceLabel(stream)} · $host',
+                    ),
+                    onPressed: isIframe ? null : () => _openAlternative(stream),
+                  );
+                  if (!isIframe) return chip;
+                  return Tooltip(
+                    message:
+                        'Це HTML-сторінка, а не відеофайл. Відтворення неможливе.',
+                    child: chip,
+                  );
+                }).toList(),
+        ),
       ),
     );
+  }
+
+  void _openAlternative(StreamSource stream) {
+    final controller = _videoPlayerService.controller;
+    if (controller == null) return;
+    Logger.i(
+      'User picked alternative source: ${stream.url} (type=${stream.type.name})',
+      tag: 'PlayerPage',
+    );
+    controller.switchStreamWithRetry(stream);
   }
 
   Widget _buildWatchPartyFloatingUI() {

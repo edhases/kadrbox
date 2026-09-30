@@ -80,12 +80,7 @@ dependencies:
   shared_preferences: ^2.3.4
 
   peerdart: ^0.5.6
-  
-  # YouTube embed player (ToS-compliant, no stream extraction)
-  youtube_player_iframe: ^5.1.2
-  
-  # YouTube stream extraction for desktop platforms
-  youtube_explode_dart: ^3.0.5
+
   semaphore: ^1.0.0
   skeletonizer: ^2.1.2
   image_picker: ^1.2.1

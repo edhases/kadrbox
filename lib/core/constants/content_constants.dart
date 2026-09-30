@@ -151,20 +151,6 @@ class ContentCountries {
 class ProviderGenreMappings {
   ProviderGenreMappings._();
 
-  /// HDRezka-specific genre slugs
-  static const Map<String, String> hdrezka = {
-    'Бойовик': 'action',
-    'Комедія': 'comedy',
-    'Драма': 'drama',
-    'Жахи': 'horror',
-    'Трилер': 'thriller',
-    'Фантастика': 'sci-fi',
-    'Фентезі': 'fantasy',
-    'Мелодрама': 'melodrama',
-    'Пригоди': 'adventure',
-    'Детектив': 'detective',
-  };
-
   /// UAKino-specific genre slugs
   static const Map<String, String> uakino = {
     'Бойовик': 'boyovyky',
@@ -186,7 +172,6 @@ class ProviderGenreMappings {
     String? fallback,
   }) {
     final mapping = switch (providerId) {
-      'hdrezka' => hdrezka,
       'uakino' => uakino,
       _ => ContentGenres.toSlug,
     };

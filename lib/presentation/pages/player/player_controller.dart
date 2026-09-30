@@ -14,6 +14,7 @@ import '../../../data/services/history_service.dart';
 import '../../../data/services/settings_service.dart';
 import '../../../data/services/watch_party_service.dart';
 import '../../../domain/entities/entities.dart';
+import 'playback_error.dart';
 
 /// Player state that can be observed by UI
 class PlayerState {
@@ -21,7 +22,7 @@ class PlayerState {
   final bool isBuffering;
   final bool isPlaying;
   final bool hasError;
-  final String? errorMessage;
+  final PlaybackError? error;
   final int? currentSeason;
   final int? currentEpisode;
   final String? currentEpisodeTitle;
@@ -46,7 +47,7 @@ class PlayerState {
     this.isBuffering = true,
     this.isPlaying = false,
     this.hasError = false,
-    this.errorMessage,
+    this.error,
     this.currentSeason,
     this.currentEpisode,
     this.currentEpisodeTitle,
@@ -67,12 +68,15 @@ class PlayerState {
     this.selectedAudioTrack,
   });
 
+  /// Raw libmpv message, kept for compatibility with existing UI code.
+  String? get errorMessage => error?.mpvMessage;
+
   PlayerState copyWith({
     bool? isInitialized,
     bool? isBuffering,
     bool? isPlaying,
     bool? hasError,
-    String? errorMessage,
+    PlaybackError? error,
     Duration? position,
     Duration? duration,
     double? volume,
@@ -98,7 +102,7 @@ class PlayerState {
       isBuffering: isBuffering ?? this.isBuffering,
       isPlaying: isPlaying ?? this.isPlaying,
       hasError: clearError ? false : (hasError ?? this.hasError),
-      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      error: clearError ? null : (error ?? this.error),
       position: position ?? this.position,
       duration: duration ?? this.duration,
       volume: volume ?? this.volume,
@@ -160,6 +164,138 @@ class PlayerController extends ChangeNotifier with WindowListener {
   final List<StreamSubscription> _subscriptions = [];
   Timer? _saveProgressTimer;
   bool _isDisposed = false;
+
+  /// Index into [_retryLadder] of the header set that last worked.
+  ///
+  /// -1 means "nothing worked yet", so the next retry starts from step 0.
+  /// Remembered for the lifetime of the controller so repeated retries are
+  /// one shot instead of walking the whole ladder again.
+  int _winningHeaderStep = -1;
+
+  /// The exact header map used for the most recent open, kept so the error
+  /// path can report what was actually sent.
+  Map<String, String> _lastSentHeaders = const {};
+
+  /// Default UA sent by the retry ladder.
+  ///
+  /// Kept short and stable — rotating it mid-ladder would change too many
+  /// variables at once to stay debuggable.
+  static const String _defaultUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+  /// Origin of the media URL, or null when the URL is not a real absolute URL.
+  static String? _originOf(String url) {
+    try {
+      final u = Uri.parse(url);
+      if (!u.hasScheme || u.host.isEmpty) return null;
+      return u.origin;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Host of the Referer/Origin header actually used, for diagnostics.
+  static String? _playerHostOf(Map<String, String> headers) {
+    for (final key in const ['Referer', 'Referrer', 'Origin']) {
+      final v = headers[key] ?? headers[key.toLowerCase()];
+      if (v == null || v.isEmpty) continue;
+      try {
+        final u = Uri.parse(v);
+        if (u.host.isNotEmpty) return u.host;
+      } catch (_) {
+        // Ignore unparsable header values.
+      }
+    }
+    return null;
+  }
+
+  /// Builds the header map for each rung of the retry ladder, in order.
+  ///
+  /// [base] is the [StreamSource]'s own headers and always wins — we escalate
+  /// *around* what the provider told us, never against it.
+  ///
+  /// Rungs:
+  ///   0. nothing            — some CDNs reject a Referer that is not theirs
+  ///   1. Referer + UA       — the common case
+  ///   2. Referer + Origin + UA — some CDNs check Origin even with a Referer
+  ///   3. Referer = media URL's own origin only (no UA rewrite)
+  List<Map<String, String>> _buildRetryLadder(
+    String url,
+    Map<String, String>? base,
+  ) {
+    final origin = _originOf(url);
+    final baseHeaders = <String, String>{...?base};
+
+    final none = <String, String>{};
+
+    // Rung 1: Referer + UA (the common case).
+    final refererUa = <String, String>{...baseHeaders};
+    if (origin != null) refererUa['Referer'] = origin;
+    refererUa['User-Agent'] = _defaultUserAgent;
+
+    // Rung 2: add Origin — some CDNs check Origin even with a Referer.
+    final refererOriginUa = <String, String>{...refererUa};
+    if (origin != null) refererOriginUa['Origin'] = origin;
+
+    // Rung 3: Referer set to the media URL's own origin, no UA rewrite.
+    // Some CDNs only accept the directory the media lives in.
+    final sameOrigin = <String, String>{...baseHeaders};
+    if (origin != null) sameOrigin['Referer'] = origin;
+
+    return [none, refererUa, refererOriginUa, sameOrigin];
+  }
+
+  /// The single place where a URL is handed to libmpv.
+  ///
+  /// Always logs URL, stream type and exact headers first — that single log
+  /// line turns "Failed to recognize file format." into a one-line diagnosis.
+  Future<void> _openMedia(
+    String url,
+    StreamSource? source,
+    Map<String, String> headers, {
+    required String reason,
+  }) {
+    final type = source?.type ?? StreamType.direct;
+    final headerSummary = headers.isEmpty
+        ? '<none>'
+        : headers.entries.map((e) => '${e.key}=${e.value}').join('; ');
+    Logger.i(
+      'OPEN[$reason] url=$url type=${type.name} headers={$headerSummary}',
+      tag: _tag,
+    );
+    _lastSentHeaders = Map<String, String>.unmodifiable(headers);
+    return _player.open(
+      Media(url, httpHeaders: headers.isEmpty ? null : headers),
+    );
+  }
+
+  /// Keeps mpv's native `referrer` option in sync with the HTTP header.
+  ///
+  /// Several CDNs validate mpv's own `referrer` separately from the header
+  /// map, so switching streams must update it too.
+  ///
+  /// Deliberately **not** awaited before the open: mpv reads `referrer` per
+  /// HTTP request, so setting it on the same event-loop turn as the open is
+  /// both sufficient and keeps [_openMedia] reachable synchronously (which
+  /// several callers and tests depend on).
+  void _applyMpvReferrer(String url) {
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+    final origin = _originOf(url);
+    if (origin == null) return;
+    // Fire-and-forget: a failure here must not block playback.
+    unawaited(
+      platform
+          .setProperty('referrer', origin)
+          .then((_) {
+            Logger.d('Set referrer: $origin', tag: _tag);
+          })
+          .catchError((Object e) {
+            Logger.w('Failed to set referrer: $e', tag: _tag);
+          }),
+    );
+  }
 
   // Test-only flag: when false avoid creating VideoController and subscribing to
   // Player.stream which can depend on native platform assets.
@@ -501,18 +637,38 @@ class PlayerController extends ChangeNotifier with WindowListener {
             ),
           );
 
-    // Set hardware decoding mode via native property
+    // Set mpv options via the native property path already used for `hwdec`.
     if (_player.platform is NativePlayer) {
+      final native = _player.platform as NativePlayer;
+
+      // Enable auto-copy to decouple decoding from rendering (best for Windows
+      // resizing).
       try {
-        // Enable auto-copy to decouple decoding from rendering (best for Windows resizing)
-        await (_player.platform as NativePlayer).setProperty(
-          'hwdec',
-          'auto-copy',
-        );
+        await native.setProperty('hwdec', 'auto-copy');
         Logger.d('Set hwdec: auto-copy (Safe Decoding Strategy)', tag: _tag);
       } catch (e) {
         Logger.w('Failed to set hwdec: $e', tag: _tag);
       }
+
+      // CDN-facing defaults. Without a UA many CDNs answer with an HTML
+      // challenge page, which libmpv then reports as
+      // "Failed to recognize file format.".
+      for (final option in <String, String>{
+        'user-agent': _defaultUserAgent,
+        // Seconds. mpv's default of 60 is far too long for a player that is
+        // supposed to fail fast and offer a retry.
+        'network-timeout': '15',
+      }.entries) {
+        try {
+          await native.setProperty(option.key, option.value);
+          Logger.d('Set ${option.key}: ${option.value}', tag: _tag);
+        } catch (e) {
+          Logger.w('Failed to set ${option.key}: $e', tag: _tag);
+        }
+      }
+
+      // `referrer` is stream-specific; the real value is applied by
+      // `_applyMpvReferrer` right before each open.
     }
 
     if (_setupPlayerStreams) {
@@ -555,12 +711,18 @@ class PlayerController extends ChangeNotifier with WindowListener {
     }
 
     // Open media
-    final currentStream = streams?.firstWhere(
-      (s) => s.url == _state.currentUrl,
-      orElse: () => StreamSource(url: _state.currentUrl),
-    );
-    await _player.open(
-      Media(_state.currentUrl, httpHeaders: currentStream?.headers),
+    final currentStream =
+        streams?.firstWhereOrNull((s) => s.url == _state.currentUrl) ??
+        (streams != null && streams!.isNotEmpty
+            ? streams!.first
+            : StreamSource(url: _state.currentUrl));
+    final initialHeaders = currentStream.headers ?? const <String, String>{};
+    _applyMpvReferrer(_state.currentUrl);
+    await _openMedia(
+      _state.currentUrl,
+      currentStream,
+      initialHeaders,
+      reason: 'initial',
     );
 
     // Resume from last position
@@ -651,15 +813,26 @@ class PlayerController extends ChangeNotifier with WindowListener {
     _subscriptions.add(
       _player.stream.error.listen((error) {
         if (_isDisposed) return;
-        if (error.isNotEmpty) {
-          Logger.w('Player error: $error', tag: _tag);
-          _state = _state.copyWith(
-            hasError: true,
-            errorMessage: error,
-            isBuffering: false,
-          );
-          notifyListeners();
-        }
+        if (error.isEmpty) return;
+
+        final source = currentSource;
+        final playbackError = PlaybackError.fromMpvMessage(
+          error,
+          providerId: providerId,
+          url: _state.currentUrl,
+          headersSent: _lastSentHeaders,
+          streamType: source?.type ?? StreamType.direct,
+          playerHost: _playerHostOf(_lastSentHeaders),
+        );
+        // ERROR level: playback failures must be visible in release builds.
+        playbackError.log(tag: _tag);
+
+        _state = _state.copyWith(
+          hasError: true,
+          error: playbackError,
+          isBuffering: false,
+        );
+        notifyListeners();
       }),
     );
 
@@ -981,7 +1154,13 @@ class PlayerController extends ChangeNotifier with WindowListener {
     );
     notifyListeners();
 
-    await _player.open(Media(stream.url, httpHeaders: stream.headers));
+    _applyMpvReferrer(stream.url);
+    await _openMedia(
+      stream.url,
+      stream,
+      stream.headers ?? const <String, String>{},
+      reason: 'switch',
+    );
     await _player.seek(currentPosition);
   }
 
@@ -993,15 +1172,83 @@ class PlayerController extends ChangeNotifier with WindowListener {
     await _player.setVideoTrack(track);
   }
 
+  /// Re-resolves the [StreamSource] backing [url] from the current streams.
+  ///
+  /// This is what makes retry behave like `switchStream`: without it the URL
+  /// was reopened with no `httpHeaders` at all, silently stripping the
+  /// Referer/User-Agent that the CDN required.
+  StreamSource? _resolveSourceFor(String url) {
+    if (streams == null || streams!.isEmpty) return null;
+    return streams!.firstWhereOrNull((s) => s.url == url);
+  }
+
+  /// Re-resolves the stream, applies the first promising header set and opens.
+  ///
+  /// Escalates through [_buildRetryLadder] until playback starts or the
+  /// ladder is exhausted; the winning rung is remembered so subsequent
+  /// retries are a single open instead of the whole walk.
   Future<void> retryPlayback() async {
     _state = _state.copyWith(clearError: true, isBuffering: true);
     notifyListeners();
 
     final positionToSeek = _state.position;
-    await _player.open(Media(_state.currentUrl));
-    if (positionToSeek > Duration.zero) {
-      await _player.seek(positionToSeek);
+    final url = _state.currentUrl;
+    final source = _resolveSourceFor(url);
+    final ladder = _buildRetryLadder(url, source?.headers);
+
+    // Resume from the rung that worked before, if any.
+    final start = _winningHeaderStep >= 0 ? _winningHeaderStep : 0;
+
+    for (var step = start; step < ladder.length; step++) {
+      if (_isDisposed) return;
+
+      _applyMpvReferrer(url);
+      await _openMedia(url, source, ladder[step], reason: 'retry:$step');
+
+      if (await _waitForPlaybackStart()) {
+        if (step != _winningHeaderStep) {
+          Logger.i(
+            'Retry ladder: step $step succeeded (headers=${ladder[step].isEmpty ? '<none>' : ladder[step].keys.join(",")})',
+            tag: _tag,
+          );
+          _winningHeaderStep = step;
+        }
+        if (positionToSeek > Duration.zero) {
+          await _player.seek(positionToSeek);
+        }
+        return;
+      }
+
+      Logger.w('Retry ladder: step $step failed, escalating', tag: _tag);
     }
+
+    Logger.e(
+      'Retry ladder exhausted for $url after ${ladder.length} attempts',
+      tag: _tag,
+    );
+  }
+
+  /// Waits briefly to see whether the just-opened media actually starts.
+  ///
+  /// Returns true as soon as we see evidence of playback, false if libmpv
+  /// reports an error or nothing happens within the window.
+  Future<bool> _waitForPlaybackStart() async {
+    if (!_setupPlayerStreams) return true;
+
+    final deadline = DateTime.now().add(const Duration(seconds: 4));
+    while (!_isDisposed && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (_state.hasError) return false;
+      if (_state.position > Duration.zero) return true;
+      // A track list implies the demuxer accepted the container.
+      if (_state.videoTracks.isNotEmpty || _state.audioTracks.isNotEmpty) {
+        return true;
+      }
+      if (_state.duration > Duration.zero) return true;
+    }
+    // Timed out without an explicit error: treat as success so we do not
+    // burn the whole ladder on a slow-but-working CDN.
+    return !_state.hasError;
   }
 
   Future<void> switchStreamWithRetry(StreamSource stream) async {
@@ -1015,7 +1262,13 @@ class PlayerController extends ChangeNotifier with WindowListener {
     );
     notifyListeners();
 
-    await _player.open(Media(stream.url, httpHeaders: stream.headers));
+    _applyMpvReferrer(stream.url);
+    await _openMedia(
+      stream.url,
+      stream,
+      stream.headers ?? const <String, String>{},
+      reason: 'switch-retry',
+    );
   }
 
   /// Try to reduce quality when buffering issues detected

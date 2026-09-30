@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../core/l10n/app_strings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -386,32 +385,6 @@ class _DetailsPageState extends State<DetailsPage> {
           const SizedBox(height: 16),
         ],
 
-        // Region block warning
-        if (_streams.isEmpty && widget.providerId == 'hdrezka') ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    AppStrings.of(context).regionBlocked,
-                    style: const TextStyle(color: Colors.orange),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-        ],
-
         // Play button + Favorite button + Watch Party
         Row(
           children: [
@@ -466,7 +439,7 @@ class _DetailsPageState extends State<DetailsPage> {
             ),
             const SizedBox(width: 12),
             IconButton.filled(
-              onPressed: _streams.isNotEmpty && widget.providerId == 'hdrezka'
+              onPressed: _streams.isNotEmpty
                   ? () {
                       HapticFeedback.lightImpact();
                       _downloadContent();

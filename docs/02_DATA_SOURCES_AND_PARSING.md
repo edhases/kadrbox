@@ -26,7 +26,6 @@ flowchart TD
 
     subgraph AdaptersLayer ["Provider Adapters (lib/data/providers/)"]
         UaflixP[UaflixProvider] -->|implements| CP
-        HdrezkaP[HdrezkaProvider] -->|implements| CP
         UakinoP[UakinoProvider] -->|implements| CP
         EneyidaP[EneyidaProvider] -->|implements| CP
         UaserialsP[UaserialsProvider] -->|implements| CP
@@ -37,7 +36,6 @@ flowchart TD
     subgraph RepositoriesLayer ["Repositories (lib/data/repositories/)"]
         UCRImpl[UnifiedContentRepositoryImpl] -->|делегує виклики| CP
         UaflixR[UaflixRepository]
-        HdrezkaR[HdrezkaRepository]
         UakinoR[UakinoRepository]
         EneyidaR[EneyidaRepository]
         UaserialsR[UaserialsRepository]
@@ -49,19 +47,18 @@ flowchart TD
         AC[ApiClient (Dio + CookieJar + Retry)]
         BS[beautiful_soup_dart]
         PJS[PlayerJsParser]
-        Parsers[UaflixParser, HDRezkaParser, UakinoParser, EneyidaParser, UaserialsParser, YummyAnimeParser, YouTubeParser]
+        Parsers[UaflixParser, UakinoParser, EneyidaParser, UaserialsParser, YummyAnimeParser, YouTubeParser]
     end
 
     UaflixP --> UaflixR
-    HdrezkaP --> HdrezkaR
     UakinoP --> UakinoR
     EneyidaP --> EneyidaR
     UaserialsP --> UaserialsR
     YummyP --> YummyR
     YouTubeP --> YouTubeR
 
-    UaflixR & HdrezkaR & UakinoR & EneyidaR & UaserialsR & YummyR & YouTubeR --> AC
-    UaflixR & HdrezkaR & UakinoR & EneyidaR & UaserialsR & YummyR & YouTubeR -->|compute() у фоновий Isolate| Parsers
+    UaflixR & UakinoR & EneyidaR & UaserialsR & YummyR & YouTubeR --> AC
+    UaflixR & UakinoR & EneyidaR & UaserialsR & YummyR & YouTubeR -->|compute() у фоновий Isolate| Parsers
     Parsers --> BS
     Parsers --> PJS
 ```
@@ -70,7 +67,7 @@ flowchart TD
 
 #### `ContentProvider` ([lib/domain/repositories/content_provider.dart](file:///e:/Github/oxide_film/lib/domain/repositories/content_provider.dart))
 Єдиний абстрактний контракт для будь-якого зовнішнього медіа-джерела.
-- `id` (`String`): Унікальний машинний ідентифікатор провайдера (`uaflix`, `hdrezka`, `uakino`, `eneyida`, `uaserials`, `yummyanime`, `youtube`).
+- `id` (`String`): Унікальний машинний ідентифікатор провайдера (`uaflix`, `uakino`, `eneyida`, `uaserials`, `yummyanime`, `youtube`).
 - `name` (`String`): Читабельна назва для відображення в інтерфейсі користувача.
 - `baseUrl` (`String`): Базовий кореневий URL (fallback/за замовчуванням).
 - `effectiveBaseUrl` (`String`): Актуальний робочий домен (динамічно коригується після аналізу редиректів).
@@ -93,13 +90,13 @@ flowchart TD
 Центральний реєстр активних провайдерів.
 - Зберігає мапу `_resolvedUrls: Map<String, String>`.
 - Реалізує розподіл провайдерів за типами показів:
-  - `separateProviderIds = {'hdrezka', 'youtube'}` — джерела з окремими сторінками або специфічним плеєром/контентом, які виключаються із загальних стрічок головного екрана (`showOnHome = false`).
-  - `hasFixedStreams(provider)` — для джерел на зразок HDRezka, де параметри потоку (озвучення, якість) формуються один раз під час запиту сесії й не перемикаються всередині одного файлу.
+  - `separateProviderIds = {'youtube'}` — джерела з окремими сторінками або специфічним плеєром/контентом, які виключаються із загальних стрічок головного екрана (`showOnHome = false`).
+  - `hasFixedStreams(provider)` — для джерел, у яких параметри потоку (озвучення, якість) формуються один раз під час запиту сесії й не перемикаються всередині одного файлу.
 - `resolveProviderUrls()`: фоновий обхід усіх провайдерів через `UrlResolverService` під час старту застосунку без блокування завантаження інтерфейсу.
 
 #### `UnifiedContentRepositoryImpl` ([lib/data/repositories/unified_content_repository_impl.dart](file:///e:/Github/oxide_film/lib/data/repositories/unified_content_repository_impl.dart))
 Реалізація фасадного репозиторію:
-- Формує комбіновані глобальні ідентифікатори об'єктів у форматі `"{providerId}:{itemId}"` (наприклад, `hdrezka:films/action/12345-movie` або `uakino:filmy/1234-avatar`).
+- Формує комбіновані глобальні ідентифікатори об'єктів у форматі `"{providerId}:{itemId}"` (наприклад, `uakino:filmy/1234-avatar`).
 - Виконує паралельний пошук у всіх активних джерелах через `StreamController`: результати стрімінгово з'являються в UI відразу ж у міру надходження відповідей від провайдерів (`_streamProviders`).
 - Здійснює зв'язку з базою даних **Drift** (`FavoritesDao`, `HistoryDao`, `MediaItemsDao`) для кешування карток та збереження прогресу відтворення.
 
@@ -149,11 +146,11 @@ sequenceDiagram
 - Автоматично кешує пул сучасних браузерних заголовків у `SharedPreferences`.
 - Раз на 24 години у фоні оновлює базу популярних User-Agent із веб-ресурсів `techblog.willshouse.com` або `useragents.me` за допомогою регулярних виразів.
 - Має вбудований пул перевірених сучасних десктопних браузерів (Chrome 122+, Firefox 123+, Edge 122+, Safari 17+ для Windows/macOS/Linux).
-- Надає методи `getRandomUA()` для випадкового скрапінгу та `getChromeUserAgent()` для AJAX-запитів, чутливих до структури клієнта (наприклад, CDN HDRezka).
+- Надає методи `getRandomUA()` для випадкового скрапінгу та `getChromeUserAgent()` для AJAX-запитів, чутливих до структури клієнта.
 
 ### 2.3. Автоматичне відстеження дзеркал (`UrlResolverService`)
 Клас [lib/data/services/url_resolver_service.dart](file:///e:/Github/oxide_film/lib/data/services/url_resolver_service.dart):
-- Українські піратські онлайн-кінотеатри постійно змінюють доменні зони (`uaflix.net` -> `uafix.net`, `hdrezka.ag` -> `hdrezka-home.tv` тощо).
+- Українські піратські онлайн-кінотеатри постійно змінюють доменні зони (`uaflix.net` -> `uafix.net`, `uaserials.my` -> `uaserials.tv` тощо).
 - `resolveUrl(originalUrl)` робить `HEAD` (або легкотривалий `GET` із заголовком `Range: bytes=0-0` у разі HTTP 405 Method Not Allowed) без авто-слідування за редиректами (`followRedirects: false`).
 - Фіксує коди `301`, `302`, `307`, `308`, витягує заголовок `Location`, обробляє відносні шляхи та зберігає кінцевий робочий домен (scheme + host).
 - Результати кешуються в `SharedPreferences` на 24 години, що усуває зайві затримки при повторних запусках.
@@ -165,14 +162,13 @@ sequenceDiagram
 
 ## 3. Каталог провайдерів та детальний аналіз парсингу
 
-Нижче наведено технічний опис кожного з 7 реалізованих провайдерів:
+Нижче наведено технічний опис кожного з 6 реалізованих провайдерів:
 
 ```
 ┌───────────────┬───────────────────────────┬──────────────────────────────────────────────────────────────┐
 │ Провайдер     │ Базовий домен (Base URL)  │ Головна технологія плеєра / Стріми                           │
 ├───────────────┼───────────────────────────┼──────────────────────────────────────────────────────────────┤
 │ UAFlix        │ https://uafix.net         │ PlayerJS / Ashdi / MP4 / HLS                                 │
-│ HDRezka       │ https://hdrezka-home.tv   │ Власний CDN (зашифрований Base64 зі сміттєвими рядками)      │
 │ UAKino        │ https://uakino.best       │ AJAX Playlists (/engine/ajax/playlists.php) / Ashdi / HLS     │
 │ Eneyida       │ https://eneyida.tv        │ AJAX Playlists / PlayerJS data-file / HLS / MP4              │
 │ UaSerials     │ https://uaserials.my      │ Iframes / PlayerJS / Ashdi / HLS                             │
@@ -208,64 +204,7 @@ sequenceDiagram
 
 ---
 
-### 3.2. HDRezka
-
-- **Файли коду**: [hdrezka_provider.dart](file:///e:/Github/oxide_film/lib/data/providers/hdrezka_provider.dart), [hdrezka_repository.dart](file:///e:/Github/oxide_film/lib/data/repositories/hdrezka_repository.dart), [hdrezka_parser.dart](file:///e:/Github/oxide_film/lib/data/parsers/hdrezka_parser.dart).
-- **Підтримувані типи**: `movie`, `series`, `cartoon`, `anime`.
-- **Дзеркала за замовчуванням**: `https://hdrezka-home.tv`, `https://rezka.ag`, `https://hdrezka.ag`, `https://hdrezka.me`, `https://hdrezka.co`, `https://hdrezka.sh`.
-- **Структура URL-адрес**:
-  - Пошук: `/search/?do=search&subaction=search&q={encodedQuery}&page={page}`
-  - Популярне: `/{section}/page/{page}/?filter=popular` (`films`, `series`, `cartoons`, `animation`).
-  - Сторінка фільму: `/{id}.html` (наприклад, `films/action/12345-title.html`).
-- **Специфіка взаємодії з CDN плеєра**:
-  - HDRezka не транслює прямі відкриті посилання в DOM-дереві сторінки.
-  - На сторінці аналізується блок `<div id="cdnplayer">` або виклики JavaScript функцій:
-    `initCDNMoviesEvents(dataId, translatorId)` або `initCDNSeriesEvents(dataId, translatorId)`.
-  - Зчитуються: `csrf-token` (з метатегу або змінних `b_token`, `csrf_token`), `data_id` та перелік доступних студій озвучення зі списку `<ul id="translators-list">`.
-  - Надсилається POST-запит на `/ajax/get_cdn_series/`:
-    ```
-    Form-Data:
-      id: {dataId}
-      translator_id: {translatorId}
-      action: "get_movie" (або "get_stream" для серіалів)
-      season: {season}      (для серій)
-      episode: {episode}    (для серій)
-      is_camrip: 0
-      is_ads: 0
-      is_director: 0
-      _token: {csrfToken}
-    Headers:
-      User-Agent: Desktop Chrome
-      X-Requested-With: XMLHttpRequest
-      Referer: {mirror}/
-      Origin: {mirror}
-      X-CSRF-TOKEN: {csrfToken}
-    ```
-- **Алгоритм деобфускації стрімів HDRezka (`decodeStreamUrl`)**:
-  Відповідь сервера приходить у JSON-полі `url` у спеціально зашифрованому форматі, що починається з `#h`, `#0`, `#1` або `#2` з наступним Base64.
-  1. Відрізається префікс `#` та маркер версії алгоритму.
-  2. У середину Base64 вкраплено відомі сигнатури «сміття», які видаляються регулярними виразами:
-     ```dart
-     '//_//JCQhIUAkXiY=', // $$!!@$^&
-     '//_//QEBAQEAhIyM=', // @@@@@!##
-     '//_//Xl5eIyo=',     // ^^^#*
-     '//_//JCQkISE=',     // $$$!!
-     '//IyMhQEBA',        // ##!@@@
-     '//QCMjQEA=',        // @##@@
-     '//_//JCQhIUAkJEBeIUAjJCRA',
-     '//_//QEBAQEAhIyMhXl5e',
-     '//_//Xl5eIUAjIyEhIyM=',
-     '//_//IyMjI14hISMjIUBA'
-     ```
-  3. Видаляються залишки слешів `//`, підкреслень `_` та вирівнюється довжина Base64 додаванням символів `=`.
-  4. Виконується декодування в UTF-8/Latin-1.
-  5. Розшифрований рядок має формат:
-     `[360p]https://...mp4 or https://...m3u8,[720p]https://...mp4,[1080p]https://...mp4`
-  6. Регулярний вираз виділяє якість (`StreamQuality.q720p`, `q1080p` тощо) та URL. До потоку додаються обов'язкові заголовки `Referer: https://hdrezka-home.tv/` та `Origin: https://hdrezka-home.tv`.
-
----
-
-### 3.3. UAKino (uakino.best)
+### 3.2. UAKino (uakino.best)
 
 - **Файли коду**: [uakino_provider.dart](file:///e:/Github/oxide_film/lib/data/providers/uakino_provider.dart), [uakino_repository.dart](file:///e:/Github/oxide_film/lib/data/repositories/uakino_repository.dart), [uakino_parser.dart](file:///e:/Github/oxide_film/lib/data/parsers/uakino_parser.dart).
 - **Підтримувані типи**: `movie`, `series`, `cartoon`, `anime`.
@@ -296,7 +235,7 @@ sequenceDiagram
 
 ---
 
-### 3.4. Eneyida (eneyida.tv)
+### 3.3. Eneyida (eneyida.tv)
 
 - **Файли коду**: [eneyida_provider.dart](file:///e:/Github/oxide_film/lib/data/providers/eneyida_provider.dart), [eneyida_repository.dart](file:///e:/Github/oxide_film/lib/data/repositories/eneyida_repository.dart), [eneyida_parser.dart](file:///e:/Github/oxide_film/lib/data/parsers/eneyida_parser.dart).
 - **Підтримувані типи**: `movie`, `series`, `cartoon`, `anime`.
@@ -322,7 +261,7 @@ sequenceDiagram
 
 ---
 
-### 3.5. UaSerials (uaserials.my)
+### 3.4. UaSerials (uaserials.my)
 
 - **Файли коду**: [uaserials_provider.dart](file:///e:/Github/oxide_film/lib/data/providers/uaserials_provider.dart), [uaserials_repository.dart](file:///e:/Github/oxide_film/lib/data/repositories/uaserials_repository.dart), [uaserials_parser.dart](file:///e:/Github/oxide_film/lib/data/parsers/uaserials_parser.dart).
 - **Підтримувані типи**: `series`, `movie`, `cartoon`, `anime`.
@@ -342,7 +281,7 @@ sequenceDiagram
 
 ---
 
-### 3.6. YummyAnime (yummyanime.tv)
+### 3.5. YummyAnime (yummyanime.tv)
 
 - **Файли коду**: [yummyanime_provider.dart](file:///e:/Github/oxide_film/lib/data/providers/yummyanime_provider.dart), [yummyanime_repository.dart](file:///e:/Github/oxide_film/lib/data/repositories/yummyanime_repository.dart), [yummyanime_parser.dart](file:///e:/Github/oxide_film/lib/data/parsers/yummyanime_parser.dart).
 - **Підтримувані типи**: Спеціалізований аніме-провайдер (`ContentType.anime`).
@@ -364,7 +303,7 @@ sequenceDiagram
 
 ---
 
-### 3.7. YouTube (youtube.com)
+### 3.6. YouTube (youtube.com)
 
 - **Файли коду**: [youtube_provider.dart](file:///e:/Github/oxide_film/lib/data/providers/youtube_provider.dart), [youtube_repository.dart](file:///e:/Github/oxide_film/lib/data/repositories/youtube_repository.dart), [youtube_parser.dart](file:///e:/Github/oxide_film/lib/data/parsers/youtube_parser.dart).
 - **Позиціонування**: `showOnHome = false` (має окремий екран та розділ).
@@ -428,12 +367,8 @@ sequenceDiagram
 | Скрипт | Призначення та роль в архітектурі |
 |---|---|
 | `scripts/provider_analysis/provider_super_analyzer.py` | Повний комплексний аудит усіх провайдерів: перевірка доступності доменів, відсоток успішного витягування 20+ полів метаданих, розрахунок коефіцієнта надійності селекторів (`parsing_confidence`). |
-| `analyze_hdrezka.py` | Дослідження дзеркал HDRezka, структури AJAX-запитів до `/ajax/get_cdn_series/`, виявлення нових типів сміттєвих рядків для оновлення `decodeStreamUrl`. |
 | `analyze_uakino_structure.py` | Інспекція структури DOM сайту UAKino, виявлення змін у класах карток (`movie-item` vs `short-item`), структури AJAX-плейлистів. |
 | `test_uaflix_connection.py`, `test_uaflix_patterns.py`, `test_uaflix_top.py` | Перевірка працездатності UAFlix під час зміни доменів (наприклад, перехід `uaflix.net` -> `uafix.net`), аналіз регулярних виразів для iframes та Ashdi. |
-| `test_stream_connectivity.py` | Валідація згенерованих посилань на стріми (m3u8/mp4): перевірка кодів відповіді CDN, коректності заголовків `Referer` та `User-Agent`. |
-| `test_cookies.py` | Перевірка збереження сесійних cookie (PHP session IDs) та виявлення антибот-челенджів. |
-| `compare_streams.py` | Порівняння стабільності та бітрейту однакових релізів між різними провайдерами для оптимізації пріоритетів вибору джерела. |
 
 ---
 
@@ -507,7 +442,6 @@ sequenceDiagram
 | Провайдер | Основний тип медіа | Джерело стрімів | Підтримка озвучень | Авто-дзеркала | Окремий екран |
 |---|---|---|---|---|---|
 | **UAFlix** | Фільми, Серіали, Аніме, Дорами | PlayerJS / Ashdi iframe | Так (через теги серій) | Так (UrlResolver) | Ні (Головна) |
-| **HDRezka** | Фільми, Серіали, Мультфільми, Аніме | Зашифрований Rezka CDN | Так (повний список студій) | Так (Ручний + список) | Так (`showOnHome=false`) |
 | **UAKino** | Фільми, Серіали, Аніме, Мультфільми | AJAX playlists.php / Ashdi | Так (по кожній серії) | Так (UrlResolver) | Ні (Головна) |
 | **Eneyida** | Фільми, Серіали, Мультфільми | AJAX playlists.php / PlayerJS | Так (вибір у плеєрі) | Так (UrlResolver) | Ні (Головна) |
 | **UaSerials**| Серіали, Мультсеріали, Фільми | Зовнішні iframes / Ashdi | Так (у назві серії) | Так (UrlResolver) | Ні (Головна) |

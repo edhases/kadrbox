@@ -6,9 +6,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -59,9 +62,79 @@ const covUakinoDetailsHTML = `<html><body>
 <a href="/other/">Не жанр</a>
 </body></html>`
 
+const covPlayerFrameHTML = `<html><body><script>
+var player = new Playerjs({file:"https://cdn.example/hls/movie-1080p/master.m3u8", width: 720});
+</script></body></html>`
+
+// Сторінка без розпізнаного медіа: резолвер обязан повернути ErrUnresolvablePlayer.
+const covDeadPlayerFrameHTML = `<html><body><div id="player"></div><script>var t="no media here";</script></body></html>`
+
 const covUakinoStreamsHTML = `<html><body>
-<div class="player"><iframe src="//player.example.com/embed/123" allowfullscreen></iframe></div>
+<iframe src="https://disqus.com/embed/comments/1"></iframe>
+<div class="player"><iframe src="/player/embed/123" allowfullscreen></iframe></div>
 </body></html>`
+
+func TestCovProviderUakinoStreamsFixture(t *testing.T) {
+	srv := covFixtureServer(map[string]string{
+		"/item/1":           covUakinoStreamsHTML,
+		"/player/embed/123": covPlayerFrameHTML,
+		"/item/2":           `<html><body>без плеєра</body></html>`,
+		"/item/3":           `<html><body><iframe src="/player/dead"></iframe></body></html>`,
+		"/player/dead":      covDeadPlayerFrameHTML,
+	})
+	defer srv.Close()
+	p := &UakinoProvider{client: covTLS(t), baseURL: srv.URL}
+
+	resp, err := p.GetStreams(context.Background(), srv.URL+"/item/1", 0, 0, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Streams) != 1 {
+		t.Fatalf("expected 1 stream, got %+v", resp)
+	}
+	st := resp.Streams[0]
+
+	// Регресія: раніше сюди повертався URL самого iframe (HTML), який libmpv не демодулює.
+	if !rePlayableURL.MatchString(st.URL) {
+		t.Fatalf("stream url must be a playable media url, got %q", st.URL)
+	}
+	if st.URL != "https://cdn.example/hls/movie-1080p/master.m3u8" {
+		t.Errorf("unexpected stream URL: %q", st.URL)
+	}
+	if st.DirectURL != st.URL {
+		t.Errorf("DirectURL must mirror URL, got %q", st.DirectURL)
+	}
+	if strings.Contains(st.URL, srv.URL) {
+		t.Errorf("stream url must not be the local fixture/iframe page: %q", st.URL)
+	}
+	if st.Quality != "1080p" {
+		t.Errorf("unexpected quality: %q", st.Quality)
+	}
+	if st.Headers["Referer"] != "https://cdn.example/" || st.Headers["Origin"] != "https://cdn.example" {
+		t.Errorf("headers must be derived from the MEDIA origin, got %v", st.Headers)
+	}
+	if st.Headers["User-Agent"] != Chrome120UserAgent {
+		t.Errorf("unexpected User-Agent: %v", st.Headers["User-Agent"])
+	}
+
+	// Без iframe: порожній список + ErrUnresolvablePlayer, а не HTML-сторінка.
+	empty, err := p.GetStreams(context.Background(), srv.URL+"/item/2", 0, 0, "")
+	if !errors.Is(err, ErrUnresolvablePlayer) {
+		t.Fatalf("expected ErrUnresolvablePlayer without iframe, got %v", err)
+	}
+	if empty == nil || len(empty.Streams) != 0 {
+		t.Fatalf("expected empty stream list, got %+v", empty)
+	}
+
+	// iframe є, але медіа не розпізнано — теж ErrUnresolvablePlayer.
+	dead, err := p.GetStreams(context.Background(), srv.URL+"/item/3", 0, 0, "")
+	if !errors.Is(err, ErrUnresolvablePlayer) {
+		t.Fatalf("expected ErrUnresolvablePlayer for dead player, got %v", err)
+	}
+	if dead == nil || len(dead.Streams) != 0 {
+		t.Fatalf("expected empty stream list, got %+v", dead)
+	}
+}
 
 func TestCovProviderUakinoSearchFixture(t *testing.T) {
 	srv := covFixtureServer(map[string]string{"/index.php": covUakinoSearchHTML})
@@ -151,39 +224,6 @@ func TestCovProviderUakinoDetailsFixture(t *testing.T) {
 	}
 }
 
-func TestCovProviderUakinoStreamsFixture(t *testing.T) {
-	srv := covFixtureServer(map[string]string{
-		"/item/1": covUakinoStreamsHTML,
-		"/item/2": `<html><body>без плеєра</body></html>`,
-	})
-	defer srv.Close()
-	p := &UakinoProvider{client: covTLS(t), baseURL: srv.URL}
-
-	resp, err := p.GetStreams(context.Background(), srv.URL+"/item/1", 0, 0, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Streams) != 1 {
-		t.Fatalf("expected 1 stream, got %+v", resp)
-	}
-	st := resp.Streams[0]
-	// Протокол-відносний // доповнюється до https:.
-	if st.URL != "https://player.example.com/embed/123" || st.DirectURL != st.URL {
-		t.Errorf("unexpected stream URLs: %+v", st)
-	}
-	if st.Headers["Referer"] != srv.URL+"/" {
-		t.Errorf("unexpected Referer: %v", st.Headers)
-	}
-
-	empty, err := p.GetStreams(context.Background(), srv.URL+"/item/2", 0, 0, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(empty.Streams) != 0 {
-		t.Errorf("expected no streams without iframe, got %+v", empty)
-	}
-}
-
 // ---- Eneyida ----
 
 const covEneyidaSearchHTML = `<html><body>
@@ -200,7 +240,9 @@ const covEneyidaDetailsHTML = `<html><body>
 </body></html>`
 
 const covEneyidaStreamsHTML = `<html><body>
-<iframe src="https://player2.example/x"></iframe>
+<iframe src="about:blank"></iframe>
+<iframe src="https://ad.doubleclick.net/ads/creative.html"></iframe>
+<iframe src="/player/embed/7"></iframe>
 </body></html>`
 
 func TestCovProviderEneyidaSearchFixture(t *testing.T) {
@@ -242,7 +284,13 @@ func TestCovProviderEneyidaDetailsFixture(t *testing.T) {
 }
 
 func TestCovProviderEneyidaStreamsFixture(t *testing.T) {
-	srv := covFixtureServer(map[string]string{"/item/7": covEneyidaStreamsHTML})
+	srv := covFixtureServer(map[string]string{
+		"/item/7":         covEneyidaStreamsHTML,
+		"/player/embed/7": covPlayerFrameHTML,
+		"/item/8":         `<html><body>без плеєра</body></html>`,
+		"/item/9":         `<html><body><iframe src="/player/dead"></iframe></body></html>`,
+		"/player/dead":    covDeadPlayerFrameHTML,
+	})
 	defer srv.Close()
 	p := &EneyidaProvider{client: covTLS(t), baseURL: srv.URL}
 
@@ -254,63 +302,107 @@ func TestCovProviderEneyidaStreamsFixture(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 	st := resp.Streams[0]
-	if st.URL != "https://player2.example/x" || st.Quality != "Auto" {
+	// Регресія: раніше повертався URL iframe-сторінки (HTML), а не медіа.
+	if !rePlayableURL.MatchString(st.URL) {
+		t.Fatalf("stream url must be a playable media url, got %q", st.URL)
+	}
+	if st.URL != "https://cdn.example/hls/movie-1080p/master.m3u8" {
 		t.Errorf("unexpected stream: %+v", st)
 	}
-}
-
-// ---- HDRezka ----
-
-const covHdrezkaSearchHTML = `<html><body>
-<div class="b-content__inline_item">
-  <div class="b-content__inline_item-link"><a href="https://hdrezka.me/f/1">Інтерстеллар</a></div>
-  <div class="b-content__inline_item-cover"><img src="https://cdn.example/i.jpg"/></div>
-</div>
-<div class="b-content__inline_item">
-  <div class="b-content__inline_item-link"><span>Без посилання</span></div>
-</div>
-</body></html>`
-
-const covHdrezkaDetailsHTML = `<html><body>
-<div class="b-post__title"><h1>Інтерстеллар</h1></div>
-<div class="b-sidecover"><img src="https://cdn.example/cover.jpg"/></div>
-<div class="b-post__description_text">Опис про космос.</div>
-</body></html>`
-
-func TestCovProviderHdrezkaSearchFixture(t *testing.T) {
-	srv := covFixtureServer(map[string]string{"/search/": covHdrezkaSearchHTML})
-	defer srv.Close()
-	p := &HdrezkaProvider{client: covTLS(t), baseURL: srv.URL}
-
-	items, err := p.Search(context.Background(), "інтерстеллар")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if strings.Contains(st.URL, srv.URL) {
+		t.Errorf("stream url must not be the fixture/iframe page: %q", st.URL)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item (second has no link), got %+v", items)
+	if st.Headers["Referer"] != "https://cdn.example/" || st.Headers["Origin"] != "https://cdn.example" {
+		t.Errorf("headers must be derived from the MEDIA origin, got %v", st.Headers)
 	}
-	it := items[0]
-	if it.Title != "Інтерстеллар" || it.Type != "movie" || it.ProviderID != "hdrezka" {
-		t.Errorf("unexpected item: %+v", it)
-	}
-	if it.PosterURL != "https://cdn.example/i.jpg" || it.URL != "https://hdrezka.me/f/1" {
-		t.Errorf("unexpected urls: %+v", it)
+
+	for _, path := range []string{"/item/8", "/item/9"} {
+		dead, err := p.GetStreams(context.Background(), srv.URL+path, 0, 0, "")
+		if !errors.Is(err, ErrUnresolvablePlayer) {
+			t.Fatalf("%s: expected ErrUnresolvablePlayer, got %v", path, err)
+		}
+		if dead == nil || len(dead.Streams) != 0 {
+			t.Fatalf("%s: expected empty stream list, got %+v", path, dead)
+		}
 	}
 }
 
-func TestCovProviderHdrezkaDetailsFixture(t *testing.T) {
-	srv := covFixtureServer(map[string]string{"/f/1": covHdrezkaDetailsHTML})
-	defer srv.Close()
-	p := &HdrezkaProvider{client: covTLS(t), baseURL: srv.URL}
+// ---- Lavakino ----
 
-	d, err := p.GetDetails(context.Background(), srv.URL+"/f/1")
+const covLavakinoStreamsHTML = `<html><body>
+<iframe src="https://www.youtube.com/embed/trailer"></iframe>
+<iframe src="/player/embed/9"></iframe>
+<iframe src="/player/embed/10"></iframe>
+</body></html>`
+
+func TestCovProviderLavakinoStreamsFixture(t *testing.T) {
+	srv := covFixtureServer(map[string]string{
+		"/item/1":          covLavakinoStreamsHTML,
+		"/player/embed/9":  covPlayerFrameHTML,
+		"/player/embed/10": `<html><body>тут немає PlayerJS</body></html>`,
+		"/item/2":          `<html><body><iframe src="/player/dead"></iframe></body></html>`,
+		"/player/dead":     covDeadPlayerFrameHTML,
+	})
+	defer srv.Close()
+	p := &LavakinoProvider{client: covTLS(t), baseURL: srv.URL}
+
+	resp, err := p.GetStreams(context.Background(), srv.URL+"/item/1", 0, 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if d.Title != "Інтерстеллар" || d.PosterURL != "https://cdn.example/cover.jpg" {
-		t.Errorf("unexpected details: %+v", d.MediaItem)
+	if len(resp.Streams) != 1 {
+		t.Fatalf("expected exactly 1 stream (early exit after first real stream), got %+v", resp.Streams)
 	}
-	if !strings.Contains(d.Description, "космос") {
-		t.Errorf("unexpected description: %q", d.Description)
+	st := resp.Streams[0]
+	if !rePlayableURL.MatchString(st.URL) {
+		t.Fatalf("stream url must be a playable media url, got %q", st.URL)
+	}
+	if st.URL != "https://cdn.example/hls/movie-1080p/master.m3u8" {
+		t.Errorf("unexpected stream url: %q", st.URL)
+	}
+	if st.Headers["Referer"] != "https://cdn.example/" || st.Headers["Origin"] != "https://cdn.example" {
+		t.Errorf("headers must be derived from the MEDIA origin, got %v", st.Headers)
+	}
+
+	dead, err := p.GetStreams(context.Background(), srv.URL+"/item/2", 0, 0, "")
+	if !errors.Is(err, ErrUnresolvablePlayer) {
+		t.Fatalf("expected ErrUnresolvablePlayer, got %v", err)
+	}
+	if dead == nil || len(dead.Streams) != 0 {
+		t.Fatalf("expected empty stream list, got %+v", dead)
+	}
+}
+
+// Фанаут обмежено MaxPlayerIframes: 10 iframe, але сервер приймає не більше ніж
+// MaxPlayerIframes запитів до плеєрів (без цього один виклик робив 1 + N запитів).
+func TestCovProviderLavakinoIframeFanOutIsCapped(t *testing.T) {
+	var frames int32
+	var item string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/item/1", func(w http.ResponseWriter, r *http.Request) {
+		var sb strings.Builder
+		for i := 0; i < 10; i++ {
+			sb.WriteString(`<iframe src="/player/embed/` + strconv.Itoa(i) + `"></iframe>`)
+		}
+		item = "<html><body>" + sb.String() + "</body></html>"
+		_, _ = w.Write([]byte(item))
+	})
+	mux.HandleFunc("/player/embed/", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&frames, 1)
+		_, _ = w.Write([]byte(covDeadPlayerFrameHTML))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := &LavakinoProvider{client: covTLS(t), baseURL: srv.URL}
+	resp, err := p.GetStreams(context.Background(), srv.URL+"/item/1", 0, 0, "")
+	if !errors.Is(err, ErrUnresolvablePlayer) {
+		t.Fatalf("expected ErrUnresolvablePlayer, got %v", err)
+	}
+	if resp == nil || len(resp.Streams) != 0 {
+		t.Fatalf("expected empty stream list, got %+v", resp)
+	}
+	if got := atomic.LoadInt32(&frames); got > int32(MaxPlayerIframes) {
+		t.Fatalf("iframe fan-out not capped: %d player fetches, limit %d", got, MaxPlayerIframes)
 	}
 }

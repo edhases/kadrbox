@@ -56,7 +56,7 @@ flowchart TD
     subgraph DataLayer ["Шар даних (Data Layer)"]
         UCRI[UnifiedContentRepositoryImpl]
         PR[ProviderRegistry]
-        Providers["Провайдери: UakinoProvider, EneyidaProvider, UaflixProvider, UaserialsProvider, HdrezkaProvider, YouTubeProvider"]
+        Providers["Провайдери: UakinoProvider, EneyidaProvider, UaflixProvider, UaserialsProvider, YouTubeProvider"]
         Parsers["Парсери DOM / HTML / JSON"]
         DAOs["Drift DAOs: HistoryDao, FavoritesDao, MediaItemsDao, SettingsDao, DownloadsDao, SearchHistoryDao"]
         AppDB[(AppDatabase - Drift / SQLite)]
@@ -86,7 +86,7 @@ flowchart TD
 | **Controllers / Services** | `PlayerController`, `SmartSearchService`, `HistoryService`, `FavoritesService` | Виклики методів, параметри пошуку, позиція медіа | `ChangeNotifier` сповіщення, `Stream<T>`, оновлені моделі стану | Управління життєвим циклом фічі, синхронізація з сервером, дедуплікація, кешування |
 | **Domain** | `MediaItem`, `StreamSource`, `MediaDetails`, `UnifiedContentRepository` | Чисті доменні структури | Бізнес-моделі | Опис контрактів взаємодії, абстракція від джерел отримання даних |
 | **Data (Repository)** | `UnifiedContentRepositoryImpl`, `ProviderRegistry` | Запити до кількох джерел | Агреговані колекції `MediaItem` | Маршрутизація запитів між конкретними провайдерами, уніфікація ID |
-| **Data (Providers/Parsers)**| `UakinoProvider`, `EneyidaProvider`, `HdrezkaParser` тощо | URL сторінки, HTML/JSON | Парсинг стрімів, метаданих | Скрапінг, отримання прямих HLS/MP4 посилань |
+| **Data (Providers/Parsers)**| `UakinoProvider`, `EneyidaProvider`, тощо | URL сторінки, HTML/JSON | Парсинг стрімів, метаданих | Скрапінг, отримання прямих HLS/MP4 посилань |
 | **Data (Persistence & Net)** | `AppDatabase` (Drift), `PocketBaseService`, `ApiClient` (Dio) | SQL транзакції, HTTP запити, WebSocket | Реактивні `Stream` з БД, мережеві DTO | Збереження на диск, обхід блокувань, фонова синхронізація |
 
 ---
@@ -425,7 +425,7 @@ sequenceDiagram
         Search->>Providers: Eneyida.search("матриця")
         Providers-->>Search: [Item 1, Item 3]
     and
-        Search->>Providers: Hdrezka.search("матрица")
+        Search->>Providers: Uakino.search("матрица")
         Providers-->>Search: [Item 4]
     and
         Search->>Providers: Нестабільний провайдер
@@ -456,7 +456,7 @@ sequenceDiagram
     autonumber
     actor User as Користувач
     participant Details as DetailsPage
-    participant Provider as ContentProvider (e.g. Hdrezka / Uakino)
+    participant Provider as ContentProvider (e.g. Uakino / Eneyida)
     participant FavSvc as FavoritesService
     participant Router as GoRouter
     participant VPS as VideoPlayerService

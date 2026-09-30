@@ -122,6 +122,32 @@ void main() {
       expect(StreamType.values, contains(StreamType.hls));
       expect(StreamType.values, contains(StreamType.dash));
       expect(StreamType.values, contains(StreamType.torrent));
+      expect(StreamType.values, contains(StreamType.iframe));
+    });
+
+    test('iframe marks a source as an unplayable HTML page', () {
+      // `iframe` is a distinct member rather than a flag on `direct` so a
+      // player page can never be mistaken for media by a switch statement.
+      const page = StreamSource(
+        url: 'https://example.com/embed/abc',
+        type: StreamType.iframe,
+      );
+      expect(page.type, StreamType.iframe);
+      expect(page.type, isNot(StreamType.direct));
+      expect(page.type, isNot(StreamType.hls));
+    });
+
+    test('iframe participates in copyWith and equality', () {
+      const original = StreamSource(
+        url: 'https://example.com/watch/1',
+        type: StreamType.direct,
+      );
+      final asIframe = original.copyWith(type: StreamType.iframe);
+
+      expect(original.type, StreamType.direct);
+      expect(asIframe.type, StreamType.iframe);
+      expect(asIframe, isNot(equals(original)));
+      expect(asIframe, equals(original.copyWith(type: StreamType.iframe)));
     });
   });
 }
