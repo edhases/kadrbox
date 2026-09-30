@@ -59,8 +59,9 @@ type Episode struct {
 
 // Voiceover описує варіант студії озвучення
 type Voiceover struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Seasons []Season `json:"seasons,omitempty"`
 }
 
 // ContentStreamsResponse - фінальний контракт відповіді для ендпоінта отримання потоків

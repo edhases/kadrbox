@@ -509,3 +509,101 @@ func TestBanderaProviderGetStreams_ZeroHTTPCalls_OnInvalidRef(t *testing.T) {
 		t.Errorf("CRITICAL INVARIANT FAILED: expected 0 network calls to /content or /stream for invalid ref, got %d", httpCallsCount)
 	}
 }
+
+// 13. ТЕСТ КРОКУ 3: Per-voice дерева озвучок (Voiceover.Seasons)
+func TestBanderaProviderGetDetails_PerVoiceSeasonsTree(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/content" {
+			resp := `{
+				"ok": true,
+				"source": "animeon",
+				"type": "series",
+				"voices": [
+					{
+						"id": "fanvoxua",
+						"display_name": "FanVoxUA",
+						"seasons": [
+							{
+								"title": 1,
+								"episodes": [
+									{"number": 1, "title": "Серія 1", "ref": {"episode_id": 101}},
+									{"number": 2, "title": "Серія 2", "ref": {"episode_id": 102}}
+								]
+							},
+							{
+								"title": 2,
+								"episodes": [
+									{"number": 1, "title": "Серія S2E1", "ref": {"episode_id": 201}}
+								]
+							}
+						]
+					},
+					{
+						"id": "subtitles_ua",
+						"display_name": "Субтитри UA",
+						"seasons": [
+							{
+								"title": 1,
+								"episodes": [
+									{"number": 1, "title": "Серія 1 (саби)", "ref": {"episode_id": 301}}
+								]
+							}
+						]
+					}
+				]
+			}`
+			_, _ = w.Write([]byte(resp))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	p := provider.NewBanderaProviderWithConfig(server.URL, "", server.Client())
+	payloadBytes, _ := json.Marshal(provider.BanderaItemPayload{
+		Source: "animeon",
+		Ref:    json.RawMessage(`{"id": 999}`),
+		Type:   "series",
+		Title:  "Тестовий Серіал",
+	})
+
+	details, err := p.GetDetails(context.Background(), string(payloadBytes))
+	if err != nil {
+		t.Fatalf("GetDetails failed: %v", err)
+	}
+
+	if len(details.Voiceovers) != 2 {
+		t.Fatalf("expected 2 voiceovers, got %d", len(details.Voiceovers))
+	}
+
+	// Перевірка голосу 1 (FanVoxUA)
+	v1 := details.Voiceovers[0]
+	if v1.Name != "FanVoxUA" {
+		t.Errorf("expected voice 1 name 'FanVoxUA', got %q", v1.Name)
+	}
+	if len(v1.Seasons) != 2 {
+		t.Fatalf("expected 2 seasons in voice 1, got %d", len(v1.Seasons))
+	}
+	if len(v1.Seasons[0].Episodes) != 2 {
+		t.Errorf("expected 2 episodes in voice 1 season 1, got %d", len(v1.Seasons[0].Episodes))
+	}
+	if len(v1.Seasons[1].Episodes) != 1 {
+		t.Errorf("expected 1 episode in voice 1 season 2, got %d", len(v1.Seasons[1].Episodes))
+	}
+
+	// Перевірка голосу 2 (Субтитри UA)
+	v2 := details.Voiceovers[1]
+	if v2.Name != "Субтитри UA" {
+		t.Errorf("expected voice 2 name 'Субтитри UA', got %q", v2.Name)
+	}
+	if len(v2.Seasons) != 1 {
+		t.Fatalf("expected 1 season in voice 2, got %d", len(v2.Seasons))
+	}
+	if len(v2.Seasons[0].Episodes) != 1 {
+		t.Errorf("expected 1 episode in voice 2, got %d", len(v2.Seasons[0].Episodes))
+	}
+	if !strings.Contains(v2.Seasons[0].Episodes[0].URL, "301") {
+		t.Errorf("expected episode URL in voice 2 to contain ref 301, got %s", v2.Seasons[0].Episodes[0].URL)
+	}
+}

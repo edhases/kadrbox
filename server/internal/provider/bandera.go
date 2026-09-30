@@ -207,24 +207,37 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 
 	// Якщо є голоси/озвучки (серіали або багатоваріантний дубляж)
 	if len(contentResp.Voices) > 0 {
-		for _, v := range contentResp.Voices {
-			vName := v.DisplayName.String()
-			if vName == "" {
-				vName = v.ID.String()
-			}
-			voiceovers = append(voiceovers, domain.Voiceover{
-				ID:   v.ID.String(),
-				Name: vName,
-			})
-		}
-
-		// Для першої версії будуємо сезони з першої доступної озвучки (Крок 3 розширить це до per-voice)
-		primaryVoice := contentResp.Voices[0]
-		if len(primaryVoice.Seasons) > 0 {
-			for sIdx, s := range primaryVoice.Seasons {
-				sNum := ParseSeasonNumber(s.Title, sIdx+1)
+		buildSeasonsForVoice := func(v BanderaVoice) []domain.Season {
+			var voiceSeasons []domain.Season
+			if len(v.Seasons) > 0 {
+				for sIdx, s := range v.Seasons {
+					sNum := ParseSeasonNumber(s.Title, sIdx+1)
+					var episodes []domain.Episode
+					for _, ep := range s.Episodes {
+						epTitle := ep.Title.String()
+						if epTitle == "" {
+							epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
+						}
+						streamRefBytes, _ := json.Marshal(BanderaStreamRef{
+							Source:      payload.Source,
+							Ref:         ep.Ref,
+							IsStreamRef: true,
+						})
+						episodes = append(episodes, domain.Episode{
+							Number: ep.Number.Int(),
+							Title:  epTitle,
+							URL:    string(streamRefBytes),
+						})
+					}
+					voiceSeasons = append(voiceSeasons, domain.Season{
+						Number:   sNum,
+						Title:    fmt.Sprintf("Сезон %d", sNum),
+						Episodes: episodes,
+					})
+				}
+			} else if len(v.Episodes) > 0 {
 				var episodes []domain.Episode
-				for _, ep := range s.Episodes {
+				for _, ep := range v.Episodes {
 					epTitle := ep.Title.String()
 					if epTitle == "" {
 						epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
@@ -240,35 +253,31 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 						URL:    string(streamRefBytes),
 					})
 				}
-				seasons = append(seasons, domain.Season{
-					Number:   sNum,
-					Title:    fmt.Sprintf("Сезон %d", sNum),
+				voiceSeasons = append(voiceSeasons, domain.Season{
+					Number:   1,
+					Title:    "Сезон 1",
 					Episodes: episodes,
 				})
 			}
-		} else if len(primaryVoice.Episodes) > 0 {
-			var episodes []domain.Episode
-			for _, ep := range primaryVoice.Episodes {
-				epTitle := ep.Title.String()
-				if epTitle == "" {
-					epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
-				}
-				streamRefBytes, _ := json.Marshal(BanderaStreamRef{
-					Source:      payload.Source,
-					Ref:         ep.Ref,
-					IsStreamRef: true,
-				})
-				episodes = append(episodes, domain.Episode{
-					Number: ep.Number.Int(),
-					Title:  epTitle,
-					URL:    string(streamRefBytes),
-				})
+			return voiceSeasons
+		}
+
+		for _, v := range contentResp.Voices {
+			vName := v.DisplayName.String()
+			if vName == "" {
+				vName = v.ID.String()
 			}
-			seasons = append(seasons, domain.Season{
-				Number:   1,
-				Title:    "Сезон 1",
-				Episodes: episodes,
+			vSeasons := buildSeasonsForVoice(v)
+			voiceovers = append(voiceovers, domain.Voiceover{
+				ID:      v.ID.String(),
+				Name:    vName,
+				Seasons: vSeasons,
 			})
+		}
+
+		// За замовчуванням seasons беруться з першої доступної озвучки
+		if len(voiceovers) > 0 {
+			seasons = voiceovers[0].Seasons
 		}
 	} else if len(contentResp.Streams) > 0 {
 		// Для фільмів зі списком стрімів
