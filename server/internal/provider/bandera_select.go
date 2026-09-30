@@ -10,7 +10,9 @@ var defaultStreamKeysFallback = []string{"url", "episode_id", "file"}
 
 // IsStreamRef визначає, чи є наданий ref посиланням на стрім (готовим для /stream),
 // чи це посилання на контент/серіал/фільм (вимагає виклику /content).
-// Використовує динамічні StreamKeys із /sources для відповідного джерела.
+// Використовує динамічні StreamKeys та ContentKeys із /sources для відповідного джерела.
+// Для джерел, де ключі перетинаються (наприклад, animeon має ContentKeys: [id] і StreamKeys: [episode_id, id]),
+// пріоритет мають ключі з різниці множин (streamKeys \ contentKeys).
 func IsStreamRef(meta SourceMeta, refRaw json.RawMessage) bool {
 	if len(refRaw) == 0 {
 		return false
@@ -26,6 +28,31 @@ func IsStreamRef(meta SourceMeta, refRaw json.RawMessage) bool {
 		streamKeys = defaultStreamKeysFallback
 	}
 
+	// 1. Обчислюємо ключі, унікальні для stream: streamKeys \ contentKeys
+	contentSet := make(map[string]struct{}, len(meta.ContentKeys))
+	for _, ck := range meta.ContentKeys {
+		contentSet[ck] = struct{}{}
+	}
+
+	var uniqueStreamKeys []string
+	for _, sk := range streamKeys {
+		if _, inContent := contentSet[sk]; !inContent {
+			uniqueStreamKeys = append(uniqueStreamKeys, sk)
+		}
+	}
+
+	// 2. Якщо є унікальні стрімові ключі: наявність хоча б одного свідчить, що це stream ref
+	if len(uniqueStreamKeys) > 0 {
+		for _, k := range uniqueStreamKeys {
+			if _, ok := rawMap[k]; ok {
+				return true
+			}
+		}
+		// Якщо жодного унікального ключа стріму немає — це НЕ стрім ref (навіть якщо є спільний ключ типу 'id')
+		return false
+	}
+
+	// 3. Дегенерований випадок (якщо streamKeys повністю перекривається contentKeys або contentKeys порожній)
 	for _, k := range streamKeys {
 		if _, ok := rawMap[k]; ok {
 			return true

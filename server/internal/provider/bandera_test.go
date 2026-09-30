@@ -85,20 +85,73 @@ func TestParseFlexibleYear(t *testing.T) {
 	}
 }
 
-// 4. Чекліст #2: Розрізнення ref через inputs з /sources (динамічно, без хардкоду)
+// 4. Чекліст #2: Розрізнення ref через inputs з /sources (множина streamKeys \ contentKeys)
 func TestIsStreamRef_WithSourceMeta(t *testing.T) {
-	meta := provider.SourceMeta{
+	// Регресія msg-011: animeon має ContentKeys: ["id"], StreamKeys: ["episode_id", "id"]
+	animeonMeta := provider.SourceMeta{
 		Key:         "animeon",
 		ContentKeys: []string{"id"},
 		StreamKeys:  []string{"episode_id", "id"},
 	}
 
-	// ref контенту (серіалу): тільки id -> в animeon це і content, але коли це episode_id -> це stream
-	episodeRef := json.RawMessage(`{"episode_id": 60300, "season": 1, "episode": 1}`)
-	if !provider.IsStreamRef(meta, episodeRef) {
-		t.Errorf("expected episodeRef with 'episode_id' to be recognized as stream ref")
+	// 1. animeon search/item ref містить тільки "id" -> НЕ stream ref!
+	animeonItemRef := json.RawMessage(`{"id": 7883, "season": 1}`)
+	if provider.IsStreamRef(animeonMeta, animeonItemRef) {
+		t.Errorf("expected animeon item ref with only 'id' to NOT be recognized as stream ref (regression msg-011)")
 	}
 
+	// 2. animeon episode ref містить "episode_id" -> IS stream ref!
+	animeonEpRef := json.RawMessage(`{"episode_id": 60300, "season": 1, "episode": 1}`)
+	if !provider.IsStreamRef(animeonMeta, animeonEpRef) {
+		t.Errorf("expected animeon episode ref with 'episode_id' to be recognized as stream ref")
+	}
+
+	// 3. franko: ContentKeys: ["id", "translations"], StreamKeys: ["id", "translation", "season", "episode"]
+	frankoMeta := provider.SourceMeta{
+		Key:         "franko",
+		ContentKeys: []string{"id", "translations"},
+		StreamKeys:  []string{"id", "translation", "season", "episode"},
+	}
+	frankoItemRef := json.RawMessage(`{"id": 105, "translations": [{"id": 1, "title": "Ukr"}]}`)
+	if provider.IsStreamRef(frankoMeta, frankoItemRef) {
+		t.Errorf("expected franko item ref with only 'id' to NOT be recognized as stream ref")
+	}
+	frankoStreamRef := json.RawMessage(`{"id": 105, "translation": 1, "season": 1, "episode": 1}`)
+	if !provider.IsStreamRef(frankoMeta, frankoStreamRef) {
+		t.Errorf("expected franko stream ref with 'translation' to be recognized as stream ref")
+	}
+
+	// 4. makhno: ContentKeys: ["play", "imdb_id", "tmdb_id", "serial"], StreamKeys: ["url", "play"]
+	makhnoMeta := provider.SourceMeta{
+		Key:         "makhno",
+		ContentKeys: []string{"play", "imdb_id", "tmdb_id", "serial"},
+		StreamKeys:  []string{"url", "play"},
+	}
+	makhnoItemRef := json.RawMessage(`{"play": "film_123", "imdb_id": "tt1234567"}`)
+	if provider.IsStreamRef(makhnoMeta, makhnoItemRef) {
+		t.Errorf("expected makhno item ref with only 'play' to NOT be recognized as stream ref")
+	}
+	makhnoStreamRef := json.RawMessage(`{"url": "https://zetvideo.net/play.m3u8", "play": "film_123"}`)
+	if !provider.IsStreamRef(makhnoMeta, makhnoStreamRef) {
+		t.Errorf("expected makhno stream ref with 'url' to be recognized as stream ref")
+	}
+
+	// 5. filmix: ContentKeys: ["id", "token", "device_id"], StreamKeys: ["url", "id", "token", "device_id", "voice", "season", "episode"]
+	filmixMeta := provider.SourceMeta{
+		Key:         "filmix",
+		ContentKeys: []string{"id", "token", "device_id"},
+		StreamKeys:  []string{"url", "id", "token", "device_id", "voice", "season", "episode"},
+	}
+	filmixItemRef := json.RawMessage(`{"id": 555, "token": "abc", "device_id": "dev1"}`)
+	if provider.IsStreamRef(filmixMeta, filmixItemRef) {
+		t.Errorf("expected filmix item ref with common keys to NOT be recognized as stream ref")
+	}
+	filmixStreamRef := json.RawMessage(`{"id": 555, "voice": "ukr", "season": 1, "episode": 1}`)
+	if !provider.IsStreamRef(filmixMeta, filmixStreamRef) {
+		t.Errorf("expected filmix stream ref with unique keys to be recognized as stream ref")
+	}
+
+	// 6. bambooua: ContentKeys: ["href"], StreamKeys: ["url"]
 	bambooMeta := provider.SourceMeta{
 		Key:         "bambooua",
 		ContentKeys: []string{"href"},
@@ -108,10 +161,19 @@ func TestIsStreamRef_WithSourceMeta(t *testing.T) {
 	if provider.IsStreamRef(bambooMeta, contentRef) {
 		t.Errorf("expected contentRef with 'href' to NOT be recognized as stream ref")
 	}
-
 	streamRef := json.RawMessage(`{"url": "https://zetvideo.net/stream.m3u8"}`)
 	if !provider.IsStreamRef(bambooMeta, streamRef) {
 		t.Errorf("expected streamRef with 'url' to be recognized as stream ref")
+	}
+
+	// 7. Дегенерований випадок: ContentKeys == StreamKeys -> фолбек працює, не панікує
+	degenerateMeta := provider.SourceMeta{
+		Key:         "degen",
+		ContentKeys: []string{"url"},
+		StreamKeys:  []string{"url"},
+	}
+	if !provider.IsStreamRef(degenerateMeta, json.RawMessage(`{"url": "https://example.com/play"}`)) {
+		t.Errorf("expected degenerate case to fallback to streamKeys check")
 	}
 }
 
