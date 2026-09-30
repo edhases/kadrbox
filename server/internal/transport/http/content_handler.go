@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
@@ -136,22 +137,42 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 		clustered := search.ClusterAndDeduplicate(candidates)
 
-		// Збираємо статистику підджерел
+		// Збираємо та нормалізуємо статистику підджерел
 		sourceStatuses := make(map[string]search.SourceStatusInfo)
+		hasSuccess := false
+		hasError := false
+
 		if rawResp.Meta != nil {
 			for srcKey, st := range rawResp.Meta.Statuses {
+				normStatus := normalizeSourceStatus(st.Status, st.Count, st.Error)
+				if normStatus == "ok" {
+					hasSuccess = true
+				} else if normStatus == "error" || normStatus == "timeout" {
+					hasError = true
+				}
 				sourceStatuses[srcKey] = search.SourceStatusInfo{
-					Status:    st.Status,
+					Status:    normStatus,
 					Count:     st.Count,
 					ElapsedMs: st.ElapsedMs,
 				}
 			}
 		}
 
+		segmentStatus := "ok"
+		if len(rawResp.Items) == 0 {
+			if hasError && !hasSuccess {
+				segmentStatus = "error"
+			} else {
+				segmentStatus = "empty"
+			}
+		} else if hasError {
+			segmentStatus = "partial"
+		}
+
 		segments := []search.SearchSegment{
 			{
 				ID:      "bandera",
-				Status:  "ok",
+				Status:  segmentStatus,
 				Count:   len(rawResp.Items),
 				Sources: sourceStatuses,
 			},
@@ -349,4 +370,21 @@ func (h *ContentHandler) Category(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(results)
+}
+
+func normalizeSourceStatus(rawStatus string, count int, errStr string) string {
+	s := strings.ToLower(strings.TrimSpace(rawStatus))
+	if errStr != "" || s == "error" || s == "failed" {
+		return "error"
+	}
+	if s == "timeout" {
+		return "timeout"
+	}
+	if s == "empty" || count == 0 {
+		return "empty"
+	}
+	if s == "ok" || s == "success" || count > 0 {
+		return "ok"
+	}
+	return "unknown"
 }

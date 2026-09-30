@@ -224,3 +224,100 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 		_, _ = trap.Search(context.Background(), "test")
 	}()
 }
+
+func TestSearchSourceStatuses_NormalizationAndNonEmptyKeys(t *testing.T) {
+	// Перевіряємо, що у відповіді пошуку всі SourceKey непорожні, а статуси джерел нормалізуються в ok/empty/error/timeout
+	banderaMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/sources" {
+			_ = json.NewEncoder(w).Encode(provider.BanderaSourcesResponse{OK: true})
+			return
+		}
+		if r.URL.Path == "/search" {
+			_ = json.NewEncoder(w).Encode(provider.BanderaSearchResponse{
+				OK: true,
+				Items: []provider.BanderaSearchItem{
+					{
+						Source: "uaflix",
+						Title:  "Бетмен",
+						Year:   json.RawMessage(`2022`),
+						Type:   provider.FlexibleString("movie"),
+						Ref:    json.RawMessage(`{"href":"https://uaflix.com/batman"}`),
+					},
+				},
+				Meta: &provider.BanderaSearchMetaResponse{
+					Statuses: map[string]provider.BanderaSourceStatus{
+						"uaflix":   {Status: "ok", Count: 1, ElapsedMs: 120},
+						"makhno":   {Status: "empty", Count: 0, ElapsedMs: 10},
+						"bambooua": {Status: "timeout", ElapsedMs: 5000},
+						"animeon":  {Status: "error", Error: "network down"},
+					},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer banderaMock.Close()
+
+	registry := provider.NewRegistry()
+	registry.Register(provider.NewBanderaProviderWithConfig(banderaMock.URL, "", banderaMock.Client()))
+	handler := transportHttp.NewContentHandler(registry, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/search?q=Бетмен", nil)
+	rr := httptest.NewRecorder()
+	handler.Search(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var resp struct {
+		Segments []struct {
+			ID      string `json:"id"`
+			Status  string `json:"status"`
+			Sources map[string]struct {
+				Status string `json:"status"`
+			} `json:"sources"`
+		} `json:"segments"`
+		Items []struct {
+			Sources []struct {
+				SourceKey string `json:"source_key"`
+			} `json:"sources"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Segments) == 0 {
+		t.Fatalf("missing segments")
+	}
+	// Оскільки є і успіх (uaflix), і помилки (animeon/bambooua), статус сегмента повинен бути "partial"
+	if resp.Segments[0].Status != "partial" {
+		t.Fatalf("expected segment status 'partial', got %q", resp.Segments[0].Status)
+	}
+
+	sources := resp.Segments[0].Sources
+	if sources["uaflix"].Status != "ok" {
+		t.Fatalf("expected uaflix status 'ok', got %q", sources["uaflix"].Status)
+	}
+	if sources["makhno"].Status != "empty" {
+		t.Fatalf("expected makhno status 'empty', got %q", sources["makhno"].Status)
+	}
+	if sources["bambooua"].Status != "timeout" {
+		t.Fatalf("expected bambooua status 'timeout', got %q", sources["bambooua"].Status)
+	}
+	if sources["animeon"].Status != "error" {
+		t.Fatalf("expected animeon status 'error', got %q", sources["animeon"].Status)
+	}
+
+	// Перевірка, що кожен SourceKey у знайдених items непорожній
+	for _, item := range resp.Items {
+		for _, s := range item.Sources {
+			if s.SourceKey == "" {
+				t.Fatalf("expected non-empty SourceKey in item source ref, got empty")
+			}
+		}
+	}
+}

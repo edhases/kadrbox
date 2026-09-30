@@ -108,13 +108,14 @@ func ClusterAndDeduplicate(candidates []ScoredSearchItem) []ScoredSearchItem {
 					combinedSources = append(combinedSources, src)
 				}
 			}
-			// Якщо в самого елемента не було Sources, додаємо базовий реф
+			// Якщо в самого елемента не було Sources, додаємо базовий реф (SourceKey = ProviderID)
 			if len(it.Sources) == 0 && it.ID != "" {
-				k := it.ProviderID + "::" + it.ID
+				k := it.ProviderID + ":" + it.ProviderID + ":" + it.ID
 				if !seenSources[k] {
 					seenSources[k] = true
 					combinedSources = append(combinedSources, SearchSourceRef{
 						ProviderID: it.ProviderID,
+						SourceKey:  it.ProviderID,
 						ItemID:     it.ID,
 						URL:        it.URL,
 					})
