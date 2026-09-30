@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:get_it/get_it.dart';
@@ -8,7 +9,6 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/download_service.dart';
 import '../../domain/entities/entities.dart';
 import 'common/skeleton.dart';
-import 'rating_badge.dart';
 
 /// Media item card for grids and lists
 class MediaCard extends StatefulWidget {
@@ -105,16 +105,14 @@ class _MediaCardState extends State<MediaCard> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Poster image
+                  // Poster image (cover fit)
                   _buildPoster(),
 
-                  // Gradient overlay (only for overlay style)
-                  if (_ui.cardInfoStyle == CardInfoStyle.overlay)
-                    _buildGradientOverlay(),
+                  // Gradient overlay (always on bottom for readability)
+                  _buildGradientOverlay(),
 
-                  // Content info (only for overlay style)
-                  if (_ui.cardInfoStyle == CardInfoStyle.overlay)
-                    _buildInfoOverlay(),
+                  // Content info (title + year • genre / rating)
+                  _buildInfoOverlay(),
 
                   // Provider badge (top-left)
                   _buildProviderBadge(),
@@ -127,8 +125,8 @@ class _MediaCardState extends State<MediaCard> {
                   if (widget.item.rating != null && _ui.showRatings)
                     _buildRatingBadge(),
 
-                  // Year badge (if no overlay style and year exists)
-                  if (_ui.cardInfoStyle != CardInfoStyle.overlay &&
+                  // Year badge (only if overlay style is hidden and year exists)
+                  if (_ui.cardInfoStyle == CardInfoStyle.hidden &&
                       widget.item.year != null &&
                       _ui.showYears)
                     _buildYearBadge(),
@@ -222,17 +220,24 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildGradientOverlay() {
+    if (_ui.cardInfoStyle == CardInfoStyle.hidden) return const SizedBox.shrink();
+
     return Positioned(
       left: 0,
       right: 0,
       bottom: 0,
-      height: 80,
+      height: 96,
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Colors.transparent, Colors.black.withValues(alpha: 0.8)],
+            colors: [
+              Colors.transparent,
+              Colors.black.withValues(alpha: 0.3),
+              Colors.black.withValues(alpha: 0.92),
+            ],
+            stops: const [0.0, 0.4, 1.0],
           ),
         ),
       ),
@@ -240,6 +245,20 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildInfoOverlay() {
+    if (_ui.cardInfoStyle == CardInfoStyle.hidden) return const SizedBox.shrink();
+
+    final parts = <String>[];
+    if (widget.item.year != null && _ui.showYears) {
+      parts.add('${widget.item.year}');
+    }
+    if (widget.item.genres != null && widget.item.genres!.isNotEmpty) {
+      parts.add(widget.item.genres!.first);
+    } else if (widget.item.type != ContentType.unknown) {
+      parts.add(widget.item.type.displayName);
+    }
+
+    final subtitle = parts.join(' • ');
+
     return Positioned(
       left: 8,
       right: 8,
@@ -248,9 +267,10 @@ class _MediaCardState extends State<MediaCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 1st line: Title (1 line max or up to 2 if short)
           Text(
             widget.item.title,
-            maxLines: 2,
+            maxLines: subtitle.isNotEmpty ? 1 : 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
@@ -259,13 +279,17 @@ class _MediaCardState extends State<MediaCard> {
               height: 1.2,
             ),
           ),
-          if (widget.item.year != null && _ui.showYears) ...[
+          if (subtitle.isNotEmpty) ...[
             const SizedBox(height: 2),
+            // 2nd line: Year • Genre
             Text(
-              '${widget.item.year}',
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: Colors.white.withValues(alpha: 0.72),
                 fontSize: 11,
+                fontWeight: FontWeight.w400,
               ),
             ),
           ],
@@ -276,16 +300,41 @@ class _MediaCardState extends State<MediaCard> {
 
   Widget _buildRatingBadge() {
     final rawRating = widget.item.rating!;
-    // Skip display for invalid ratings
     if (rawRating < 0) return const SizedBox.shrink();
 
     return Positioned(
       top: 8,
       right: 8,
-      child: RatingBadge(
-        rating: rawRating,
-        source: widget.item.ratingSource,
-        compact: false,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.star_rounded, size: 12, color: Colors.amber),
+                const SizedBox(width: 3),
+                Text(
+                  rawRating > 10 ? (rawRating / 10).toStringAsFixed(1) : rawRating.toStringAsFixed(1),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -294,18 +343,28 @@ class _MediaCardState extends State<MediaCard> {
     return Positioned(
       top: 8,
       left: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          widget.item.providerId.toUpperCase(),
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 9,
-            fontWeight: FontWeight.bold,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Text(
+              widget.item.providerId.toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.4,
+              ),
+            ),
           ),
         ),
       ),
@@ -313,58 +372,70 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildTypeBadge() {
-    final typeColor = _getTypeColor();
     final typeIcon = _getTypeIcon();
 
     return Positioned(
-      top: 28,
+      top: 32,
       left: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        decoration: BoxDecoration(
-          color: typeColor.withValues(alpha: 0.9),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(typeIcon, size: 10, color: Colors.white),
-            const SizedBox(width: 2),
-            Text(
-              widget.item.type.shortName,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 8,
-                fontWeight: FontWeight.bold,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.15),
               ),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(typeIcon, size: 10, color: Colors.white70),
+                const SizedBox(width: 3),
+                Text(
+                  widget.item.type.shortName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
-  }
-
-  Color _getTypeColor() {
-    // Unified neutral style — no rainbow badge colors
-    return Colors.black.withValues(alpha: 0.55);
   }
 
   Widget _buildYearBadge() {
     return Positioned(
       bottom: 8,
       left: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          '${widget.item.year}',
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Text(
+              '${widget.item.year}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
         ),
       ),
@@ -382,3 +453,4 @@ class _MediaCardState extends State<MediaCard> {
     );
   }
 }
+

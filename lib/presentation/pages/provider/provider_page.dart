@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/logger.dart';
 import '../../../data/providers/provider_registry.dart';
-import '../../../data/providers/hdrezka_provider.dart';
 import '../../../data/providers/youtube_provider.dart';
 import '../../../data/services/settings_service.dart';
 import '../../../domain/entities/entities.dart';
@@ -242,7 +241,7 @@ class _ProviderPageState extends State<ProviderPage>
 
   /// Check if provider has fixed streams (can't change quality/voiceover after start)
   bool get _hasFixedStreams {
-    if (_provider is HdrezkaProvider) return HdrezkaProvider.hasFixedStreams;
+    if (_provider != null) return _registry.hasFixed(_provider!);
     return false;
   }
 
@@ -290,7 +289,13 @@ class _ProviderPageState extends State<ProviderPage>
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             tooltip: 'Назад',
           ),
           const SizedBox(width: 8),

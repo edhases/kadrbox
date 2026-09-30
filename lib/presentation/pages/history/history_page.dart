@@ -71,7 +71,13 @@ class _HistoryPageState extends State<HistoryPage> {
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             tooltip: 'Назад',
           ),
           const SizedBox(width: 8),

@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../../core/l10n/app_strings.dart';
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/settings_service.dart';
+import '../../../data/services/provider_catalog_service.dart';
 import '../../../core/services/version_service.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/history_service.dart';
@@ -44,11 +45,17 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _settings.addListener(_onSettingsChanged);
+    try {
+      GetIt.instance<ProviderCatalogService>().addListener(_onSettingsChanged);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _settings.removeListener(_onSettingsChanged);
+    try {
+      GetIt.instance<ProviderCatalogService>().removeListener(_onSettingsChanged);
+    } catch (_) {}
     super.dispose();
   }
 
@@ -561,7 +568,13 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             tooltip: _s.back,
           ),
           const SizedBox(width: 8),

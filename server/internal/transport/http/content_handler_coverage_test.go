@@ -42,6 +42,20 @@ func (f *covStubProvider) Search(_ context.Context, _ string) ([]domain.MediaIte
 	return f.items, nil
 }
 
+func (f *covStubProvider) GetPopular(_ context.Context, _ string, _ int) ([]domain.MediaItem, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.items, nil
+}
+
+func (f *covStubProvider) GetByCategory(_ context.Context, _, _ string, _ int) ([]domain.MediaItem, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.items, nil
+}
+
 func (f *covStubProvider) GetDetails(_ context.Context, itemURL string) (*domain.MediaDetails, error) {
 	f.gotURL = itemURL
 	if f.err != nil {

@@ -17,7 +17,7 @@ func TestUakinoProviderBasicAndSearch(t *testing.T) {
 	if p.Name() != "UAKino" {
 		t.Errorf("expected Name 'UAKino', got '%s'", p.Name())
 	}
-	if p.BaseURL() != "https://uakino.best" {
-		t.Errorf("expected BaseURL 'https://uakino.best', got '%s'", p.BaseURL())
+	if p.BaseURL() != "https://uakino.biz" {
+		t.Errorf("expected BaseURL 'https://uakino.biz', got '%s'", p.BaseURL())
 	}
 }

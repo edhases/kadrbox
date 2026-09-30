@@ -197,7 +197,13 @@ class _DetailsPageState extends State<DetailsPage> {
                   children: [
                     IconButton(
                       icon: const Icon(Icons.arrow_back),
-                      onPressed: () => context.pop(),
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/');
+                        }
+                      },
                     ),
                     const Spacer(),
                   ],
@@ -253,7 +259,13 @@ class _DetailsPageState extends State<DetailsPage> {
           pinned: true,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
           ),
           flexibleSpace: FlexibleSpaceBar(
             title: Text(
@@ -1024,7 +1036,13 @@ class _DetailsPageState extends State<DetailsPage> {
           ),
           const SizedBox(height: 8),
           TextButton(
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             child: const Text('Назад'),
           ),
         ],

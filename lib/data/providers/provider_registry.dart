@@ -5,8 +5,6 @@ import '../../domain/repositories/content_provider.dart';
 import '../../core/utils/logger.dart';
 import '../services/settings_service.dart';
 import '../services/url_resolver_service.dart';
-import 'hdrezka_provider.dart';
-import 'youtube_provider.dart';
 
 /// Registry for managing content providers
 ///
@@ -58,8 +56,7 @@ class ProviderRegistry {
 
   /// Check if a provider should be shown on the home page
   static bool showOnHome(ContentProvider provider) {
-    if (provider is HdrezkaProvider) return HdrezkaProvider.showOnHome;
-    if (provider is YouTubeProvider) return YouTubeProvider.showOnHome;
+    if (provider.id == 'hdrezka' || provider.id == 'youtube') return false;
     return !separateProviderIds.contains(provider.id);
   }
 
@@ -69,7 +66,7 @@ class ProviderRegistry {
 
   /// Check if a provider has fixed streams (can't change quality/voiceover after start)
   static bool hasFixedStreams(ContentProvider provider) {
-    if (provider is HdrezkaProvider) return HdrezkaProvider.hasFixedStreams;
+    if (provider.id == 'hdrezka') return true;
     return false;
   }
 

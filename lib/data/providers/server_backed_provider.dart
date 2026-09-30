@@ -54,7 +54,7 @@ class ServerBackedProvider extends ContentProvider {
     try {
       final list = await _api.getJsonList(
         '$_base/search',
-        queryParameters: {'q': query},
+        queryParameters: {'q': query, 'provider': id},
       );
       final items = list
           .whereType<Map>()
@@ -104,11 +104,56 @@ class ServerBackedProvider extends ContentProvider {
   }
 
   @override
-  Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async =>
-      [];
+  Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async {
+    try {
+      final params = <String, dynamic>{'provider': id, 'page': page};
+      if (type != null) params['type'] = type.name;
+      final list = await _api.getJsonList(
+        '$_base/popular',
+        queryParameters: params,
+      );
+      return list
+          .whereType<Map>()
+          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+          .where((i) => i.title.isNotEmpty)
+          .toList();
+    } catch (e) {
+      Logger.w('Server getPopular failed for $id: $e', tag: _tag);
+      return [];
+    }
+  }
 
   @override
-  Future<List<MediaItem>> getNew({ContentType? type, int page = 1}) async => [];
+  Future<List<MediaItem>> getNew({ContentType? type, int page = 1}) async =>
+      getPopular(type: type, page: page);
+
+  @override
+  Future<List<MediaItem>> getByCategory(
+    String category, {
+    ContentType? type,
+    int page = 1,
+  }) async {
+    try {
+      final params = <String, dynamic>{
+        'provider': id,
+        'category': category,
+        'page': page,
+      };
+      if (type != null) params['type'] = type.name;
+      final list = await _api.getJsonList(
+        '$_base/category',
+        queryParameters: params,
+      );
+      return list
+          .whereType<Map>()
+          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+          .where((i) => i.title.isNotEmpty)
+          .toList();
+    } catch (e) {
+      Logger.w('Server getByCategory failed for $id ($category): $e', tag: _tag);
+      return [];
+    }
+  }
 
   // -- mapping ---------------------------------------------------------------
 

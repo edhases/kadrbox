@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/edhases/oxide-server/internal/domain"
 	"github.com/edhases/oxide-server/internal/provider"
 	"github.com/edhases/oxide-server/internal/repository/postgres"
 )
@@ -29,10 +30,29 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := h.registry.SingleFlightSearch(r.Context(), query)
-	if err != nil {
-		http.Error(w, `{"error":"failed to execute search"}`, http.StatusInternalServerError)
-		return
+	providerID := r.URL.Query().Get("provider")
+	var results []domain.MediaItem
+	var err error
+
+	if providerID != "" {
+		results, err = h.registry.SearchProvider(r.Context(), providerID, query)
+		if err != nil {
+			switch {
+			case errors.Is(err, provider.ErrProviderDisabled):
+				http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
+			case errors.Is(err, provider.ErrProviderNotFound):
+				http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
+			default:
+				http.Error(w, `{"error":"failed to execute search"}`, http.StatusInternalServerError)
+			}
+			return
+		}
+	} else {
+		results, err = h.registry.SingleFlightSearch(r.Context(), query)
+		if err != nil {
+			http.Error(w, `{"error":"failed to execute search"}`, http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -102,4 +122,57 @@ func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 func (h *ContentHandler) Providers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(h.registry.Catalog())
+}
+
+// Popular — GET /api/v1/content/popular
+func (h *ContentHandler) Popular(w http.ResponseWriter, r *http.Request) {
+	providerID := r.URL.Query().Get("provider")
+	contentType := r.URL.Query().Get("type")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	results, err := h.registry.Popular(r.Context(), providerID, contentType, page)
+	if err != nil {
+		switch {
+		case errors.Is(err, provider.ErrProviderDisabled):
+			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
+		case errors.Is(err, provider.ErrProviderNotFound):
+			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error":"failed to load popular content"}`, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(results)
+}
+
+// Category — GET /api/v1/content/category
+func (h *ContentHandler) Category(w http.ResponseWriter, r *http.Request) {
+	providerID := r.URL.Query().Get("provider")
+	category := r.URL.Query().Get("category")
+	contentType := r.URL.Query().Get("type")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	results, err := h.registry.Category(r.Context(), providerID, category, contentType, page)
+	if err != nil {
+		switch {
+		case errors.Is(err, provider.ErrProviderDisabled):
+			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
+		case errors.Is(err, provider.ErrProviderNotFound):
+			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error":"failed to load category content"}`, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(results)
 }

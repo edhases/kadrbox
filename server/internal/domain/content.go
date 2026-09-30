@@ -32,10 +32,15 @@ type MediaItem struct {
 // MediaDetails описує повні метадані медіа
 type MediaDetails struct {
 	MediaItem
-	Description string            `json:"description,omitempty"`
-	Genres      []string          `json:"genres,omitempty"`
-	Seasons     []Season          `json:"seasons,omitempty"`
-	Voiceovers  []Voiceover       `json:"voiceovers,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Genres      []string    `json:"genres,omitempty"`
+	Countries   []string    `json:"countries,omitempty"`
+	Director    string      `json:"director,omitempty"`
+	Actors      []string    `json:"actors,omitempty"`
+	Duration    string      `json:"duration,omitempty"`
+	TrailerURL  string      `json:"trailer_url,omitempty"`
+	Seasons     []Season    `json:"seasons,omitempty"`
+	Voiceovers  []Voiceover `json:"voiceovers,omitempty"`
 }
 
 // Season описує сезон серіалу

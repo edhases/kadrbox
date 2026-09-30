@@ -165,8 +165,9 @@ class RemoteConfig {
     return const RemoteConfig(
       providerMirrors: {
         'hdrezka': ['https://hdrezka.ag', 'https://rezka.ag'],
-        'uakino': ['https://uakino.club', 'https://uakino.me'],
+        'uakino': ['https://uakino.biz', 'https://uakino.club', 'https://uakino.me'],
         'eneyida': ['https://eneyida.tv'],
+        'lavakino': ['https://lavakino.net', 'https://lavakino.cc'],
       },
       cssSelectors: {
         'hdrezka': {

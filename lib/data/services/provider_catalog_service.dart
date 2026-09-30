@@ -114,16 +114,78 @@ class ProviderCatalogService extends ChangeNotifier {
   Future<void> _applyCached({bool stale = true}) async {
     try {
       final raw = _prefs.getString(_cacheKey);
-      if (raw == null || raw.isEmpty) {
-        Logger.w('No cached catalog available', tag: _tag);
+      if (raw != null && raw.isNotEmpty) {
+        final catalog = ProviderCatalog.fromJson(
+          Map<String, dynamic>.from(jsonDecode(raw) as Map),
+        );
+        await _applyCatalog(catalog, stale: stale);
         return;
       }
-      final catalog = ProviderCatalog.fromJson(
-        Map<String, dynamic>.from(jsonDecode(raw) as Map),
-      );
-      await _applyCatalog(catalog, stale: stale);
     } catch (e) {
       Logger.w('Failed to apply cached catalog: $e', tag: _tag);
     }
+
+    // Default static fallback catalog
+    final fallbackEntries = [
+      const ProviderCatalogEntry(
+        id: 'uakino',
+        name: 'UAKino',
+        baseUrl: 'https://uakino.biz',
+        showOnHome: true,
+        hasFixedStreams: false,
+        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+      const ProviderCatalogEntry(
+        id: 'eneyida',
+        name: 'Eneyida',
+        baseUrl: 'https://eneyida.tv',
+        showOnHome: true,
+        hasFixedStreams: false,
+        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+      const ProviderCatalogEntry(
+        id: 'lavakino',
+        name: 'Lavakino',
+        baseUrl: 'https://lavakino.net',
+        showOnHome: true,
+        hasFixedStreams: false,
+        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+      const ProviderCatalogEntry(
+        id: 'bandera',
+        name: 'Bandera Online',
+        baseUrl: 'https://bbe.lme.isroot.in/api/v2',
+        showOnHome: true,
+        hasFixedStreams: false,
+        contentTypes: ['movie', 'series', 'anime'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+      const ProviderCatalogEntry(
+        id: 'hdrezka',
+        name: 'HDRezka',
+        baseUrl: 'https://hdrezka.ag',
+        showOnHome: false,
+        hasFixedStreams: true,
+        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+    ];
+    await _applyCatalog(
+      ProviderCatalog(version: 1, providers: fallbackEntries),
+      stale: true,
+    );
   }
 }

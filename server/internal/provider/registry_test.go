@@ -24,6 +24,16 @@ func (d *dummyProvider) Search(ctx context.Context, query string) ([]domain.Medi
 		{ID: "1", ProviderID: d.id, Title: query + " from " + d.name},
 	}, nil
 }
+func (d *dummyProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
+	return []domain.MediaItem{
+		{ID: "pop1", ProviderID: d.id, Title: "Popular from " + d.name},
+	}, nil
+}
+func (d *dummyProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
+	return []domain.MediaItem{
+		{ID: "cat1", ProviderID: d.id, Title: category + " from " + d.name},
+	}, nil
+}
 func (d *dummyProvider) GetDetails(ctx context.Context, itemURL string) (*domain.MediaDetails, error) {
 	return nil, nil
 }

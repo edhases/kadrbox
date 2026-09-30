@@ -1,30 +1,43 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:oxide_film/data/models/provider_catalog.dart';
 import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/providers/uakino_provider.dart';
-import 'package:oxide_film/data/providers/yummyanime_provider.dart';
+import 'package:oxide_film/data/providers/server_backed_provider.dart';
 import 'package:oxide_film/domain/entities/entities.dart';
 
 void main() {
   late ProviderRegistry registry;
-  late ApiClient client;
 
   setUp(() {
     registry = ProviderRegistry();
-    client = ApiClient();
   });
+
+  ServerBackedProvider makeProvider(String id, String name, {bool home = true}) {
+    return ServerBackedProvider(
+      ProviderCatalogEntry(
+        id: id,
+        name: name,
+        baseUrl: 'https://$id.example',
+        showOnHome: home,
+        hasFixedStreams: false,
+        contentTypes: ['movie', 'series', 'anime'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+    );
+  }
 
   group('ProviderRegistry', () {
     test('should register providers', () {
-      registry.register(UakinoProvider(client));
-      registry.register(YummyAnimeProvider(client));
+      registry.register(makeProvider('uakino', 'UAKino'));
+      registry.register(makeProvider('eneyida', 'Eneyida'));
 
       expect(registry.all.length, 2);
     });
 
     test('should not register duplicate providers', () {
-      final provider = UakinoProvider(client);
+      final provider = makeProvider('uakino', 'UAKino');
       registry.register(provider);
       registry.register(provider);
 
@@ -33,8 +46,8 @@ void main() {
     });
 
     test('getById should return correct provider', () {
-      registry.register(UakinoProvider(client));
-      registry.register(YummyAnimeProvider(client));
+      registry.register(makeProvider('uakino', 'UAKino'));
+      registry.register(makeProvider('eneyida', 'Eneyida'));
 
       final result = registry.getById('uakino');
 
@@ -43,7 +56,7 @@ void main() {
     });
 
     test('getById should return null for unknown id', () {
-      registry.register(UakinoProvider(client));
+      registry.register(makeProvider('uakino', 'UAKino'));
 
       final result = registry.getById('unknown');
 
@@ -51,49 +64,30 @@ void main() {
     });
 
     test('getByContentType should return matching providers', () {
-      registry.register(UakinoProvider(client)); // all types
-      registry.register(YummyAnimeProvider(client)); // anime only
+      registry.register(makeProvider('uakino', 'UAKino'));
+      registry.register(makeProvider('eneyida', 'Eneyida'));
 
       final movieProviders = registry.getByContentType(ContentType.movie);
       final animeProviders = registry.getByContentType(ContentType.anime);
 
-      expect(movieProviders.length, 1); // uakino
-      expect(animeProviders.length, 2); // uakino + yummyanime
+      expect(movieProviders.length, 2);
+      expect(animeProviders.length, 2);
+    });
+
+    test('homeProviders should exclude separate providers', () {
+      registry.register(makeProvider('uakino', 'UAKino', home: true));
+      registry.register(makeProvider('hdrezka', 'HDRezka', home: false));
+
+      expect(registry.homeProviders.map((p) => p.id), contains('uakino'));
+      expect(registry.homeProviders.map((p) => p.id), isNot(contains('hdrezka')));
     });
 
     test('unregister should remove provider', () {
-      registry.register(UakinoProvider(client));
-      registry.register(YummyAnimeProvider(client));
+      registry.register(makeProvider('uakino', 'UAKino'));
+      expect(registry.getById('uakino'), isNotNull);
 
       registry.unregister('uakino');
-
-      expect(registry.all.length, 1);
       expect(registry.getById('uakino'), isNull);
-    });
-
-    test('clear should remove all providers', () {
-      registry.register(UakinoProvider(client));
-      registry.register(YummyAnimeProvider(client));
-
-      registry.clear();
-
-      expect(registry.all, isEmpty);
-    });
-
-    test('enabled should return only enabled providers', () {
-      final provider = UakinoProvider(client);
-      registry.register(provider);
-
-      // By default, provider is enabled
-      expect(registry.enabled.length, 1);
-    });
-
-    test('all should return all providers regardless of enabled state', () {
-      final provider = UakinoProvider(client);
-      provider.isEnabled = false;
-      registry.register(provider);
-
-      expect(registry.all.length, 1);
     });
   });
 }

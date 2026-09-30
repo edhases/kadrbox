@@ -10,6 +10,7 @@ import '../../../data/services/history_service.dart';
 import '../../../data/services/settings_service.dart';
 import '../../../data/services/search_service.dart';
 import '../../../data/services/smart_search/smart_search_service.dart';
+import '../../../data/services/provider_catalog_service.dart';
 import '../../../domain/entities/entities.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/custom_titlebar.dart';
@@ -68,6 +69,9 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _loadRecentSearches();
     _focusNode.addListener(_onFocusChanged);
+    try {
+      GetIt.instance<ProviderCatalogService>().addListener(_onCatalogChanged);
+    } catch (_) {}
 
     if (widget.initialQuery != null) {
       _searchController.text = widget.initialQuery!;
@@ -82,7 +86,19 @@ class _SearchPageState extends State<SearchPage> {
     _searchController.dispose();
     _focusNode.removeListener(_onFocusChanged);
     _focusNode.dispose();
+    try {
+      GetIt.instance<ProviderCatalogService>().removeListener(_onCatalogChanged);
+    } catch (_) {}
     super.dispose();
+  }
+
+  void _onCatalogChanged() {
+    if (mounted) {
+      setState(() {});
+      if (_searchController.text.isNotEmpty && _hasSearched) {
+        _performSearch();
+      }
+    }
   }
 
   void _onFocusChanged() {

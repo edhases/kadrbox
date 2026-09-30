@@ -25,6 +25,12 @@ func (p *covErrProvider) BaseURL() string { return "http://cov-err" }
 func (p *covErrProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	return nil, errors.New("cov search boom")
 }
+func (p *covErrProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
+	return nil, errors.New("cov pop boom")
+}
+func (p *covErrProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
+	return nil, errors.New("cov cat boom")
+}
 func (p *covErrProvider) GetDetails(ctx context.Context, itemURL string) (*domain.MediaDetails, error) {
 	return nil, nil
 }
@@ -50,6 +56,12 @@ func (p *covCountingProvider) Search(ctx context.Context, query string) ([]domai
 		time.Sleep(p.delay)
 	}
 	return []domain.MediaItem{{ID: "1", ProviderID: p.id, Title: query}}, nil
+}
+func (p *covCountingProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
+	return []domain.MediaItem{{ID: "pop", ProviderID: p.id, Title: "Pop"}}, nil
+}
+func (p *covCountingProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
+	return []domain.MediaItem{{ID: "cat", ProviderID: p.id, Title: category}}, nil
 }
 func (p *covCountingProvider) GetDetails(ctx context.Context, itemURL string) (*domain.MediaDetails, error) {
 	return nil, nil

@@ -9,12 +9,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../core/l10n/app_strings.dart';
+import '../../../core/utils/responsive_utils.dart';
 
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/settings_service.dart';
 import '../../../data/services/episode_update_service.dart';
+import '../../../data/services/provider_catalog_service.dart';
 import '../../../domain/entities/entities.dart';
-import '../../../domain/repositories/content_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/custom_titlebar.dart';
@@ -25,6 +26,12 @@ import '../../widgets/common/app_error_widget.dart';
 import '../../widgets/tv/focusable_card.dart';
 import '../../widgets/home/continue_watching_section.dart';
 import '../../widgets/home/recommendations_section.dart';
+import '../../widgets/home/hero_banner.dart';
+
+/// Intent for Ctrl+K search shortcut
+class SearchIntent extends Intent {
+  const SearchIntent();
+}
 
 /// Home page with content browsing
 class HomePage extends StatefulWidget {
@@ -37,8 +44,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _registry = GetIt.instance<ProviderRegistry>();
   final _settings = GetIt.instance<SettingsService>();
-  final _categoriesController = ScrollController();
-  final _providersController = ScrollController();
   final _episodeUpdateService = GetIt.instance<EpisodeUpdateService>();
   final _scrollController = ScrollController();
 
@@ -49,6 +54,7 @@ class _HomePageState extends State<HomePage> {
   bool _isLoading = true;
   String? _error;
   ContentFilter _filter = const ContentFilter();
+  String? _selectedProviderId; // null = all home providers
 
   bool _isOffline = false;
 
@@ -56,6 +62,9 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _settings.addListener(_onSettingsChanged);
+    try {
+      GetIt.instance<ProviderCatalogService>().addListener(_onCatalogChanged);
+    } catch (_) {}
     _checkConnectivity();
     Connectivity().onConnectivityChanged.listen(_updateConnectivity);
     _loadContent();
@@ -82,14 +91,22 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _settings.removeListener(_onSettingsChanged);
+    try {
+      GetIt.instance<ProviderCatalogService>().removeListener(_onCatalogChanged);
+    } catch (_) {}
     _scrollController.dispose();
-    _categoriesController.dispose();
-    _providersController.dispose();
     super.dispose();
   }
 
   void _onSettingsChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onCatalogChanged() {
+    if (mounted) {
+      setState(() {});
+      _loadContent(refresh: true);
+    }
   }
 
   Future<void> _loadContent({bool refresh = false}) async {
@@ -116,7 +133,16 @@ class _HomePageState extends State<HomePage> {
         GetIt.instance<RecommendationService>().refresh();
       }
 
-      final providers = _registry.homeProviders;
+      // Ensure catalog is synced from backend (or fallback cache)
+      try {
+        await GetIt.instance<ProviderCatalogService>().sync();
+      } catch (_) {}
+
+      final homeProviders = _registry.homeProviders;
+      final providers = _selectedProviderId != null
+          ? homeProviders.where((p) => p.id == _selectedProviderId).toList()
+          : homeProviders;
+
       final allItems = <MediaItem>[];
       final seenIds = <String>{};
 
@@ -260,23 +286,151 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop =
+    final isDesktopPlatform =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.windows ||
             defaultTargetPlatform == TargetPlatform.linux ||
             defaultTargetPlatform == TargetPlatform.macOS);
 
-    return Scaffold(
-      body: Column(
-        children: [
-          // Custom titlebar for desktop
-          if (isDesktop) const CustomTitleBar(),
+    final showRail = context.isDesktop;
 
-          // Main content
-          Expanded(child: _buildBody()),
-        ],
+    final bodyWidget = Row(
+      children: [
+        if (showRail) _buildNavigationRail(),
+        if (showRail) const VerticalDivider(thickness: 1, width: 1),
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1400),
+              child: _buildBody(),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return Shortcuts(
+      shortcuts: <ShortcutActivator, Intent>{
+        LogicalKeySet(
+          LogicalKeyboardKey.control,
+          LogicalKeyboardKey.keyK,
+        ): const SearchIntent(),
+        LogicalKeySet(
+          LogicalKeyboardKey.meta,
+          LogicalKeyboardKey.keyK,
+        ): const SearchIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          SearchIntent: CallbackAction<SearchIntent>(
+            onInvoke: (intent) {
+              context.push('/search');
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            body: Column(
+              children: [
+                // Custom titlebar for desktop
+                if (isDesktopPlatform) const CustomTitleBar(),
+
+                // Main content
+                Expanded(child: bodyWidget),
+              ],
+            ),
+            bottomNavigationBar: showRail ? null : _buildBottomNav(),
+          ),
+        ),
       ),
-      bottomNavigationBar: isDesktop ? null : _buildBottomNav(),
+    );
+  }
+
+  Widget _buildNavigationRail() {
+    final location = GoRouterState.of(context).uri.toString();
+    final currentIndex = location.startsWith('/search')
+        ? 1
+        : location.startsWith('/favorites')
+        ? 2
+        : location.startsWith('/history')
+        ? 3
+        : location.startsWith('/downloads')
+        ? 4
+        : 0;
+
+    return NavigationRail(
+      selectedIndex: currentIndex,
+      labelType: NavigationRailLabelType.all,
+      leading: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: IconButton(
+          icon: const Icon(Icons.search),
+          tooltip: 'Пошук (Ctrl+K)',
+          onPressed: () => context.push('/search'),
+        ),
+      ),
+      trailing: Expanded(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 16.0),
+            child: IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Налаштування',
+              onPressed: () => context.push('/settings'),
+            ),
+          ),
+        ),
+      ),
+      destinations: const [
+        NavigationRailDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home),
+          label: Text('Головна'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.search_outlined),
+          selectedIcon: Icon(Icons.search),
+          label: Text('Пошук'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.favorite_outline),
+          selectedIcon: Icon(Icons.favorite),
+          label: Text('Улюблене'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.history_outlined),
+          selectedIcon: Icon(Icons.history),
+          label: Text('Історія'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.download_outlined),
+          selectedIcon: Icon(Icons.download),
+          label: Text('Завантаження'),
+        ),
+      ],
+      onDestinationSelected: (index) {
+        if (index == currentIndex) return;
+        switch (index) {
+          case 0:
+            context.go('/');
+            break;
+          case 1:
+            context.go('/search');
+            break;
+          case 2:
+            context.go('/favorites');
+            break;
+          case 3:
+            context.go('/history');
+            break;
+          case 4:
+            context.go('/downloads');
+            break;
+        }
+      },
     );
   }
 
@@ -367,6 +521,17 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
+    // Top recommended / popular item for Hero Banner
+    MediaItem? heroItem;
+    if (!_filter.hasActiveFilters && _filteredItems.isNotEmpty) {
+      final recService = GetIt.instance<RecommendationService>();
+      if (recService.recommendations.isNotEmpty) {
+        heroItem = recService.recommendations.first;
+      } else {
+        heroItem = _filteredItems.first;
+      }
+    }
+
     return RefreshIndicator(
       onRefresh: () => _loadContent(refresh: true),
       child: CustomScrollView(
@@ -398,7 +563,7 @@ class _HomePageState extends State<HomePage> {
               IconButton(
                 icon: const Icon(Icons.search),
                 onPressed: () => context.push('/search'),
-                tooltip: 'Пошук',
+                tooltip: 'Пошук (Ctrl+K)',
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
@@ -491,7 +656,12 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
 
-          // Quick filter chips
+          // Categories & Source filter pills directly under the top header
+          SliverToBoxAdapter(
+            child: _buildCategoryPillsBar(),
+          ),
+
+          // Active quick filter chips
           if (_filter.hasActiveFilters)
             SliverToBoxAdapter(
               child: QuickFilterChips(
@@ -517,25 +687,23 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
 
+          // Hero Banner (Top featured item)
+          if (heroItem != null)
+            SliverToBoxAdapter(
+              child: HeroBanner(item: heroItem),
+            ),
+
           // Continue Watching Section
-          // Only show if no active filters (don't clutter filtered results)
           if (!_filter.hasActiveFilters)
             const SliverToBoxAdapter(child: ContinueWatchingSection()),
 
           // Recommendations Section
-          // Only show if no active filters
           if (!_filter.hasActiveFilters)
             const SliverToBoxAdapter(child: RecommendationsSection()),
 
-          // Categories section
-          SliverToBoxAdapter(child: _buildCategoriesSection()),
-
-          // Providers section
-          SliverToBoxAdapter(child: _buildProvidersSection()),
-
-          // Section title
+          // Section title: "Популярне" with inline "Всі →" button
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
             sliver: SliverToBoxAdapter(
               child: Row(
                 children: [
@@ -548,16 +716,182 @@ class _HomePageState extends State<HomePage> {
                           ?.copyWith(fontWeight: FontWeight.bold),
                     ),
                   ),
+                  TextButton.icon(
+                    onPressed: () {
+                      final typeParam = _filter.type != null
+                          ? '?type=${_filter.type!.name}'
+                          : '';
+                      context.push('/category$typeParam');
+                    },
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                    label: const Text('Всі →'),
+                  ),
                 ],
               ),
             ),
           ),
 
-          // Media grid/list with Focus support for D-Pad
+          // Media grid/list
           _buildMediaSection(),
 
           // Bottom padding
           const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryPillsBar() {
+    final categories = [
+      (null, 'Всі', Icons.grid_view_rounded),
+      (ContentType.movie, ContentType.movie.displayName, Icons.movie_outlined),
+      (ContentType.series, ContentType.series.displayName, Icons.tv_outlined),
+      (ContentType.cartoon, ContentType.cartoon.displayName, Icons.animation_outlined),
+      (ContentType.anime, ContentType.anime.displayName, Icons.auto_awesome_outlined),
+      (ContentType.dorama, ContentType.dorama.displayName, Icons.filter_vintage_outlined),
+    ];
+
+    final homeProviders = _registry.homeProviders;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          // Source Selector Popup/Pill
+          if (homeProviders.length > 1) ...[
+            PopupMenuButton<String?>(
+              tooltip: 'Джерело контенту',
+              initialValue: _selectedProviderId,
+              onSelected: (providerId) {
+                setState(() {
+                  _selectedProviderId = providerId;
+                });
+                _loadContent();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: null,
+                  child: Text('Всі джерела'),
+                ),
+                ...homeProviders.map(
+                  (p) => PopupMenuItem(
+                    value: p.id,
+                    child: Text(p.name),
+                  ),
+                ),
+              ],
+              child: FilterChip(
+                selected: _selectedProviderId != null,
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.source_outlined,
+                      size: 16,
+                      color: _selectedProviderId != null
+                          ? AppTheme.primaryColor
+                          : Colors.white70,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _selectedProviderId == null
+                          ? 'Джерело ▾'
+                          : '${_registry.getById(_selectedProviderId!)?.name ?? _selectedProviderId} ▾',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _selectedProviderId != null
+                            ? AppTheme.primaryColor
+                            : Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                onSelected: null,
+                backgroundColor: AppTheme.darkCard,
+                selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: _selectedProviderId != null
+                        ? AppTheme.primaryColor
+                        : AppTheme.darkBorder,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+
+          // Category Pills
+          ...categories.map((cat) {
+            final (type, label, icon) = cat;
+            final isSelected = _filter.type == type;
+
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                selected: isSelected,
+                avatar: Icon(
+                  icon,
+                  size: 16,
+                  color: isSelected ? Colors.white : Colors.white70,
+                ),
+                label: Text(label),
+                labelStyle: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected ? Colors.white : Colors.white70,
+                ),
+                backgroundColor: AppTheme.darkCard,
+                selectedColor: AppTheme.primaryColor,
+                checkmarkColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: isSelected
+                        ? AppTheme.primaryColor
+                        : AppTheme.darkBorder,
+                  ),
+                ),
+                onSelected: (selected) {
+                  final newType = selected ? type : null;
+                  setState(() {
+                    _filter = _filter.copyWith(
+                      type: newType,
+                      clearType: newType == null,
+                    );
+                  });
+                  _loadContent();
+                },
+              ),
+            );
+          }),
+
+          // HDRezka dedicated button
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: const Icon(
+                Icons.play_circle_filled,
+                size: 16,
+                color: Colors.orange,
+              ),
+              label: const Text('HDREZKA'),
+              labelStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.orange,
+              ),
+              backgroundColor: Colors.orange.withValues(alpha: 0.15),
+              side: BorderSide(color: Colors.orange.withValues(alpha: 0.4)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              onPressed: () => context.push('/provider/hdrezka'),
+            ),
+          ),
         ],
       ),
     );
@@ -626,135 +960,35 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCategoriesSection() {
-    final categories = [
-      (ContentType.movie, Icons.movie_outlined),
-      (ContentType.series, Icons.tv_outlined),
-      (ContentType.cartoon, Icons.animation_outlined),
-      (ContentType.anime, Icons.auto_awesome_outlined),
-      (ContentType.dorama, Icons.filter_vintage_outlined),
-    ];
+  int _calculateColumns(BuildContext context) {
+    if (_ui.gridColumns > 0) return _ui.gridColumns;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-          child: Row(
-            children: [
-              Text(
-                'Категорії',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: () => context.push('/category'),
-                child: const Text('Всі →'),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 100,
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(
-              context,
-            ).copyWith(scrollbars: false),
-            child: ListView.builder(
-              controller: _categoriesController,
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: categories.length + 1, // +1 for HDRezka
-              itemBuilder: (context, index) {
-                if (index < categories.length) {
-                  final (type, icon) = categories[index];
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: _HomeSquareTile(
-                      label: type.pluralName,
-                      icon: icon,
-                      onTap: () => context.push('/category?type=${type.name}'),
-                    ),
-                  );
-                } else {
-                  // HDRezka button - styled to match categories
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: _HomeSquareTile(
-                      label: 'HDREZKA',
-                      icon: Icons.play_circle_outline,
-                      onTap: () => context.push('/provider/hdrezka'),
-                    ),
-                  );
-                }
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < ResponsiveUtils.phoneMaxWidth;
 
-  Widget _buildProvidersSection() {
-    final separateProviders = _registry.separateProviders
-        .where((p) => p.id != 'youtube' && p.id != 'hdrezka')
-        .toList();
-    if (separateProviders.isEmpty) return const SizedBox.shrink();
+    if (isMobile) {
+      return width < ResponsiveUtils.compactWidth ? 2 : 3;
+    }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: Row(
-            children: [
-              Text(
-                'Провайдери',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 56,
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(
-              context,
-            ).copyWith(scrollbars: false),
-            child: ListView.builder(
-              controller: _providersController,
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: separateProviders.length,
-              itemBuilder: (context, index) {
-                final provider = separateProviders[index];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: _ProviderCard(
-                    provider: provider,
-                    onTap: () => context.push('/provider/${provider.id}'),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    );
+    final double effectiveWidth = width > 1400 ? 1400 : width;
+    final cols = (effectiveWidth / 180).floor();
+    return cols.clamp(3, 7);
   }
 
   Widget _buildMediaSection() {
+    // When no filters are active, limit "Популярне" to 2 rows
+    final columns = _calculateColumns(context);
+    final isPopularSection = !_filter.hasActiveFilters;
+    final maxItems = isPopularSection ? columns * 2 : _filteredItems.length;
+    final itemsToShow = _filteredItems.take(maxItems).toList();
+
     switch (_ui.listStyle) {
       case ListStyle.list:
         return SliverPadding(
           padding: EdgeInsets.symmetric(horizontal: _ui.gridSpacing.padding),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((context, index) {
-              final item = _filteredItems[index];
+              final item = itemsToShow[index];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: FocusableCard(
@@ -766,7 +1000,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               );
-            }, childCount: _filteredItems.length),
+            }, childCount: itemsToShow.length),
           ),
         );
       case ListStyle.compact:
@@ -774,7 +1008,7 @@ class _HomePageState extends State<HomePage> {
           padding: EdgeInsets.symmetric(horizontal: _ui.gridSpacing.padding),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((context, index) {
-              final item = _filteredItems[index];
+              final item = itemsToShow[index];
               return FocusableCard(
                 onTap: () => _onItemTap(item),
                 borderRadius: 8,
@@ -783,23 +1017,23 @@ class _HomePageState extends State<HomePage> {
                   onTap: () => _onItemTap(item),
                 ),
               );
-            }, childCount: _filteredItems.length),
+            }, childCount: itemsToShow.length),
           ),
         );
       case ListStyle.grid:
         return SliverPadding(
           padding: EdgeInsets.symmetric(horizontal: _ui.gridSpacing.padding),
           sliver: SliverGrid(
-            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: _getMaxCrossAxisExtent(),
-              childAspectRatio: _ui.posterSize.aspectRatio,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              childAspectRatio: 2 / 3,
               crossAxisSpacing: _ui.gridSpacing.crossAxisSpacing,
               mainAxisSpacing: _ui.gridSpacing.mainAxisSpacing,
             ),
             delegate: SliverChildBuilderDelegate((context, index) {
-              final item = _filteredItems[index];
+              final item = itemsToShow[index];
               return MediaCard(item: item, onTap: () => _onItemTap(item));
-            }, childCount: _filteredItems.length),
+            }, childCount: itemsToShow.length),
           ),
         );
     }
@@ -809,51 +1043,35 @@ class _HomePageState extends State<HomePage> {
     context.push('/details/${item.providerId}/${Uri.encodeComponent(item.id)}');
   }
 
-  double _getMaxCrossAxisExtent() {
-    switch (_ui.posterSize) {
-      case PosterSize.small:
-        return 130;
-      case PosterSize.medium:
-        return 180;
-      case PosterSize.large:
-        return 250;
-    }
-  }
-
   Widget _buildSkeletonGrid() {
+    final columns = _calculateColumns(context);
+
     return CustomScrollView(
       slivers: [
         // App bar skeleton
         const SliverAppBar(floating: true, title: Text('Oxide Film')),
 
-        // Categories skeleton
+        // Categories pill bar skeleton
         SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 12),
-                child: Skeleton(width: 100, height: 24),
-              ),
-              SizedBox(
-                height: 100,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: 4,
-                  itemBuilder: (context, index) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Skeleton(
-                        width: 100,
-                        height: 100,
-                        borderRadius: 12,
-                      ),
-                    );
-                  },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: List.generate(
+                5,
+                (index) => const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Skeleton(width: 80, height: 32, borderRadius: 16),
                 ),
               ),
-            ],
+            ),
+          ),
+        ),
+
+        // Hero banner skeleton
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Skeleton(width: double.infinity, height: 340, borderRadius: 20),
           ),
         ),
 
@@ -863,76 +1081,24 @@ class _HomePageState extends State<HomePage> {
           sliver: SliverToBoxAdapter(child: Skeleton(width: 150, height: 28)),
         ),
 
-        // Grid skeleton
+        // Grid skeleton (2 rows)
         SliverPadding(
           padding: EdgeInsets.symmetric(horizontal: _ui.gridSpacing.padding),
           sliver: SliverGrid(
-            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: _getMaxCrossAxisExtent(),
-              childAspectRatio: _ui.posterSize.aspectRatio,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              childAspectRatio: 2 / 3,
               crossAxisSpacing: _ui.gridSpacing.crossAxisSpacing,
               mainAxisSpacing: _ui.gridSpacing.mainAxisSpacing,
             ),
             delegate: SliverChildBuilderDelegate(
               (context, index) =>
                   Skeleton(borderRadius: _ui.posterSize.borderRadius),
-              childCount: 12,
+              childCount: columns * 2,
             ),
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Quick action square tile (Category or Provider)
-class _HomeSquareTile extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _HomeSquareTile({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
-    return SizedBox(
-      width: 100,
-      child: Card(
-        color: Colors.white.withValues(alpha: 0.05),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: InkWell(
-          onTap: () {
-            HapticFeedback.lightImpact();
-            onTap();
-          },
-          borderRadius: BorderRadius.circular(12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 28, color: accent),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 12,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1125,76 +1291,5 @@ class _MediaCompactTile extends StatelessWidget {
       trailing: const Icon(Icons.chevron_right, size: 20),
       onTap: onTap,
     );
-  }
-}
-
-/// Card for provider (HDREZKA, YouTube)
-class _ProviderCard extends StatelessWidget {
-  final ContentProvider provider;
-  final VoidCallback onTap;
-
-  const _ProviderCard({required this.provider, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _getProviderColor(provider.id);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: 160,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_getProviderIcon(provider.id), size: 24, color: color),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  provider.name.toUpperCase(),
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    letterSpacing: 0.5,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  IconData _getProviderIcon(String providerId) {
-    switch (providerId) {
-      case 'hdrezka':
-        return Icons.play_circle_filled;
-      case 'youtube':
-        return Icons.play_arrow;
-      default:
-        return Icons.video_library;
-    }
-  }
-
-  Color _getProviderColor(String providerId) {
-    switch (providerId) {
-      case 'hdrezka':
-        return Colors.orange;
-      case 'youtube':
-        return Colors.red;
-      default:
-        return AppTheme.primaryColor;
-    }
   }
 }

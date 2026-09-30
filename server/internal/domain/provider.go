@@ -9,6 +9,8 @@ type Provider interface {
 	BaseURL() string
 	Describe() ProviderInfo
 	Search(ctx context.Context, query string) ([]MediaItem, error)
+	GetPopular(ctx context.Context, contentType string, page int) ([]MediaItem, error)
+	GetByCategory(ctx context.Context, category, contentType string, page int) ([]MediaItem, error)
 	GetDetails(ctx context.Context, itemURL string) (*MediaDetails, error)
 	GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*ContentStreamsResponse, error)
 }

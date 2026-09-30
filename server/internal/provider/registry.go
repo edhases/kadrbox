@@ -187,6 +187,24 @@ func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaIt
 	return aggregated
 }
 
+// SearchProvider виконує пошук по конкретному провайдеру
+func (r *Registry) SearchProvider(ctx context.Context, id, query string) ([]domain.MediaItem, error) {
+	p, ok := r.Get(id)
+	if !ok {
+		return nil, fmt.Errorf("%w %q", ErrProviderNotFound, id)
+	}
+	if !r.IsEnabled(id) {
+		return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
+	}
+	items, err := p.Search(ctx, query)
+	if err != nil {
+		r.recordError(id, err)
+		return nil, err
+	}
+	r.recordSuccess(id)
+	return items, nil
+}
+
 // SingleFlightSearch запобігає дублюванню однакових одночасних пошукових запитів від багатьох клієнтів
 func (r *Registry) SingleFlightSearch(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	key := fmt.Sprintf("search:%s", query)
@@ -233,4 +251,95 @@ func (r *Registry) Streams(ctx context.Context, id, itemURL string, season, epis
 	}
 	r.recordSuccess(id)
 	return resp, nil
+}
+
+// Popular повертає список популярного контенту для вказаного провайдера або першого доступного
+func (r *Registry) Popular(ctx context.Context, id, contentType string, page int) ([]domain.MediaItem, error) {
+	if id != "" {
+		p, ok := r.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("%w %q", ErrProviderNotFound, id)
+		}
+		if !r.IsEnabled(id) {
+			return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
+		}
+		items, err := p.GetPopular(ctx, contentType, page)
+		if err != nil {
+			r.recordError(id, err)
+			return nil, err
+		}
+		r.recordSuccess(id)
+		return items, nil
+	}
+
+	// Якщо провайдер не вказано — об'єднуємо з домашніх увімкнених провайдерів
+	var aggregated []domain.MediaItem
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, p := range r.List() {
+		if !r.IsEnabled(p.ID()) || !p.Describe().ShowOnHome {
+			continue
+		}
+		wg.Add(1)
+		go func(prov domain.Provider) {
+			defer wg.Done()
+			items, err := prov.GetPopular(ctx, contentType, page)
+			if err == nil && len(items) > 0 {
+				r.recordSuccess(prov.ID())
+				mu.Lock()
+				aggregated = append(aggregated, items...)
+				mu.Unlock()
+			} else if err != nil {
+				r.recordError(prov.ID(), err)
+			}
+		}(p)
+	}
+	wg.Wait()
+	return aggregated, nil
+}
+
+// Category повертає список контенту за категорією/жанром
+func (r *Registry) Category(ctx context.Context, id, category, contentType string, page int) ([]domain.MediaItem, error) {
+	if id != "" {
+		p, ok := r.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("%w %q", ErrProviderNotFound, id)
+		}
+		if !r.IsEnabled(id) {
+			return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
+		}
+		items, err := p.GetByCategory(ctx, category, contentType, page)
+		if err != nil {
+			r.recordError(id, err)
+			return nil, err
+		}
+		r.recordSuccess(id)
+		return items, nil
+	}
+
+	var aggregated []domain.MediaItem
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, p := range r.List() {
+		if !r.IsEnabled(p.ID()) || !p.Describe().ShowOnHome {
+			continue
+		}
+		wg.Add(1)
+		go func(prov domain.Provider) {
+			defer wg.Done()
+			items, err := prov.GetByCategory(ctx, category, contentType, page)
+			if err == nil && len(items) > 0 {
+				r.recordSuccess(prov.ID())
+				mu.Lock()
+				aggregated = append(aggregated, items...)
+				mu.Unlock()
+			} else if err != nil {
+				r.recordError(prov.ID(), err)
+			}
+		}(p)
+	}
+	wg.Wait()
+	return aggregated, nil
 }

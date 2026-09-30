@@ -79,6 +79,8 @@ func main() {
 	registry.Register(provider.NewUakinoProvider(tlsClient))
 	registry.Register(provider.NewEneyidaProvider(tlsClient))
 	registry.Register(provider.NewHdrezkaProvider(tlsClient))
+	registry.Register(provider.NewLavakinoProvider(tlsClient))
+	registry.Register(provider.NewBanderaProvider())
 	if disabled := cfg.GetDisabledProviders(); len(disabled) > 0 {
 		registry.DisableMany(disabled)
 		log.Printf("[Registry] Disabled providers (kill-switch): %v", disabled)

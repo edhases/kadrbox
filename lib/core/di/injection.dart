@@ -3,13 +3,7 @@ import 'package:injectable/injectable.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../network/api_client.dart';
 import '../../data/providers/provider_registry.dart';
-import '../../data/providers/uakino_provider.dart';
-import '../../data/providers/hdrezka_provider.dart';
 import '../../data/providers/youtube_provider.dart';
-import '../../data/providers/eneyida_provider.dart';
-// import '../../data/providers/yummyanime_provider.dart';  // Disabled - not working properly
-import '../../data/providers/uaflix_provider.dart';
-import '../../data/providers/uaserials_provider.dart';
 import '../../data/database/app_database.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/favorites_service.dart';
@@ -31,11 +25,7 @@ import '../../data/services/user_agent_service.dart';
 import '../../data/services/provider_catalog_service.dart';
 import '../../data/services/update_service.dart';
 import '../../data/database/dao/search_history_dao.dart';
-import '../../data/database/dao/history_dao.dart';
-import '../../data/database/dao/favorites_dao.dart';
 import '../../data/database/dao/media_items_dao.dart';
-import '../../data/repositories/unified_content_repository_impl.dart';
-import '../../domain/repositories/unified_content_repository.dart';
 // External API services
 import '../../data/services/tmdb_service.dart';
 import '../../data/services/jikan_service.dart';
@@ -168,34 +158,12 @@ Future<void> configureDependencies() async {
       mediaItemsDao: MediaItemsDao(database),
     ),
   );
-
-  // Unified Repository
-  getIt.registerLazySingleton<UnifiedContentRepository>(
-    () => UnifiedContentRepositoryImpl(
-      getIt<ProviderRegistry>().all,
-      HistoryDao(database),
-      FavoritesDao(database),
-      MediaItemsDao(database),
-    ),
-  );
 }
 
 void _registerProviders() {
   final registry = getIt<ProviderRegistry>();
   final apiClient = getIt<ApiClient>();
 
-  // Ukrainian providers (shown on home page)
-  registry.register(UakinoProvider(apiClient));
-  registry.register(EneyidaProvider(apiClient));
-  registry.register(UaflixProvider(apiClient));
-  registry.register(UaserialsProvider(apiClient));
-
-  // Anime providers (shown on home page)
-  // registry.register(YummyAnimeProvider(apiClient));  // Disabled - not working properly
-
-  // Separate providers (NOT shown on home page - have dedicated buttons)
-  // HDRezka: Multi-language, fixed streams (can't change quality/voiceover after start)
-  registry.register(HdrezkaProvider(apiClient, getIt<UserAgentService>()));
-  // YouTube: Embed-only (ToS compliant, no direct stream extraction)
+  // YouTube: Embed-only client-side provider (ToS compliant, no direct stream extraction)
   registry.register(YouTubeProvider(apiClient));
 }

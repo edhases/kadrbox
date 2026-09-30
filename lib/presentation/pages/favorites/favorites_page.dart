@@ -106,7 +106,13 @@ class _FavoritesPageState extends State<FavoritesPage>
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             tooltip: 'Назад',
           ),
           const SizedBox(width: 8),

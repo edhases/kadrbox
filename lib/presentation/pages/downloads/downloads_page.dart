@@ -123,7 +123,13 @@ class _DownloadsPageState extends State<DownloadsPage>
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             tooltip: s.back,
           ),
           const SizedBox(width: 8),

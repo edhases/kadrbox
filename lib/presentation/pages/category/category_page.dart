@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/utils/logger.dart';
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/settings_service.dart';
+import '../../../data/services/provider_catalog_service.dart';
 import '../../../domain/entities/entities.dart';
 import '../../../domain/repositories/content_provider.dart';
 import '../../widgets/media_card.dart';
@@ -74,6 +75,9 @@ class _CategoryPageState extends State<CategoryPage>
 
     _tabController.addListener(_onTabChanged);
     _scrollController.addListener(_onScroll);
+    try {
+      GetIt.instance<ProviderCatalogService>().addListener(_onCatalogChanged);
+    } catch (_) {}
 
     // Load initial content
     _loadContent(_tabs[_tabController.index]);
@@ -85,7 +89,19 @@ class _CategoryPageState extends State<CategoryPage>
     _tabController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    try {
+      GetIt.instance<ProviderCatalogService>().removeListener(_onCatalogChanged);
+    } catch (_) {}
     super.dispose();
+  }
+
+  void _onCatalogChanged() {
+    if (mounted) {
+      final currentType = _tabs[_tabController.index];
+      _contentByType[currentType]?.clear();
+      _pageByType[currentType] = 1;
+      _loadContent(currentType);
+    }
   }
 
   void _onTabChanged() {
@@ -112,6 +128,11 @@ class _CategoryPageState extends State<CategoryPage>
     });
 
     try {
+      // Ensure catalog is synced
+      try {
+        await GetIt.instance<ProviderCatalogService>().sync();
+      } catch (_) {}
+
       // Get only home providers (excludes HDRezka/YouTube which have dedicated buttons)
       final providers = _registry.getHomeProvidersByContentType(type);
       Logger.d(
@@ -289,7 +310,13 @@ class _CategoryPageState extends State<CategoryPage>
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             tooltip: 'Назад',
           ),
           const SizedBox(width: 8),
