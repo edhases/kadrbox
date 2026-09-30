@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
+import '../../core/error/exceptions.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
 
@@ -435,6 +436,16 @@ class OxideServerService {
       return false;
     } catch (e) {
       Logger.w('Failed to refresh token: $e', tag: _tag);
+      final errorStr = e.toString().toLowerCase();
+      if ((e is ServerException && e.statusCode == 401) ||
+          errorStr.contains('401') ||
+          errorStr.contains('invalid or expired')) {
+        Logger.i(
+          'Refresh token is invalid or expired, clearing session',
+          tag: _tag,
+        );
+        await signOut();
+      }
       return false;
     }
   }

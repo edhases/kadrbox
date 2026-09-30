@@ -142,14 +142,12 @@ func (p *UakinoProvider) fetchCatalog(ctx context.Context, reqURL string) ([]dom
 			return
 		}
 
-		imgElem := s.Find(".movie-poster img, .poster img")
+		imgElem := s.Find(".movie-img img, .movie-img-1 img, .movie-img-inner img, .movie-poster img, .poster img, img")
 		poster, _ := imgElem.Attr("src")
 		if poster == "" {
 			poster, _ = imgElem.Attr("data-src")
 		}
-		if poster != "" && !strings.HasPrefix(poster, "http") {
-			poster = p.baseURL + poster
-		}
+		poster = p.ResolvePosterURL(poster)
 
 		yearStr := s.Find(".movie-date, .year").Text()
 		year := parseYear(yearStr)
@@ -196,13 +194,12 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 		origTitle = strings.TrimSpace(origTitle)
 	}
 
-	poster, _ := doc.Find(".movie-poster img, .full-poster img, .fposter img, img[itemprop='image']").First().Attr("src")
+	posterElem := doc.Find(".movie-img img, .movie-img-1 img, .movie-img-inner img, .movie-poster img, .full-poster img, .fposter img, img[itemprop='image']").First()
+	poster, _ := posterElem.Attr("src")
 	if poster == "" {
-		poster, _ = doc.Find(".movie-poster img, .full-poster img, .fposter img").First().Attr("data-src")
+		poster, _ = posterElem.Attr("data-src")
 	}
-	if poster != "" && !strings.HasPrefix(poster, "http") {
-		poster = p.baseURL + poster
-	}
+	poster = p.ResolvePosterURL(poster)
 	desc := strings.TrimSpace(doc.Find(".full-text, .movie-desc, .fdesc, [itemprop='description']").First().Text())
 
 	var genres []string
@@ -368,3 +365,18 @@ func parseYear(text string) int {
 	}
 	return 0
 }
+
+func (p *UakinoProvider) ResolvePosterURL(poster string) string {
+	poster = strings.TrimSpace(poster)
+	if poster == "" {
+		return ""
+	}
+	if strings.HasPrefix(poster, "//") {
+		return "https:" + poster
+	}
+	if strings.HasPrefix(poster, "http://") || strings.HasPrefix(poster, "https://") {
+		return poster
+	}
+	return strings.TrimRight(p.baseURL, "/") + "/" + strings.TrimLeft(poster, "/")
+}
+

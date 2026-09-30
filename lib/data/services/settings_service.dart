@@ -16,13 +16,13 @@ enum AppThemeMode {
   String get displayName {
     switch (this) {
       case AppThemeMode.dark:
-        return 'Р СћР ВµР СР Р…Р В°';
+        return 'Темна';
       case AppThemeMode.amoled:
         return 'AMOLED';
       case AppThemeMode.light:
-        return 'Р РЋР Р†РЎвЂ“РЎвЂљР В»Р В°';
+        return 'Світла';
       case AppThemeMode.system:
-        return 'Р РЋР С‘РЎРѓРЎвЂљР ВµР СР Р…Р В°';
+        return 'Системна';
     }
   }
 
@@ -47,7 +47,7 @@ enum DefaultQuality {
   String get displayName {
     switch (this) {
       case DefaultQuality.auto:
-        return 'Р С’Р Р†РЎвЂљР С•';
+        return 'Авто';
       case DefaultQuality.q480p:
         return '480p';
       case DefaultQuality.q720p:
@@ -77,9 +77,9 @@ enum PlayerType {
   String get displayName {
     switch (this) {
       case PlayerType.internal:
-        return 'Р вЂ™Р В±РЎС“Р Т‘Р С•Р Р†Р В°Р Р…Р С‘Р в„–';
+        return 'Вбудований';
       case PlayerType.external:
-        return 'Р вЂ”Р С•Р Р†Р Р…РЎвЂ“РЎв‚¬Р Р…РЎвЂ“Р в„–';
+        return 'Зовнішній';
     }
   }
 

@@ -185,9 +185,7 @@ class _ProviderPageState extends State<ProviderPage>
         setState(() => _loadingByType[type] = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё СЃС‚РѕСЂС–РЅРєСѓ: $e',
-            ),
+            content: Text('Не вдалося завантажити сторінку: $e'),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -242,12 +240,8 @@ class _ProviderPageState extends State<ProviderPage>
   Widget build(BuildContext context) {
     if (_provider == null) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ'),
-        ),
-        body: const Center(
-          child: Text('РџСЂРѕРІР°Р№РґРµСЂ РЅРµ Р·РЅР°Р№РґРµРЅРѕ'),
-        ),
+        appBar: AppBar(title: const Text('Провайдер не знайдено')),
+        body: const Center(child: Text('Провайдер не знайдено')),
       );
     }
 
@@ -287,7 +281,7 @@ class _ProviderPageState extends State<ProviderPage>
                 context.go('/');
               }
             },
-            tooltip: 'РќР°Р·Р°Рґ',
+            tooltip: 'Назад',
           ),
           const SizedBox(width: 8),
           Icon(_providerIcon, color: _providerColor),
@@ -344,7 +338,7 @@ class _ProviderPageState extends State<ProviderPage>
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'РЇРєС–СЃС‚СЊ С‚Р° РґСѓР±Р»СЏР¶ С„С–РєСЃСѓСЋС‚СЊСЃСЏ РїСЂРё Р·Р°РїСѓСЃРєСѓ РІС–РґРµРѕ С– РЅРµ РјРѕР¶СѓС‚СЊ Р±СѓС‚Рё Р·РјС–РЅРµРЅС– РїС–Рґ С‡Р°СЃ РїРµСЂРµРіР»СЏРґСѓ',
+              'Якість та дубляж фіксуються при запуску відео і не можуть бути змінені під час перегляду',
               style: TextStyle(fontSize: 12, color: Colors.orange.shade700),
             ),
           ),
@@ -427,7 +421,7 @@ class _ProviderPageState extends State<ProviderPage>
             const Icon(Icons.error_outline, size: 64, color: Colors.red),
             const SizedBox(height: 16),
             Text(
-              'РџРѕРјРёР»РєР° Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ',
+              'Помилка завантаження',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
@@ -435,7 +429,7 @@ class _ProviderPageState extends State<ProviderPage>
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () => _loadContent(type),
-              child: const Text('РЎРїСЂРѕР±СѓРІР°С‚Рё Р·РЅРѕРІСѓ'),
+              child: const Text('Спробувати знову'),
             ),
           ],
         ),
@@ -450,12 +444,12 @@ class _ProviderPageState extends State<ProviderPage>
             Icon(_getTypeIcon(type), size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             Text(
-              'РќС–С‡РѕРіРѕ РЅРµ Р·РЅР°Р№РґРµРЅРѕ',
+              'Нічого не знайдено',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'РЎРїСЂРѕР±СѓР№С‚Рµ Р·РјС–РЅРёС‚Рё С„С–Р»СЊС‚СЂРё',
+              'Спробуйте змінити фільтри',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],

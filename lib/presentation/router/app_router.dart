@@ -119,7 +119,7 @@ class AppRouter {
                     const SizedBox(height: 16),
                     TextButton(
                       onPressed: () => context.go('/'),
-                      child: const Text('РЎРєР°СЃСѓРІР°С‚Рё'),
+                      child: const Text('Скасувати'),
                     ),
                   ],
                 ),
