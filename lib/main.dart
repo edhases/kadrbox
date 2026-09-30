@@ -53,28 +53,14 @@ void main() async {
             title: 'Oxide Film',
           );
 
-          // Apply options without waiting — waitUntilReadyToShow can
-          // deadlock with TitleBarStyle.hidden on some Windows builds.
-          await windowManager.setSize(windowOptions.size!);
-          await windowManager.setMinimumSize(windowOptions.minimumSize!);
-          await windowManager.center();
-          await windowManager.setTitle(windowOptions.title!);
-          await windowManager.setTitleBarStyle(windowOptions.titleBarStyle!);
-          await windowManager.setSkipTaskbar(windowOptions.skipTaskbar!);
+          await windowManager.waitUntilReadyToShow(windowOptions, () async {
+            await windowManager.show();
+            await windowManager.focus();
+          });
 
-          // Show immediately — no callbacks, no races
+          // Ensure window is revealed even if callback wasn't fired
           await windowManager.show();
           await windowManager.focus();
-
-          // Double-tap fallback in case the first show was eaten by Windows
-          Future.delayed(const Duration(milliseconds: 800), () async {
-            try {
-              if (!await windowManager.isVisible()) {
-                await windowManager.show();
-                await windowManager.focus();
-              }
-            } catch (_) {}
-          });
         } catch (e) {
           Logger.e(
             'WindowManager initialization failed',

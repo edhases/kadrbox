@@ -58,7 +58,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection> {
           ),
         ),
         SizedBox(
-          height: 200,
+          height: 220,
           child: ScrollConfiguration(
             behavior: ScrollConfiguration.of(
               context,
