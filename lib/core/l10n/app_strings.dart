@@ -270,6 +270,8 @@ class AppStrings {
     'Quality and dubbing are picked at playback start',
   );
   String get backupShared => _t('Копію надіслано', 'Backup shared');
+  String get providerDisabledByServer =>
+      _t('Вимкнено сервером', 'Disabled by server');
   String exportSuccess(String path) => _t('Збережено: $path', 'Saved: $path');
   String get importSuccess =>
       _t('Дані успішно імпортовано!', 'Data imported successfully!');

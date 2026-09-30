@@ -94,6 +94,7 @@ func NewRouter(
 
 		// Публічний каталог і пошук
 		r.Route("/content", func(r chi.Router) {
+			r.Get("/providers", contentH.Providers)
 			r.Get("/search", contentH.Search)
 			r.Get("/details", contentH.GetDetails)
 			r.Get("/streams", contentH.GetStreams)

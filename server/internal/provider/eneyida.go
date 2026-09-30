@@ -35,6 +35,19 @@ func (p *EneyidaProvider) BaseURL() string {
 	return p.baseURL
 }
 
+// Describe повертає публічні метадані для каталогу провайдерів.
+func (p *EneyidaProvider) Describe() domain.ProviderInfo {
+	return domain.ProviderInfo{
+		ID:                   p.ID(),
+		Name:                 p.Name(),
+		BaseURL:              p.baseURL,
+		ShowOnHome:           true,
+		HasFixedStreams:      false,
+		ContentTypes:         []string{"movie", "series", "cartoon", "anime"},
+		SearchEnabledDefault: true,
+	}
+}
+
 func (p *EneyidaProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	searchURL := fmt.Sprintf("%s/index.php?do=search&subaction=search&story=%s", p.baseURL, url.QueryEscape(query))
 	html, err := p.client.Get(ctx, searchURL, p.baseURL)

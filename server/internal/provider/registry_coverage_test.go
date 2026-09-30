@@ -16,8 +16,11 @@ type covErrProvider struct {
 	id string
 }
 
-func (p *covErrProvider) ID() string      { return p.id }
-func (p *covErrProvider) Name() string    { return p.id }
+func (p *covErrProvider) ID() string   { return p.id }
+func (p *covErrProvider) Name() string { return p.id }
+func (p *covErrProvider) Describe() domain.ProviderInfo {
+	return domain.ProviderInfo{ID: p.id, Name: p.id, ShowOnHome: true, SearchEnabledDefault: true}
+}
 func (p *covErrProvider) BaseURL() string { return "http://cov-err" }
 func (p *covErrProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	return nil, errors.New("cov search boom")
@@ -35,8 +38,11 @@ type covCountingProvider struct {
 	delay time.Duration
 }
 
-func (p *covCountingProvider) ID() string      { return p.id }
-func (p *covCountingProvider) Name() string    { return p.id }
+func (p *covCountingProvider) ID() string   { return p.id }
+func (p *covCountingProvider) Name() string { return p.id }
+func (p *covCountingProvider) Describe() domain.ProviderInfo {
+	return domain.ProviderInfo{ID: p.id, Name: p.id, ShowOnHome: true, SearchEnabledDefault: true}
+}
 func (p *covCountingProvider) BaseURL() string { return "http://cov-count" }
 func (p *covCountingProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	p.count.Add(1)
@@ -162,4 +168,78 @@ func TestCovRegistryConcurrentSearch(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestCovRegistryKillSwitch(t *testing.T) {
+	reg := provider.NewRegistry()
+	reg.Register(&dummyProvider{id: "p1", name: "Provider 1"})
+
+	if !reg.IsEnabled("p1") {
+		t.Fatalf("expected p1 enabled by default")
+	}
+	reg.SetEnabled("p1", false)
+	if reg.IsEnabled("p1") {
+		t.Fatalf("expected p1 disabled after kill-switch")
+	}
+
+	// Вимкнений провайдер не бере участі в пошуку.
+	if got := reg.SearchAll(context.Background(), "q"); len(got) != 0 {
+		t.Fatalf("expected no results from disabled provider, got %d", len(got))
+	}
+
+	// Details/Streams повертають ErrProviderDisabled.
+	if _, err := reg.Details(context.Background(), "p1", "http://x"); !errors.Is(err, provider.ErrProviderDisabled) {
+		t.Fatalf("expected ErrProviderDisabled from Details, got %v", err)
+	}
+	if _, err := reg.Streams(context.Background(), "p1", "http://x", 0, 0, ""); !errors.Is(err, provider.ErrProviderDisabled) {
+		t.Fatalf("expected ErrProviderDisabled from Streams, got %v", err)
+	}
+
+	// Невідомий провайдер — ErrProviderNotFound.
+	if _, err := reg.Details(context.Background(), "nope", "http://x"); !errors.Is(err, provider.ErrProviderNotFound) {
+		t.Fatalf("expected ErrProviderNotFound, got %v", err)
+	}
+
+	// Повторне ввімкнення повертає пошук.
+	reg.SetEnabled("p1", true)
+	if got := reg.SearchAll(context.Background(), "q"); len(got) != 1 {
+		t.Fatalf("expected 1 result after re-enable, got %d", len(got))
+	}
+}
+
+func TestCovRegistryCatalog(t *testing.T) {
+	reg := provider.NewRegistry()
+	reg.Register(&dummyProvider{id: "p1", name: "Provider 1"})
+	reg.DisableMany([]string{"p1", ""})
+
+	cat := reg.Catalog()
+	if len(cat.Providers) != 1 {
+		t.Fatalf("expected 1 catalog entry, got %d", len(cat.Providers))
+	}
+	entry := cat.Providers[0]
+	if entry.ID != "p1" || entry.Name != "Provider 1" {
+		t.Errorf("unexpected catalog entry: %+v", entry)
+	}
+	if entry.Enabled {
+		t.Errorf("expected p1 disabled in catalog")
+	}
+	if !entry.Healthy {
+		t.Errorf("expected p1 healthy (no errors yet)")
+	}
+
+	// Помилка пошуку погіршує здоров'я.
+	reg.SetEnabled("p1", true)
+	reg.Register(&covErrProvider{id: "broken"})
+	_ = reg.SearchAll(context.Background(), "q")
+	cat = reg.Catalog()
+	for _, e := range cat.Providers {
+		if e.ID == "broken" {
+			if e.Healthy {
+				t.Errorf("expected broken provider unhealthy")
+			}
+			if e.Health.ConsecutiveErrors == 0 {
+				t.Errorf("expected consecutive errors recorded")
+			}
+		}
+	}
 }

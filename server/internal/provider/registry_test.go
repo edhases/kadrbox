@@ -13,8 +13,11 @@ type dummyProvider struct {
 	name string
 }
 
-func (d *dummyProvider) ID() string      { return d.id }
-func (d *dummyProvider) Name() string    { return d.name }
+func (d *dummyProvider) ID() string   { return d.id }
+func (d *dummyProvider) Name() string { return d.name }
+func (d *dummyProvider) Describe() domain.ProviderInfo {
+	return domain.ProviderInfo{ID: d.id, Name: d.name, ShowOnHome: true, SearchEnabledDefault: true}
+}
 func (d *dummyProvider) BaseURL() string { return "http://dummy" }
 func (d *dummyProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	return []domain.MediaItem{

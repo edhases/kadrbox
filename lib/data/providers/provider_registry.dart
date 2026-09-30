@@ -26,8 +26,35 @@ class ProviderRegistry {
   bool _urlsResolved = false;
 
   /// Provider IDs that should NOT appear on the home page or in general categories
-  /// These providers have their own dedicated buttons/sections
+  /// These providers have their own dedicated buttons/sections.
+  /// Backend catalog can override per-provider flags (see [_serverShowOnHome]).
   static const Set<String> separateProviderIds = {'hdrezka', 'youtube'};
+
+  /// Backend-driven overrides from the provider catalog (source of truth).
+  final Map<String, bool> _backendEnabled = {};
+  final Map<String, bool> _serverShowOnHome = {};
+  final Map<String, bool> _serverFixedStreams = {};
+
+  /// Apply a backend catalog snapshot: kill-switch flags + display metadata.
+  void applyBackendCatalog({
+    required Map<String, bool> enabled,
+    required Map<String, bool> showOnHome,
+    required Map<String, bool> fixedStreams,
+  }) {
+    _backendEnabled
+      ..clear()
+      ..addAll(enabled);
+    _serverShowOnHome
+      ..clear()
+      ..addAll(showOnHome);
+    _serverFixedStreams
+      ..clear()
+      ..addAll(fixedStreams);
+  }
+
+  /// Backend kill-switch state (defaults to true when backend didn't say).
+  bool isBackendEnabled(String providerId) =>
+      _backendEnabled[providerId] ?? true;
 
   /// Check if a provider should be shown on the home page
   static bool showOnHome(ContentProvider provider) {
@@ -36,11 +63,19 @@ class ProviderRegistry {
     return !separateProviderIds.contains(provider.id);
   }
 
+  /// Instance-aware variant honoring backend catalog overrides.
+  bool showsOnHome(ContentProvider provider) =>
+      _serverShowOnHome[provider.id] ?? showOnHome(provider);
+
   /// Check if a provider has fixed streams (can't change quality/voiceover after start)
   static bool hasFixedStreams(ContentProvider provider) {
     if (provider is HdrezkaProvider) return HdrezkaProvider.hasFixedStreams;
     return false;
   }
+
+  /// Instance-aware variant honoring backend catalog overrides.
+  bool hasFixed(ContentProvider provider) =>
+      _serverFixedStreams[provider.id] ?? hasFixedStreams(provider);
 
   /// Get settings service (lazy to avoid circular dependency)
   SettingsService? get _settings {
@@ -79,13 +114,20 @@ class ProviderRegistry {
   /// Get all registered providers
   List<ContentProvider> get all => List.unmodifiable(_providers);
 
-  /// Get only enabled providers (checks SettingsService)
+  /// Get only enabled providers (checks SettingsService).
+  /// Effective state = backend kill-switch AND local user toggle.
   List<ContentProvider> get enabled {
     final settings = _settings;
     if (settings == null) {
-      return _providers.where((p) => p.isEnabled).toList();
+      return _providers
+          .where((p) => p.isEnabled && isBackendEnabled(p.id))
+          .toList();
     }
-    return _providers.where((p) => settings.isProviderEnabled(p.id)).toList();
+    return _providers
+        .where(
+          (p) => settings.isProviderEnabled(p.id) && isBackendEnabled(p.id),
+        )
+        .toList();
   }
 
   /// Get provider by ID
@@ -104,17 +146,17 @@ class ProviderRegistry {
 
   /// Get providers that should be shown on home page for a content type
   List<ContentProvider> getHomeProvidersByContentType(ContentType type) {
-    return getByContentType(type).where((p) => showOnHome(p)).toList();
+    return getByContentType(type).where((p) => showsOnHome(p)).toList();
   }
 
   /// Get providers that have their own dedicated buttons/sections (not on home)
   List<ContentProvider> get separateProviders {
-    return enabled.where((p) => separateProviderIds.contains(p.id)).toList();
+    return enabled.where((p) => !showsOnHome(p)).toList();
   }
 
   /// Get providers for home page only (excludes separate providers like HDRezka/YouTube)
   List<ContentProvider> get homeProviders {
-    return enabled.where((p) => showOnHome(p)).toList();
+    return enabled.where((p) => showsOnHome(p)).toList();
   }
 
   /// Get resolved URL for a provider (or default if not resolved)

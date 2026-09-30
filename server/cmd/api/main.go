@@ -79,6 +79,10 @@ func main() {
 	registry.Register(provider.NewUakinoProvider(tlsClient))
 	registry.Register(provider.NewEneyidaProvider(tlsClient))
 	registry.Register(provider.NewHdrezkaProvider(tlsClient))
+	if disabled := cfg.GetDisabledProviders(); len(disabled) > 0 {
+		registry.DisableMany(disabled)
+		log.Printf("[Registry] Disabled providers (kill-switch): %v", disabled)
+	}
 	log.Printf("[Registry] Registered %d content providers", len(registry.List()))
 
 	// 6. WebSocket Hub для Watch Party

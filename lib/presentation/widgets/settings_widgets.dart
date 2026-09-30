@@ -238,7 +238,11 @@ class ProviderTile extends StatefulWidget {
   final String url;
   final String? iconUrl;
   final bool isEnabled;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
+
+  /// When set, the tile shows this reason and the switch is non-interactive
+  /// (e.g. provider force-disabled by backend).
+  final String? disabledReason;
 
   const ProviderTile({
     super.key,
@@ -247,6 +251,7 @@ class ProviderTile extends StatefulWidget {
     this.iconUrl,
     required this.isEnabled,
     required this.onChanged,
+    this.disabledReason,
   });
 
   @override
@@ -268,7 +273,7 @@ class _ProviderTileState extends State<ProviderTile> {
         if (event is KeyDownEvent &&
             (event.logicalKey == LogicalKeyboardKey.select ||
                 event.logicalKey == LogicalKeyboardKey.enter)) {
-          widget.onChanged(!widget.isEnabled);
+          widget.onChanged?.call(!widget.isEnabled);
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -319,12 +324,23 @@ class _ProviderTileState extends State<ProviderTile> {
                   ),
           ),
           title: Text(widget.name),
-          subtitle: Text(
-            widget.url,
-            style: TextStyle(
-              color: Theme.of(context).textTheme.bodySmall?.color,
-              fontSize: 12,
-            ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.url,
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                  fontSize: 12,
+                ),
+              ),
+              if (widget.disabledReason != null)
+                Text(
+                  widget.disabledReason!,
+                  style: const TextStyle(fontSize: 11, color: Colors.orange),
+                ),
+            ],
           ),
           value: widget.isEnabled,
           dense: true,

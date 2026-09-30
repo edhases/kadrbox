@@ -694,11 +694,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
     // Separate home providers from dedicated providers
     final homeProviders = providers
-        .where((p) => ProviderRegistry.showOnHome(p))
+        .where((p) => _registry.showsOnHome(p))
         .toList();
 
     final separateProviders = providers
-        .where((p) => !ProviderRegistry.showOnHome(p))
+        .where((p) => !_registry.showsOnHome(p))
         .toList();
 
     return [
@@ -716,15 +716,20 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         ...homeProviders.map((provider) {
-          final isEnabled = _settings.isProviderEnabled(provider.id);
+          final backendOff = !_registry.isBackendEnabled(provider.id);
+          final isEnabled =
+              _settings.isProviderEnabled(provider.id) && !backendOff;
           return ProviderTile(
             name: provider.name,
             url: provider.baseUrl,
             iconUrl: provider.iconUrl,
             isEnabled: isEnabled,
-            onChanged: (value) {
-              _settings.setProviderEnabled(provider.id, value);
-            },
+            disabledReason: backendOff ? _s.providerDisabledByServer : null,
+            onChanged: backendOff
+                ? null
+                : (value) {
+                    _settings.setProviderEnabled(provider.id, value);
+                  },
           );
         }),
       ],
@@ -753,7 +758,9 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         ...separateProviders.map((provider) {
-          final isEnabled = _settings.isProviderEnabled(provider.id);
+          final backendOff = !_registry.isBackendEnabled(provider.id);
+          final isEnabled =
+              _settings.isProviderEnabled(provider.id) && !backendOff;
           final isSearchEnabled = _settings.isSearchEnabledForProvider(
             provider.id,
           );
@@ -762,13 +769,18 @@ class _SettingsPageState extends State<SettingsPage> {
             url: provider.baseUrl,
             iconUrl: provider.iconUrl,
             searchLabel: _s.includeInGlobalSearch,
-            fixedNote: _s.fixedStreamsNote,
+            fixedNote: backendOff
+                ? _s.providerDisabledByServer
+                : _s.fixedStreamsNote,
             isEnabled: isEnabled,
-            isSearchEnabled: isSearchEnabled,
-            hasFixedStreams: ProviderRegistry.hasFixedStreams(provider),
-            onEnabledChanged: (value) {
-              _settings.setProviderEnabled(provider.id, value);
-            },
+            isSearchEnabled: isSearchEnabled && !backendOff,
+            showSearchToggle: !backendOff,
+            hasFixedStreams: _registry.hasFixed(provider),
+            onEnabledChanged: backendOff
+                ? null
+                : (value) {
+                    _settings.setProviderEnabled(provider.id, value);
+                  },
             onSearchEnabledChanged: (value) {
               _settings.setSearchEnabledForProvider(provider.id, value);
             },
@@ -1028,8 +1040,9 @@ class _SeparateProviderTile extends StatelessWidget {
   final String fixedNote;
   final bool isEnabled;
   final bool isSearchEnabled;
+  final bool showSearchToggle;
   final bool hasFixedStreams;
-  final ValueChanged<bool> onEnabledChanged;
+  final ValueChanged<bool>? onEnabledChanged;
   final ValueChanged<bool> onSearchEnabledChanged;
 
   const _SeparateProviderTile({
@@ -1040,6 +1053,7 @@ class _SeparateProviderTile extends StatelessWidget {
     required this.fixedNote,
     required this.isEnabled,
     required this.isSearchEnabled,
+    this.showSearchToggle = true,
     required this.hasFixedStreams,
     required this.onEnabledChanged,
     required this.onSearchEnabledChanged,
@@ -1056,9 +1070,10 @@ class _SeparateProviderTile extends StatelessWidget {
           url: url,
           iconUrl: iconUrl,
           isEnabled: isEnabled,
+          disabledReason: showSearchToggle ? null : fixedNote,
           onChanged: onEnabledChanged,
         ),
-        if (isEnabled)
+        if (isEnabled && showSearchToggle)
           Padding(
             padding: const EdgeInsets.only(left: 68, right: 16, bottom: 4),
             child: Column(

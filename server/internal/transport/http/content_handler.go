@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -47,15 +48,16 @@ func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, ok := h.registry.Get(providerID)
-	if !ok {
-		http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-		return
-	}
-
-	details, err := p.GetDetails(r.Context(), itemURL)
+	details, err := h.registry.Details(r.Context(), providerID, itemURL)
 	if err != nil {
-		http.Error(w, `{"error":"failed to get media details"}`, http.StatusInternalServerError)
+		switch {
+		case errors.Is(err, provider.ErrProviderDisabled):
+			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
+		case errors.Is(err, provider.ErrProviderNotFound):
+			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error":"failed to get media details"}`, http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -78,18 +80,26 @@ func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 	season, _ := strconv.Atoi(seasonStr)
 	episode, _ := strconv.Atoi(episodeStr)
 
-	p, ok := h.registry.Get(providerID)
-	if !ok {
-		http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-		return
-	}
-
-	resp, err := p.GetStreams(r.Context(), itemURL, season, episode, voiceID)
+	resp, err := h.registry.Streams(r.Context(), providerID, itemURL, season, episode, voiceID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to get streams"}`, http.StatusInternalServerError)
+		switch {
+		case errors.Is(err, provider.ErrProviderDisabled):
+			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
+		case errors.Is(err, provider.ErrProviderNotFound):
+			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error":"failed to get streams"}`, http.StatusInternalServerError)
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// Providers — GET /api/v1/content/providers
+// Публічний каталог провайдерів: джерело правди для застосунків.
+func (h *ContentHandler) Providers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.registry.Catalog())
 }

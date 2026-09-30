@@ -28,6 +28,7 @@ import '../../data/services/recommendation_service.dart';
 import '../../data/services/smart_search/smart_search_service.dart';
 import '../../data/services/data_transfer_service.dart';
 import '../../data/services/user_agent_service.dart';
+import '../../data/services/provider_catalog_service.dart';
 import '../../data/services/update_service.dart';
 import '../../data/database/dao/search_history_dao.dart';
 import '../../data/database/dao/history_dao.dart';
@@ -127,6 +128,11 @@ Future<void> configureDependencies() async {
 
   // Provider registry
   getIt.registerLazySingleton<ProviderRegistry>(() => ProviderRegistry());
+
+  // Backend provider catalog sync (source of truth for provider list)
+  getIt.registerLazySingleton<ProviderCatalogService>(
+    () => ProviderCatalogService(),
+  );
 
   // Register content providers
   _registerProviders();

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -19,6 +20,7 @@ type Config struct {
 	JWTSecret           string
 	BaseProxyURL        string
 	AppURL              string
+	DisabledProviders   string
 	GoogleClientID      string
 	GoogleClientSecret  string
 	GoogleRedirectURI   string
@@ -56,6 +58,7 @@ func Load() *Config {
 		JWTSecret:           getEnv("JWT_SECRET", ""),
 		BaseProxyURL:        getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
 		AppURL:              getEnv("APP_URL", "https://film.oxideteam.pp.ua"),
+		DisabledProviders:   getEnv("DISABLED_PROVIDERS", ""),
 		GoogleClientID:      getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret:  getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURI:   getEnv("GOOGLE_REDIRECT_URI", "https://film.oxideteam.pp.ua/api/v1/auth/google/callback"),
@@ -72,6 +75,17 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// GetDisabledProviders парсить DISABLED_PROVIDERS ("uaflix, hdrezka") у список ID.
+func (c *Config) GetDisabledProviders() []string {
+	var out []string
+	for _, id := range strings.Split(c.DisabledProviders, ",") {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func getEnvInt(key string, defaultVal int) int {

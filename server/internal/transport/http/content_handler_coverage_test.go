@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -27,8 +28,11 @@ type covStubProvider struct {
 	gotVoice   string
 }
 
-func (f *covStubProvider) ID() string      { return f.id }
-func (f *covStubProvider) Name() string    { return "cov-stub-" + f.id }
+func (f *covStubProvider) ID() string   { return f.id }
+func (f *covStubProvider) Name() string { return "cov-stub-" + f.id }
+func (f *covStubProvider) Describe() domain.ProviderInfo {
+	return domain.ProviderInfo{ID: f.id, Name: "cov-stub-" + f.id, ShowOnHome: true, SearchEnabledDefault: true}
+}
 func (f *covStubProvider) BaseURL() string { return "https://cov.example/" + f.id }
 
 func (f *covStubProvider) Search(_ context.Context, _ string) ([]domain.MediaItem, error) {
@@ -263,5 +267,55 @@ func TestCovHttpStreamsProviderError(t *testing.T) {
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("очікувався 500, отримано %d", rr.Code)
+	}
+}
+
+// TestCovHttpProvidersCatalog — каталог містить зареєстрованих провайдерів.
+func TestCovHttpProvidersCatalog(t *testing.T) {
+	h, _ := covContentHandler(&covStubProvider{id: "p1"})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/providers", nil)
+	rr := httptest.NewRecorder()
+
+	h.Providers(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("очікувався 200, отримано %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("очікувався application/json, отримано %q", ct)
+	}
+	var cat struct {
+		Version   int64 `json:"version"`
+		Providers []struct {
+			ID      string `json:"id"`
+			Enabled bool   `json:"enabled"`
+			Healthy bool   `json:"healthy"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatalf("невалідний JSON каталогу: %v", err)
+	}
+	if len(cat.Providers) != 1 || cat.Providers[0].ID != "p1" {
+		t.Errorf("неочікуваний каталог: %+v", cat)
+	}
+	if !cat.Providers[0].Enabled || !cat.Providers[0].Healthy {
+		t.Errorf("очікувався enabled+healthy провайдер: %+v", cat.Providers[0])
+	}
+}
+
+// TestCovHttpDetailsDisabledProvider — вимкнений провайдер дає 403.
+func TestCovHttpDetailsDisabledProvider(t *testing.T) {
+	reg := provider.NewRegistry()
+	reg.Register(&covStubProvider{id: "p1"})
+	reg.SetEnabled("p1", false)
+	h := transporthttp.NewContentHandler(reg, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/details?provider=p1&url=https://x/1", nil)
+	rr := httptest.NewRecorder()
+
+	h.GetDetails(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("очікувався 403, отримано %d", rr.Code)
 	}
 }

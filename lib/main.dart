@@ -10,6 +10,7 @@ import 'core/services/version_service.dart';
 import 'core/utils/logger.dart';
 import 'data/providers/provider_registry.dart';
 import 'data/services/auth_service.dart';
+import 'data/services/provider_catalog_service.dart';
 import 'presentation/app.dart';
 
 void main() async {
@@ -101,6 +102,9 @@ void main() async {
       // Proactively refresh auth session in background
       _refreshAuthSession();
 
+      // Sync backend provider catalog (source of truth for provider list)
+      _syncProviderCatalog();
+
       // Resolve provider URLs in background (detects domain changes)
       _resolveProviderUrls();
 
@@ -110,6 +114,26 @@ void main() async {
       Logger.e('Zone error', tag: 'Main', error: error, stackTrace: stack);
     },
   );
+}
+
+/// Sync backend provider catalog in background
+///
+/// Backend is the source of truth: new providers appear everywhere
+/// (home, catalog, search, settings) without an app update.
+void _syncProviderCatalog() {
+  try {
+    final catalog = getIt<ProviderCatalogService>();
+    catalog
+        .sync()
+        .then((_) {
+          Logger.d('Provider catalog synced', tag: 'Main');
+        })
+        .catchError((e) {
+          Logger.w('Catalog sync failed: $e', tag: 'Main');
+        });
+  } catch (e) {
+    Logger.w('Failed to start catalog sync: $e', tag: 'Main');
+  }
 }
 
 /// Resolve provider URLs in background

@@ -35,6 +35,19 @@ func (p *HdrezkaProvider) BaseURL() string {
 	return p.baseURL
 }
 
+// Describe повертає публічні метадані для каталогу провайдерів.
+func (p *HdrezkaProvider) Describe() domain.ProviderInfo {
+	return domain.ProviderInfo{
+		ID:                   p.ID(),
+		Name:                 p.Name(),
+		BaseURL:              p.baseURL,
+		ShowOnHome:           false,
+		HasFixedStreams:      true,
+		ContentTypes:         []string{"movie", "series", "cartoon", "animation"},
+		SearchEnabledDefault: false,
+	}
+}
+
 func (p *HdrezkaProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	searchURL := fmt.Sprintf("%s/search/?do=search&subaction=search&q=%s", p.baseURL, url.QueryEscape(query))
 	html, err := p.client.Get(ctx, searchURL, p.baseURL)
