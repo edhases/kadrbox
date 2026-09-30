@@ -127,7 +127,7 @@ func main() {
 		Addr:         ":" + cfg.ServerPort,
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 45 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

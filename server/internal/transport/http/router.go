@@ -26,6 +26,7 @@ func NewRouter(
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
+	r.Use(middleware.RateLimitMiddleware(middleware.NewIPRateLimiter(30, 60)))
 
 	// 2. Безпечний CORS (дозволяємо нативні додатки без Origin, свій домен та локальні сервери)
 	r.Use(cors.Handler(cors.Options{

@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -193,11 +194,23 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC RECOVER] in GetDetails: %v", rec)
+			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		}
+	}()
+
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
 
 	if providerID == "" || itemURL == "" {
 		http.Error(w, `{"error":"provider and url parameters are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := ValidateSafeURL(itemURL); err != nil {
+		http.Error(w, `{"error":"invalid or unsafe item url"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -219,6 +232,13 @@ func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC RECOVER] in GetStreams: %v", rec)
+			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		}
+	}()
+
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
 	seasonStr := r.URL.Query().Get("season")
@@ -227,6 +247,11 @@ func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 
 	if providerID == "" || itemURL == "" {
 		http.Error(w, `{"error":"provider and url parameters are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := ValidateSafeURL(itemURL); err != nil {
+		http.Error(w, `{"error":"invalid or unsafe item url"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -261,6 +286,13 @@ func (h *ContentHandler) Providers(w http.ResponseWriter, r *http.Request) {
 
 // Popular — GET /api/v1/content/popular
 func (h *ContentHandler) Popular(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC RECOVER] in Popular: %v", rec)
+			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		}
+	}()
+
 	providerID := r.URL.Query().Get("provider")
 	contentType := r.URL.Query().Get("type")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -287,6 +319,13 @@ func (h *ContentHandler) Popular(w http.ResponseWriter, r *http.Request) {
 
 // Category — GET /api/v1/content/category
 func (h *ContentHandler) Category(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC RECOVER] in Category: %v", rec)
+			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		}
+	}()
+
 	providerID := r.URL.Query().Get("provider")
 	category := r.URL.Query().Get("category")
 	contentType := r.URL.Query().Get("type")
