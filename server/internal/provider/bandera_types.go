@@ -201,7 +201,15 @@ type BanderaSourceStatus struct {
 	Status    string `json:"status"`
 	Count     int    `json:"count,omitempty"`
 	ElapsedMs int64  `json:"elapsed_ms,omitempty"`
+	Elapsed   int64  `json:"elapsed,omitempty"`
 	Error     string `json:"error,omitempty"`
+}
+
+func (s BanderaSourceStatus) GetElapsedMs() int64 {
+	if s.ElapsedMs > 0 {
+		return s.ElapsedMs
+	}
+	return s.Elapsed
 }
 
 type BanderaSearchItem struct {

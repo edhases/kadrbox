@@ -134,6 +134,24 @@ class ApiClient {
     }
   }
 
+  /// GET request that returns raw response data (Map or List or dynamic)
+  Future<dynamic> getRawJson(
+    String url, {
+    Map<String, dynamic>? queryParameters,
+    Map<String, dynamic>? headers,
+  }) async {
+    try {
+      final response = await _dio.get(
+        url,
+        queryParameters: queryParameters,
+        options: Options(headers: headers),
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleDioError(e);
+    }
+  }
+
   /// GET request that returns JSON List
   Future<List<dynamic>> getJsonList(
     String url, {

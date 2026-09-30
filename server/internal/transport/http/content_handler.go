@@ -153,7 +153,7 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 				sourceStatuses[srcKey] = search.SourceStatusInfo{
 					Status:    normStatus,
 					Count:     st.Count,
-					ElapsedMs: st.ElapsedMs,
+					ElapsedMs: st.GetElapsedMs(),
 				}
 			}
 		}

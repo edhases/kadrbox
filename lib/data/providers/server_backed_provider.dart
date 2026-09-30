@@ -141,11 +141,65 @@ class ServerBackedProvider extends ContentProvider {
     ContentType? type,
     int page = 1,
   }) async {
-    final json = await _api.getJson(
+    final rawData = await _api.getRawJson(
       '$_base/search',
       queryParameters: {'q': query},
     );
-    var envelope = SearchEnvelope.fromJson(json, _mapItem);
+
+    SearchEnvelope envelope;
+    if (rawData is Map) {
+      envelope = SearchEnvelope.fromJson(
+        Map<String, dynamic>.from(rawData),
+        _mapItem,
+      );
+    } else if (rawData is List) {
+      // Сумісність зі старішою версією бекенду, яка повертала плоский List<MediaItem>
+      final items = <ScoredMediaItem>[];
+      for (final raw in rawData) {
+        if (raw is Map) {
+          final item = _mapItem(Map<String, dynamic>.from(raw));
+          items.add(
+            ScoredMediaItem(
+              item: item,
+              score: 1.0,
+              matchedBy: 'legacy_server',
+              clusterKey: item.id,
+              sources: [
+                SearchItemSource(
+                  providerId: item.providerId,
+                  sourceKey: item.providerId,
+                  itemId: item.id,
+                ),
+              ],
+            ),
+          );
+        }
+      }
+      envelope = SearchEnvelope(
+        query: query,
+        canonical: query,
+        tookMs: 0,
+        segments: [
+          SearchSegment(
+            id: 'bandera',
+            status: 'ok',
+            count: items.length,
+            sources: {
+              'bandera': SearchSourceStatus(
+                key: 'bandera',
+                status: SourceStatus.ok,
+                count: items.length,
+              ),
+            },
+          ),
+        ],
+        items: items,
+        filteredOut: 0,
+      );
+    } else {
+      envelope = SearchEnvelope.empty(query);
+    }
+
     if (type != null) {
       envelope = SearchEnvelope(
         query: envelope.query,

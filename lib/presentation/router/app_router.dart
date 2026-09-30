@@ -146,9 +146,13 @@ class AppRouter {
             name: 'details',
             pageBuilder: (context, state) {
               final providerId = state.pathParameters['providerId']!;
-              final mediaId = Uri.decodeComponent(
-                state.pathParameters['mediaId']!,
-              );
+              final rawMediaId = state.pathParameters['mediaId']!;
+              String mediaId;
+              try {
+                mediaId = Uri.decodeComponent(rawMediaId);
+              } catch (_) {
+                mediaId = rawMediaId;
+              }
               return _buildPageWithThemeTransition(
                 context: context,
                 state: state,
