@@ -167,11 +167,17 @@ func (c *BanderaClient) GetSourceMeta(ctx context.Context, sourceKey string) (So
 	return m, ok
 }
 
-// Search виконує пошук за запитом query
-func (c *BanderaClient) Search(ctx context.Context, query string) ([]BanderaSearchItem, error) {
+// SearchWithMeta виконує пошук та повертає повну відповідь разом із meta.statuses
+func (c *BanderaClient) SearchWithMeta(ctx context.Context, query string, year int, serial int) (*BanderaSearchResponse, error) {
 	sourcesStr := c.GetSearchSourcesStr(ctx)
 	reqURL := fmt.Sprintf("%s/search?sources=%s&title=%s",
 		c.baseURL, url.QueryEscape(sourcesStr), url.QueryEscape(query))
+	if year > 0 {
+		reqURL += fmt.Sprintf("&year=%d", year)
+	}
+	if serial > 0 {
+		reqURL += fmt.Sprintf("&serial=%d", serial)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -196,7 +202,16 @@ func (c *BanderaClient) Search(ctx context.Context, query string) ([]BanderaSear
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
 
-	return searchResp.Items, nil
+	return &searchResp, nil
+}
+
+// Search виконує базовий пошук за запитом query
+func (c *BanderaClient) Search(ctx context.Context, query string) ([]BanderaSearchItem, error) {
+	resp, err := c.SearchWithMeta(ctx, query, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
 }
 
 // GetContent запитує /content з обов'язковим прапорцем full: true

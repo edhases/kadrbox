@@ -58,7 +58,7 @@ func (p *BanderaProvider) Describe() domain.ProviderInfo {
 	}
 }
 
-func generateStableContentID(source, title string, year int, ref json.RawMessage) string {
+func GenerateStableContentID(source, title string, year int, ref json.RawMessage) string {
 	h := sha1.New()
 	h.Write([]byte(source))
 	h.Write([]byte(":"))
@@ -70,6 +70,10 @@ func generateStableContentID(source, title string, year int, ref json.RawMessage
 		h.Write(ref)
 	}
 	return "bo_" + source + "_" + hex.EncodeToString(h.Sum(nil))[:10]
+}
+
+func generateStableContentID(source, title string, year int, ref json.RawMessage) string {
+	return GenerateStableContentID(source, title, year, ref)
 }
 
 // Search виконує пошук у Bandera Online
@@ -118,6 +122,11 @@ func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.Me
 	}
 
 	return results, nil
+}
+
+// SearchWithMeta виконує пошук та повертає повну відповідь BanderaSearchResponse (з Items та Meta.Statuses)
+func (p *BanderaProvider) SearchWithMeta(ctx context.Context, query string, year int, serial int) (*BanderaSearchResponse, error) {
+	return p.client.SearchWithMeta(ctx, query, year, serial)
 }
 
 // GetPopular виконує пошук типових назв як фолбек популярного

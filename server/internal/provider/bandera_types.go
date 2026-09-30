@@ -188,8 +188,20 @@ type SourceMeta struct {
 // ---- Search API DTO ----
 
 type BanderaSearchResponse struct {
-	OK    bool                `json:"ok"`
-	Items []BanderaSearchItem `json:"items"`
+	OK    bool                       `json:"ok"`
+	Items []BanderaSearchItem        `json:"items"`
+	Meta  *BanderaSearchMetaResponse `json:"meta,omitempty"`
+}
+
+type BanderaSearchMetaResponse struct {
+	Statuses map[string]BanderaSourceStatus `json:"statuses,omitempty"`
+}
+
+type BanderaSourceStatus struct {
+	Status    string `json:"status"`
+	Count     int    `json:"count,omitempty"`
+	ElapsedMs int64  `json:"elapsed_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type BanderaSearchItem struct {
