@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:skeletonizer/skeletonizer.dart';
 
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/favorites_service.dart';
@@ -162,11 +161,7 @@ class _DetailsPageState extends State<DetailsPage> {
 
   Widget _buildContent() {
     if (_isLoading) {
-      // Use Skeletonizer instead of custom skeleton
-      return Skeletonizer(
-        enabled: true,
-        child: _isDesktop ? _buildDesktopLayout() : _buildMobileLayout(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_error != null) {
@@ -215,7 +210,7 @@ class _DetailsPageState extends State<DetailsPage> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Hero(
-                      tag: 'media_poster_${widget.mediaId}',
+                      tag: 'media_poster_${widget.providerId}_${widget.mediaId}',
                       child: _buildPoster(),
                     ),
                   ),
@@ -326,10 +321,12 @@ class _DetailsPageState extends State<DetailsPage> {
         fit: StackFit.expand,
         children: [
           Hero(
-            tag: 'media_poster_${widget.mediaId}',
+            tag: 'media_poster_${widget.providerId}_${widget.mediaId}',
             child: CachedNetworkImage(
               imageUrl: _details!.item.posterUrl!,
               fit: BoxFit.cover,
+              memCacheHeight: 800,
+              maxWidthDiskCache: 800,
             ),
           ),
           Container(

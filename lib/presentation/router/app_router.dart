@@ -58,8 +58,21 @@ class AppRouter {
           GoRoute(
             path: '/auth',
             name: 'oauth_callback',
-            builder: (context, state) => const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+            builder: (context, state) => Scaffold(
+              appBar: AppBar(),
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => context.go('/'),
+                      child: const Text('Скасувати'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
 
@@ -114,7 +127,27 @@ class AppRouter {
             builder: (context, state) {
               // Support both query params and extra data
               final extra = state.extra as Map<String, dynamic>?;
-              final url = extra?['url'] ?? state.uri.queryParameters['url']!;
+              final url =
+                  extra?['url'] as String? ??
+                  state.uri.queryParameters['url'];
+              if (url == null || url.isEmpty) {
+                return Scaffold(
+                  appBar: AppBar(),
+                  body: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Немає URL для відтворення'),
+                        const SizedBox(height: 12),
+                        TextButton(
+                          onPressed: () => context.go('/'),
+                          child: const Text('На головну'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
               final title =
                   extra?['title'] ?? state.uri.queryParameters['title'];
               final subtitle =
@@ -225,9 +258,7 @@ class AppRouter {
     return CustomTransitionPage<void>(
       key: state.pageKey,
       child: child,
-      barrierDismissible: true,
-      barrierColor: Colors.black38,
-      opaque: false,
+      opaque: true,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
         return FadeTransition(
           opacity: CurveTween(curve: Curves.easeInOut).animate(animation),

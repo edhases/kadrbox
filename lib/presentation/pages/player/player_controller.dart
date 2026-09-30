@@ -209,7 +209,8 @@ class PlayerController extends ChangeNotifier with WindowListener {
 
   // Expose player and controller for Video widget
   Player get player => _player;
-  VideoController get videoController => _videoController!;
+  VideoController? get videoController => _videoController;
+  bool get hasVideoController => _videoController != null;
 
   // Video fit options
   static const List<BoxFit> fits = [BoxFit.contain, BoxFit.cover, BoxFit.fill];

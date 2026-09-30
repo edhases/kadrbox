@@ -125,37 +125,31 @@ class _CategoryPageState extends State<CategoryPage>
           ? filter.genres.first
           : null;
 
-      for (final provider in providers) {
-        try {
-          List<MediaItem> items;
-          if (selectedGenre != null) {
-            // Use getByCategory if genre is selected
-            Logger.d(
-              'Fetching $type by category "$selectedGenre" from ${provider.name}',
+      // Parallel fetch from all providers to avoid N sequential RTTs.
+      final results = await Future.wait(
+        providers.map((provider) async {
+          try {
+            if (selectedGenre != null) {
+              return await provider.getByCategory(
+                selectedGenre,
+                type: type,
+                page: 1,
+              );
+            }
+            return await provider.getPopular(type: type, page: 1);
+          } catch (e, stack) {
+            Logger.e(
+              'Failed to load $type from ${provider.name}',
               tag: _tag,
+              error: e,
+              stackTrace: stack,
             );
-            items = await provider.getByCategory(
-              selectedGenre,
-              type: type,
-              page: 1,
-            );
-          } else {
-            Logger.d('Fetching popular $type from ${provider.name}', tag: _tag);
-            items = await provider.getPopular(type: type, page: 1);
+            return <MediaItem>[];
           }
-          Logger.d(
-            'Got ${items.length} items from ${provider.name}',
-            tag: _tag,
-          );
-          allItems.addAll(items);
-        } catch (e, stack) {
-          Logger.e(
-            'Failed to load $type from ${provider.name}',
-            tag: _tag,
-            error: e,
-            stackTrace: stack,
-          );
-        }
+        }),
+      );
+      for (final items in results) {
+        allItems.addAll(items);
       }
 
       if (mounted) {
@@ -193,36 +187,32 @@ class _CategoryPageState extends State<CategoryPage>
     setState(() => _loadingByType[type] = true);
 
     try {
-      // Get only home providers for pagination
+      // Get only home providers for pagination (parallel fetch)
       final providers = _registry.getHomeProvidersByContentType(type);
-      final newItems = <MediaItem>[];
 
-      for (final provider in providers) {
-        try {
-          List<MediaItem> items;
-          if (selectedGenre != null) {
-            items = await provider.getByCategory(
-              selectedGenre,
-              type: type,
-              page: nextPage,
+      final results = await Future.wait(
+        providers.map((provider) async {
+          try {
+            if (selectedGenre != null) {
+              return await provider.getByCategory(
+                selectedGenre,
+                type: type,
+                page: nextPage,
+              );
+            }
+            return await provider.getPopular(type: type, page: nextPage);
+          } catch (e, stack) {
+            Logger.e(
+              'Failed to load more $type from ${provider.name}',
+              tag: _tag,
+              error: e,
+              stackTrace: stack,
             );
-          } else {
-            items = await provider.getPopular(type: type, page: nextPage);
+            return <MediaItem>[];
           }
-          Logger.d(
-            'Got ${items.length} more items from ${provider.name}',
-            tag: _tag,
-          );
-          newItems.addAll(items);
-        } catch (e, stack) {
-          Logger.e(
-            'Failed to load more $type from ${provider.name}',
-            tag: _tag,
-            error: e,
-            stackTrace: stack,
-          );
-        }
-      }
+        }),
+      );
+      final newItems = results.expand((items) => items).toList();
 
       if (mounted && newItems.isNotEmpty) {
         final filtered = filter.apply(newItems);

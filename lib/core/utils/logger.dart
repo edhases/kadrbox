@@ -1,4 +1,5 @@
 import 'dart:developer' as developer;
+import 'package:flutter/foundation.dart';
 
 /// Simple logger utility for debugging
 class Logger {
@@ -8,7 +9,7 @@ class Logger {
   static bool useConsoleLogs = true;
 
   /// Check if logging should output to console
-  static bool get _shouldLogToConsole => useConsoleLogs;
+  static bool get _shouldLogToConsole => useConsoleLogs && kDebugMode;
 
   static void d(String message, {String? tag}) {
     if (_shouldLogToConsole) print('[DEBUG] [$tag] $message');

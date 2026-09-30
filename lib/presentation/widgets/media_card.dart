@@ -151,14 +151,20 @@ class _MediaCardState extends State<MediaCard> {
     );
 
     return Hero(
-      tag: 'media_poster_${widget.item.id}',
+      tag: 'media_poster_${widget.item.providerId}_${widget.item.id}',
       child: localPath != null
-          ? Image.file(File(localPath), fit: BoxFit.cover)
+          ? Image.file(
+              File(localPath),
+              fit: BoxFit.cover,
+              cacheWidth: 400,
+              gaplessPlayback: true,
+            )
           : widget.item.posterUrl != null
           ? CachedNetworkImage(
               imageUrl: widget.item.posterUrl!,
               fit: BoxFit.cover,
               memCacheHeight: 400,
+              maxWidthDiskCache: 400,
               placeholder: (context, url) => const Skeleton(
                 width: double.infinity,
                 height: double.infinity,

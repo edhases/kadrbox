@@ -390,10 +390,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       Stack(
                         fit: StackFit.expand,
                         children: [
-                          if (!state.isTransitioning)
+                          if (!state.isTransitioning &&
+                              controller.hasVideoController)
                             Video(
                               key: ValueKey('video_${state.textureKey}'),
-                              controller: controller.videoController,
+                              controller: controller.videoController!,
                               fit: state.videoFit,
                               fill: Colors.black,
                               controls: NoVideoControls,

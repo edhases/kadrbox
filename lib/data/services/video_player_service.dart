@@ -130,7 +130,7 @@ class VideoPlayerService extends ChangeNotifier {
     notifyListeners();
 
     if (_controller != null) {
-      _controller!.removeListener(notifyListeners);
+      _controller!.removeListener(_safeNotifyListeners);
       _controller!.dispose();
       _controller = null;
     }

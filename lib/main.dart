@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
@@ -11,7 +13,21 @@ import 'data/services/auth_service.dart';
 import 'presentation/app.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  await runZonedGuarded<Future<void>>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    FlutterError.onError = (details) {
+      Logger.e(
+        'FlutterError: ${details.exceptionAsString()}',
+        tag: 'Main',
+        error: details.exception,
+        stackTrace: details.stack,
+      );
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      Logger.e('Uncaught async error', tag: 'Main', error: error, stackTrace: stack);
+      return true;
+    };
 
   // Desktop window configuration (must be initialized early before engine renders)
   if (!kIsWeb &&
@@ -78,6 +94,9 @@ void main() async {
   _resolveProviderUrls();
 
   runApp(const OxideFilmApp());
+  }, (error, stack) {
+    Logger.e('Zone error', tag: 'Main', error: error, stackTrace: stack);
+  });
 }
 
 /// Resolve provider URLs in background

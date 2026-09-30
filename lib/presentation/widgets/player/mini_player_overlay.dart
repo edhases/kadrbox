@@ -144,6 +144,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> {
         widget.child,
         if (_videoPlayerService.miniPlayerState == MiniPlayerState.minimized &&
             _videoPlayerService.controller != null &&
+            _videoPlayerService.controller!.hasVideoController &&
             !_videoPlayerService.isDesktopPiP)
           Positioned(
             left: _position.dx,
@@ -166,7 +167,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> {
                       // Video
                       Video(
                         controller:
-                            _videoPlayerService.controller!.videoController,
+                            _videoPlayerService.controller!.videoController!,
                         fit: BoxFit.cover,
                         controls: NoVideoControls,
                       ),

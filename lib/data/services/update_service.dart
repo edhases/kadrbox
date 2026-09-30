@@ -142,6 +142,9 @@ class UpdateService {
 
       final downloadUrl = platformInfo.url;
       final expectedHash = platformInfo.sha256;
+      if (downloadUrl.isEmpty) {
+        throw UnsupportedError('No download URL for current platform');
+      }
       final extension = Platform.isAndroid ? 'apk' : 'exe';
 
       // Clean up old updates before downloading

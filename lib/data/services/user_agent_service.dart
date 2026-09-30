@@ -10,23 +10,31 @@ class UserAgentService {
   static const String _fallbackUrl = 'https://www.useragents.me/';
 
   final http.Client _client;
-  final SharedPreferences _prefs;
+  final SharedPreferences? _prefs;
 
   UserAgentService({http.Client? client, required SharedPreferences prefs})
     : _client = client ?? http.Client(),
       _prefs = prefs;
 
+  /// Stateless fallback instance for early init when SharedPreferences
+  /// is not available yet (e.g. inside ApiClient constructor).
+  UserAgentService.fallback({http.Client? client})
+    : _client = client ?? http.Client(),
+      _prefs = null;
+
   List<String> _cachedUAs = [];
 
   Future<void> initialize() async {
-    final cached = _prefs.getStringList(_uaKey);
+    final prefs = _prefs;
+    if (prefs == null) return;
+    final cached = prefs.getStringList(_uaKey);
     if (cached != null && cached.isNotEmpty) {
       _cachedUAs = cached;
       Logger.d('Loaded ${_cachedUAs.length} User-Agents from cache', tag: 'UA');
     }
 
     // Update if older than 24 hours
-    final lastUpdate = _prefs.getInt(_lastUpdateKey) ?? 0;
+    final lastUpdate = prefs.getInt(_lastUpdateKey) ?? 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - lastUpdate > 24 * 60 * 60 * 1000 || _cachedUAs.isEmpty) {
       fetchLatestUserAgents(); // Run in background
@@ -88,7 +96,7 @@ class UserAgentService {
     }
 
     if (success) {
-      await _prefs.setInt(
+      await _prefs?.setInt(
         _lastUpdateKey,
         DateTime.now().millisecondsSinceEpoch,
       );
@@ -124,7 +132,7 @@ class UserAgentService {
 
         if (newUAs.length > 5) {
           _cachedUAs = newUAs;
-          await _prefs.setStringList(_uaKey, _cachedUAs);
+          await _prefs?.setStringList(_uaKey, _cachedUAs);
           Logger.d(
             'Successfully updated User-Agents: ${newUAs.length} found from $_fallbackUrl',
             tag: 'UA',
@@ -170,7 +178,7 @@ class UserAgentService {
 
         if (newUAs.length > 5) {
           _cachedUAs = newUAs;
-          await _prefs.setStringList(_uaKey, _cachedUAs);
+          await _prefs?.setStringList(_uaKey, _cachedUAs);
           Logger.d(
             'Successfully updated User-Agents: ${newUAs.length} found from $url',
             tag: 'UA',

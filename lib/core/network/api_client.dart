@@ -4,6 +4,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:dio_smart_retry/dio_smart_retry.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../error/exceptions.dart';
 import '../../data/services/user_agent_service.dart';
@@ -14,13 +15,21 @@ class ApiClient {
   final CookieJar _cookieJar = CookieJar();
   late final UserAgentService _uaService;
 
-  ApiClient({UserAgentService? uaService}) {
-    _uaService = uaService ?? UserAgentService(prefs: null as dynamic);
+  ApiClient({UserAgentService? uaService, SharedPreferences? prefs}) {
+    if (uaService != null) {
+      _uaService = uaService;
+    } else if (prefs != null) {
+      _uaService = UserAgentService(prefs: prefs);
+    } else {
+      // No prefs available (e.g. early init): use stateless fallback UA.
+      _uaService = UserAgentService.fallback();
+    }
 
     _dio = Dio(
       BaseOptions(
         connectTimeout: AppConfig.connectTimeout,
         receiveTimeout: AppConfig.receiveTimeout,
+        sendTimeout: AppConfig.connectTimeout,
         headers: {
           'User-Agent': _uaService.getRandomUA(),
           'Accept':
@@ -33,7 +42,7 @@ class ApiClient {
     // Add cookie manager for session persistence (PHPSESSID etc.)
     _dio.interceptors.add(CookieManager(_cookieJar));
 
-    // Add retry interceptor
+    // Add retry interceptor (only for network errors / 5xx, never 4xx)
     _dio.interceptors.add(
       RetryInterceptor(
         dio: _dio,
@@ -43,6 +52,17 @@ class ApiClient {
           Duration(seconds: 2),
           Duration(seconds: 3),
         ],
+        retryEvaluator: (error, _) {
+          if (error.type == DioExceptionType.badResponse) {
+            final code = error.response?.statusCode ?? 0;
+            return code >= 500;
+          }
+          return error.type == DioExceptionType.connectionTimeout ||
+              error.type == DioExceptionType.receiveTimeout ||
+              error.type == DioExceptionType.sendTimeout ||
+              error.type == DioExceptionType.connectionError ||
+              error.type == DioExceptionType.unknown;
+        },
       ),
     );
   }

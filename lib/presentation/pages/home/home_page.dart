@@ -561,8 +561,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildBottomNav() {
+    final location = GoRouterState.of(context).uri.toString();
+    final currentIndex = location.startsWith('/search')
+        ? 1
+        : location.startsWith('/favorites')
+        ? 2
+        : location.startsWith('/history')
+        ? 3
+        : location.startsWith('/downloads')
+        ? 4
+        : 0;
     return BottomNavigationBar(
-      currentIndex: 0,
+      currentIndex: currentIndex,
       items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.home_outlined),
@@ -591,18 +601,22 @@ class _HomePageState extends State<HomePage> {
         ),
       ],
       onTap: (index) {
+        if (index == currentIndex) return;
         switch (index) {
+          case 0:
+            context.go('/');
+            break;
           case 1:
-            context.push('/search');
+            context.go('/search');
             break;
           case 2:
-            context.push('/favorites');
+            context.go('/favorites');
             break;
           case 3:
-            context.push('/history');
+            context.go('/history');
             break;
           case 4:
-            context.push('/downloads');
+            context.go('/downloads');
             break;
         }
       },

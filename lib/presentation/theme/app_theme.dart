@@ -215,15 +215,20 @@ class AppTheme {
   }
 
   /// Light theme
-  static ThemeData get lightTheme {
+  static ThemeData get lightTheme => buildLightTheme();
+  static ThemeData buildLightTheme({AccentColor accent = AccentColor.indigo}) {
+    final accentColorValue = Color(accent.colorValue);
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
       colorScheme: ColorScheme.light(
-        primary: primaryColor,
+        primary: accentColorValue,
         secondary: secondaryColor,
         surface: Colors.white,
         error: errorColor,
+        onPrimary: Colors.white,
+        onSurface: Colors.black87,
+        onError: Colors.white,
       ),
       scaffoldBackgroundColor: const Color(0xFFF5F5F5),
       cardColor: Colors.white,
@@ -261,16 +266,58 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: primaryColor, width: 2),
+          borderSide: BorderSide(color: accentColorValue, width: 2),
         ),
       ),
 
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: Colors.white,
-        selectedItemColor: primaryColor,
+        selectedItemColor: accentColorValue,
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         elevation: 8,
+      ),
+
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: accentColorValue,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(foregroundColor: accentColorValue),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: Colors.grey[200]!,
+        selectedColor: accentColorValue.withValues(alpha: 0.15),
+        labelStyle: const TextStyle(color: Colors.black87),
+        side: const BorderSide(color: Color(0xFFE0E0E0)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      dialogTheme: const DialogThemeData(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        backgroundColor: Color(0xFF1A1A1A),
+        contentTextStyle: TextStyle(color: Colors.white),
+        behavior: SnackBarBehavior.floating,
+      ),
+      textTheme: const TextTheme(
+        titleLarge: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+        titleMedium: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+        titleSmall: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+        bodyLarge: TextStyle(color: Colors.black87),
+        bodyMedium: TextStyle(color: Colors.black54),
+        bodySmall: TextStyle(color: Colors.grey),
+        labelLarge: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+        labelMedium: TextStyle(color: Colors.black54),
+        labelSmall: TextStyle(color: Colors.grey),
       ),
     );
   }

@@ -143,21 +143,27 @@ class _HistoryPageState extends State<HistoryPage> {
           const SizedBox(height: 24),
         ],
 
-        // Full history
+        // Full history (lazy builder to avoid building 1000+ tiles at once)
         _SectionHeader(title: 'Вся історія', icon: Icons.history),
         const SizedBox(height: 8),
-        ...history.map(
-          (item) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: FocusableCard(
-              onTap: () => _openDetails(item),
-              borderRadius: 8,
-              child: _HistoryTile(
-                item: item,
-                onRemove: () => _removeItem(item),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: history.length,
+          itemBuilder: (context, index) {
+            final item = history[index];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: FocusableCard(
+                onTap: () => _openDetails(item),
+                borderRadius: 8,
+                child: _HistoryTile(
+                  item: item,
+                  onRemove: () => _removeItem(item),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ],
     );
