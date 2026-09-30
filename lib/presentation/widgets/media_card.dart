@@ -345,18 +345,8 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Color _getTypeColor() {
-    switch (widget.item.type) {
-      case ContentType.movie:
-        return Colors.blue;
-      case ContentType.series:
-        return Colors.purple;
-      case ContentType.cartoon:
-        return Colors.orange;
-      case ContentType.anime:
-        return Colors.pink;
-      default:
-        return Colors.grey;
-    }
+    // Unified neutral style — no rainbow badge colors
+    return Colors.black.withValues(alpha: 0.55);
   }
 
   Widget _buildYearBadge() {

@@ -211,6 +211,18 @@ func (r *UserRepository) LinkDiscord(ctx context.Context, userID uuid.UUID, disc
 	return err
 }
 
+// UnlinkTelegram відв'язує Telegram ID від користувача
+func (r *UserRepository) UnlinkTelegram(ctx context.Context, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET telegram_id = NULL, updated_at = NOW() WHERE id = $1`, userID)
+	return err
+}
+
+// UnlinkDiscord відв'язує Discord ID від користувача
+func (r *UserRepository) UnlinkDiscord(ctx context.Context, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET discord_id = NULL, updated_at = NOW() WHERE id = $1`, userID)
+	return err
+}
+
 // CreateOAuthUser створює верифікованого користувача через OAuth (Google/Telegram/Discord)
 func (r *UserRepository) CreateOAuthUser(ctx context.Context, email, passwordHash, username, avatarURL string, telegramID *int64, discordID *string) (*domain.User, error) {
 	query := `

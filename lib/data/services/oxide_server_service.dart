@@ -131,12 +131,20 @@ class OxideServerService {
     }
   }
 
-  /// Sign in with OAuth provider (discord, telegram) using loopback HTTP server
-  Future<void> signInWithOAuthLoopback(String provider) async {
+  /// Sign in with OAuth provider (discord, telegram, google) using loopback HTTP server.
+  /// If [linkToken] is provided (access token of the current session), the
+  /// provider is linked to the existing account instead of a fresh sign-in.
+  Future<void> signInWithOAuthLoopback(
+    String provider, {
+    String? linkToken,
+  }) async {
     HttpServer? server;
     try {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final redirectUrl = 'http://127.0.0.1:${server.port}/callback';
+      var redirectUrl = 'http://127.0.0.1:${server.port}/callback';
+      if (linkToken != null && linkToken.isNotEmpty) {
+        redirectUrl += '?link_token=${Uri.encodeQueryComponent(linkToken)}';
+      }
 
       final authUri = Uri.parse(
         '${AppConfig.serverApiUrl}/auth/$provider/login',
@@ -553,6 +561,24 @@ class OxideServerService {
       Logger.i('Account deleted successfully', tag: _tag);
     } catch (e) {
       Logger.e('Account deletion failed', tag: _tag, error: e);
+      rethrow;
+    }
+  }
+
+  /// Unlink OAuth provider (telegram / discord) from the current account.
+  /// Server refuses to unlink the last login method — the error is rethrown.
+  Future<void> unlinkProvider(String provider) async {
+    if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
+    final url = '${AppConfig.serverApiUrl}/auth/unlink';
+    try {
+      final res = await _apiClient.post(url, data: {'provider': provider});
+      if (res is Map) {
+        _user = Map<String, dynamic>.from(res);
+        await _prefs.setString(_userKey, jsonEncode(_user));
+        Logger.i('Provider $provider unlinked', tag: _tag);
+      }
+    } catch (e) {
+      Logger.e('Unlink $provider failed', tag: _tag, error: e);
       rethrow;
     }
   }

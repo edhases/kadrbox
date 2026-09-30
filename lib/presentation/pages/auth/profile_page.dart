@@ -392,91 +392,217 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  /// Orange banner for accounts with unverified email.
+  Widget _buildVerifyBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.mark_email_unread_outlined, color: Colors.orange),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Підтвердіть пошту, інакше акаунт не активний',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () => context.go(
+                          '/verify-email?email=${Uri.encodeQueryComponent(_authService.userEmail ?? '')}',
+                        ),
+                  child: const Text('Підтвердити'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        setState(() => _isLoading = true);
+                        try {
+                          await _authService.refreshProfile();
+                        } finally {
+                          if (mounted) setState(() => _isLoading = false);
+                        }
+                      },
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Оновити статус',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildProfile() {
     final profile = _authService.profile;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Avatar
-          GestureDetector(
-            onTap: _isEditing ? _pickImage : null,
-            child: Stack(
+          if (!_authService.isVerified) _buildVerifyBanner(),
+          // ── Compact profile card ─────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.darkCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.08),
+                width: 1,
+              ),
+            ),
+            child: Row(
               children: [
-                CircleAvatar(
-                  radius: 50,
-                  backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.2),
-                  backgroundImage: _authService.avatarUrl != null
-                      ? NetworkImage(_authService.avatarUrl!)
-                      : null,
-                  child: _authService.avatarUrl == null
-                      ? Text(
-                          _authService.displayName[0].toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 40,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primaryColor,
+                // Avatar
+                GestureDetector(
+                  onTap: _isEditing ? _pickImage : null,
+                  child: Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 36,
+                        backgroundColor: AppTheme.primaryColor.withValues(
+                          alpha: 0.15,
+                        ),
+                        backgroundImage: _authService.avatarUrl != null
+                            ? NetworkImage(_authService.avatarUrl!)
+                            : null,
+                        child: _authService.avatarUrl == null
+                            ? Text(
+                                _authService.displayName[0].toUpperCase(),
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primaryColor,
+                                ),
+                              )
+                            : null,
+                      ),
+                      if (_isEditing)
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: const BoxDecoration(
+                              color: AppTheme.primaryColor,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // Name, email, stats in one compact block
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_isEditing)
+                        TextField(
+                          controller: _nameController,
+                          decoration: InputDecoration(
+                            labelText: "Ім'я",
+                            filled: true,
+                            fillColor: AppTheme.darkBackground,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                           ),
                         )
-                      : null,
-                ),
-                if (_isEditing)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primaryColor,
-                        shape: BoxShape.circle,
+                      else
+                        Text(
+                          _authService.displayName,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _authService.userEmail ?? '',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF8E8E93),
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.camera_alt,
-                        color: Colors.white,
-                        size: 20,
+                      const SizedBox(height: 12),
+                      // Stats row inline
+                      ListenableBuilder(
+                        listenable: Listenable.merge([
+                          _historyService,
+                          _favoritesService,
+                        ]),
+                        builder: (context, _) => Row(
+                          children: [
+                            FutureBuilder<int>(
+                              future: _historyService.count,
+                              initialData: 0,
+                              builder: (context, snapshot) =>
+                                  _buildInlineStatItem(
+                                    snapshot.data?.toString() ?? '0',
+                                    'Переглянуто',
+                                  ),
+                            ),
+                            const SizedBox(width: 20),
+                            FutureBuilder<int>(
+                              future: _favoritesService.count,
+                              initialData: 0,
+                              builder: (context, snapshot) =>
+                                  _buildInlineStatItem(
+                                    snapshot.data?.toString() ?? '0',
+                                    'Обране',
+                                  ),
+                            ),
+                            const SizedBox(width: 20),
+                            _buildInlineStatItem(
+                              _formatDate(profile?['created_at']),
+                              'З нами з',
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
 
-          // Name
-          if (_isEditing)
-            TextField(
-              controller: _nameController,
-              textAlign: TextAlign.center,
-              decoration: InputDecoration(
-                labelText: "Ім'я",
-                filled: true,
-                fillColor: AppTheme.darkCard,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            )
-          else
-            Text(
-              _authService.displayName,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-          const SizedBox(height: 8),
-
-          // Email
-          Text(
-            _authService.userEmail ?? '',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.white.withValues(alpha: 0.7),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Bio
-          if (_isEditing)
+          // ── Bio ────────────────────────────────────────────────────────
+          if (_isEditing) ...[
+            const SizedBox(height: 16),
             TextField(
               controller: _bioController,
               maxLines: 3,
@@ -489,31 +615,34 @@ class _ProfilePageState extends State<ProfilePage> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-            )
-          else if (profile?['bio'] != null && profile!['bio'].isNotEmpty)
+            ),
+          ] else if (profile?['bio'] != null && profile!['bio'].isNotEmpty) ...[
+            const SizedBox(height: 16),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: AppTheme.darkCard,
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
               child: Text(
                 profile['bio'],
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
               ),
             ),
+          ],
 
-          // Save button when editing
+          // ── Save button ───────────────────────────────────────────────
           if (_isEditing) ...[
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _saveProfile,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryColor,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 child: _isLoading
                     ? const SizedBox(
@@ -527,116 +656,75 @@ class _ProfilePageState extends State<ProfilePage> {
                     : const Text('Зберегти'),
               ),
             ),
-          ],
-
-          const SizedBox(height: 32),
-
-          // Stats
-          ListenableBuilder(
-            listenable: Listenable.merge([_historyService, _favoritesService]),
-            builder: (context, _) => Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            const SizedBox(height: 12),
+            Row(
               children: [
-                FutureBuilder<int>(
-                  future: _historyService.count,
-                  initialData: 0,
-                  builder: (context, snapshot) => _buildStatItem(
-                    icon: Icons.history,
-                    label: 'Переглянуто',
-                    value: snapshot.data?.toString() ?? '0',
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _showChangePasswordDialog,
+                    icon: const Icon(Icons.lock_reset),
+                    label: const Text('Змінити пароль'),
                   ),
                 ),
-                FutureBuilder<int>(
-                  future: _favoritesService.count,
-                  initialData: 0,
-                  builder: (context, snapshot) => _buildStatItem(
-                    icon: Icons.favorite,
-                    label: 'Обране',
-                    value: snapshot.data?.toString() ?? '0',
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _deleteAccount,
+                    icon: const Icon(Icons.delete_forever, color: Colors.red),
+                    label: const Text(
+                      'Видалити акаунт',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.red),
+                    ),
                   ),
-                ),
-                _buildStatItem(
-                  icon: Icons.calendar_today,
-                  label: 'З нами з',
-                  value: _formatDate(profile?['created_at']),
                 ),
               ],
             ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Account Actions
-          if (_isEditing) ...[
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _showChangePasswordDialog,
-                icon: const Icon(Icons.lock_reset),
-                label: const Text('Змінити пароль'),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _deleteAccount,
-                icon: const Icon(Icons.delete_forever, color: Colors.red),
-                label: const Text(
-                  'Видалити акаунт',
-                  style: TextStyle(color: Colors.red),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.red),
-                ),
-              ),
-            ),
           ] else ...[
+            // ── Linked accounts ────────────────────────────────────
             const SizedBox(height: 24),
             _buildLinkedAccounts(),
-            const SizedBox(height: 32),
-            // Logout button (only shown when not editing to keep it clean)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _signOut,
-                icon: const Icon(Icons.logout, color: Colors.red),
-                label: const Text(
-                  'Вийти з акаунту',
-                  style: TextStyle(color: Colors.red),
+
+            // ── Sign out — fixed width, left-aligned ──────────────────
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: _signOut,
+              icon: const Icon(Icons.logout, color: Colors.red, size: 18),
+              label: const Text(
+                'Вийти з акаунту',
+                style: TextStyle(color: Colors.red),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.red),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
                 ),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.red),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
           ],
+
+          const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  Widget _buildStatItem({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
+  Widget _buildInlineStatItem(String value, String label) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: AppTheme.primaryColor),
-        const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
         ),
         Text(
           label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.white.withValues(alpha: 0.6),
-          ),
+          style: const TextStyle(fontSize: 11, color: Color(0xFF8E8E93)),
         ),
       ],
     );
@@ -658,14 +746,18 @@ class _ProfilePageState extends State<ProfilePage> {
           Icons.login,
           linked.contains('google'),
         ),
-        /*
         _buildProviderTile(
           'discord',
           'Discord',
           Icons.chat,
           linked.contains('discord'),
         ),
-        */
+        _buildProviderTile(
+          'telegram',
+          'Telegram',
+          Icons.send,
+          linked.contains('telegram'),
+        ),
       ],
     );
   }

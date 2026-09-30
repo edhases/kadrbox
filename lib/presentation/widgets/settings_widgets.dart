@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import '../../data/services/settings_service.dart';
 import '../../domain/entities/ui_settings.dart';
+import '../../presentation/theme/app_theme.dart';
 
 // =============================================================================
 // SETTINGS SECTION
@@ -38,18 +39,15 @@ class SettingsSection extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               children: [
-                Icon(
-                  icon,
-                  size: 20,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+                Icon(icon, size: 20, color: AppTheme.textMuted),
                 const SizedBox(width: 8),
                 Text(
                   title,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                  style: const TextStyle(
+                    color: AppTheme.textMuted,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    letterSpacing: 0.5,
                   ),
                 ),
               ],
@@ -222,7 +220,11 @@ class _SettingsSwitchState extends State<SettingsSwitch> {
             ),
           ),
           value: widget.value,
-          activeThumbColor: Theme.of(context).colorScheme.primary,
+          dense: true,
+          activeColor: Colors.white,
+          activeTrackColor: Theme.of(context).colorScheme.primary,
+          inactiveThumbColor: Colors.white60,
+          inactiveTrackColor: Colors.white12,
           onChanged: widget.onChanged,
         ),
       ),
@@ -329,7 +331,11 @@ class _ProviderTileState extends State<ProviderTile> {
             ),
           ),
           value: widget.isEnabled,
-          activeThumbColor: Theme.of(context).colorScheme.primary,
+          dense: true,
+          activeColor: Colors.white,
+          activeTrackColor: Theme.of(context).colorScheme.primary,
+          inactiveThumbColor: Colors.white60,
+          inactiveTrackColor: Colors.white12,
           onChanged: widget.onChanged,
         ),
       ),

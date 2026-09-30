@@ -55,7 +55,18 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
     } catch (e) {
-      setState(() => _error = _authService.error ?? e.toString());
+      final msg = _authService.error ?? e.toString();
+      final unverified =
+          msg.contains('не підтверджена') ||
+          msg.contains('not verified') ||
+          msg.contains('403');
+      if (unverified && mounted) {
+        context.go(
+          '/verify-email?email=${Uri.encodeQueryComponent(_emailController.text.trim())}',
+        );
+        return;
+      }
+      setState(() => _error = msg);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

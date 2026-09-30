@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/services/oxide_server_service.dart';
 import '../../domain/entities/entities.dart';
 import '../pages/home/home_page.dart';
 import '../pages/details/details_page.dart';
@@ -16,14 +19,35 @@ import '../pages/downloads/downloads_page.dart';
 import '../pages/stats/stats_page.dart';
 import '../pages/watch_party/watch_party_page.dart';
 import '../pages/auth/login_page.dart';
+import '../pages/auth/onboarding_page.dart';
 import '../pages/auth/register_page.dart';
+import '../pages/auth/verify_email_page.dart';
 import '../pages/auth/profile_page.dart';
 import '../widgets/player/mini_player_overlay.dart';
 
 /// Application router configuration
 class AppRouter {
+  static bool _isFirstLaunch() {
+    try {
+      // Already signed in — onboarding is irrelevant.
+      if (GetIt.instance<OxideServerService>().isAuthenticated) return false;
+      final prefs = GetIt.instance<SharedPreferences>();
+      return !OnboardingPage.isSeen(prefs);
+    } catch (_) {
+      return false;
+    }
+  }
+
   static final GoRouter router = GoRouter(
     initialLocation: '/',
+    redirect: (context, state) {
+      final location = state.uri.toString();
+      final onboarding =
+          location == '/onboarding' || location.startsWith('/onboarding?');
+      if (_isFirstLaunch() && !onboarding) return '/onboarding';
+      if (!_isFirstLaunch() && onboarding) return '/';
+      return null;
+    },
     routes: [
       ShellRoute(
         builder: (context, state, child) {
@@ -39,6 +63,11 @@ class AppRouter {
 
           // Auth routes
           GoRoute(
+            path: '/onboarding',
+            name: 'onboarding',
+            builder: (context, state) => const OnboardingPage(),
+          ),
+          GoRoute(
             path: '/login',
             name: 'login',
             builder: (context, state) => const LoginPage(),
@@ -47,6 +76,14 @@ class AppRouter {
             path: '/register',
             name: 'register',
             builder: (context, state) => const RegisterPage(),
+          ),
+          GoRoute(
+            path: '/verify-email',
+            name: 'verify-email',
+            builder: (context, state) {
+              final email = state.uri.queryParameters['email'] ?? '';
+              return VerifyEmailPage(email: email);
+            },
           ),
           GoRoute(
             path: '/profile',

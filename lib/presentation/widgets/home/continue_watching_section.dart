@@ -58,10 +58,11 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection> {
           ),
         ),
         SizedBox(
-          height: 140,
-          child: Scrollbar(
-            controller: _scrollController,
-            thumbVisibility: false, // Only show when scrolling
+          height: 200,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: ListView.separated(
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -87,7 +88,6 @@ class _ContinueWatchingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Calculate progress
     final progress = item.durationMs > 0
         ? (item.positionMs / item.durationMs).clamp(0.0, 1.0)
         : 0.0;
@@ -101,9 +101,6 @@ class _ContinueWatchingCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           onTap: () {
             final isLocal = item.providerId == 'local';
-            // For online content, good luck with lastStreamUrl validity.
-            // Ideally we should open DetailsPage if we can't play directly.
-            // But let's try playing.
             context.push(
               '/player',
               extra: {
@@ -122,12 +119,12 @@ class _ContinueWatchingCard extends StatelessWidget {
               },
             );
           },
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Poster / Thumbnail
-              SizedBox(
-                width: 93, // 2/3 aspect ratio approx for 140 height
-                height: 140,
+              // 16:9 thumbnail with progress bar flushed to bottom edge
+              AspectRatio(
+                aspectRatio: 16 / 9,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -136,93 +133,89 @@ class _ContinueWatchingCard extends StatelessWidget {
                         imageUrl: item.posterUrl!,
                         fit: BoxFit.cover,
                         errorWidget: (_, __, ___) => Container(
-                          color: Colors.grey[800],
-                          child: const Icon(Icons.movie, color: Colors.white54),
+                          color: Colors.grey[850],
+                          child: const Icon(
+                            Icons.movie_outlined,
+                            color: Colors.white24,
+                          ),
                         ),
                       )
                     else
                       Container(
-                        color: Colors.grey[800],
-                        child: const Icon(Icons.movie, color: Colors.white54),
+                        color: Colors.grey[850],
+                        child: const Icon(
+                          Icons.movie_outlined,
+                          color: Colors.white24,
+                        ),
                       ),
 
-                    // Play icon overlay
+                    // Subtle play icon
                     Center(
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
+                          color: Colors.black.withOpacity(0.30),
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
                         ),
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(8),
                         child: const Icon(
                           Icons.play_arrow,
                           color: Colors.white,
-                          size: 24,
+                          size: 20,
                         ),
+                      ),
+                    ),
+
+                    // Progress bar flush to bottom
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        backgroundColor: Colors.white.withOpacity(0.15),
+                        color: Theme.of(context).colorScheme.primary,
+                        minHeight: 3,
                       ),
                     ),
                   ],
                 ),
               ),
 
-              // Info
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+              // Text info below the thumbnail
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 13,
+                        color: Colors.white,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (item.season != null && item.episode != null)
                       Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        'S${item.season} E${item.episode}',
                         style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          color: Color(0xFF8E8E93),
+                          fontSize: 12,
                         ),
-                      ),
-                      if (item.season != null && item.episode != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'S${item.season} E${item.episode}',
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                      if (item.episodeTitle != null &&
-                          item.episodeTitle!.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          item.episodeTitle!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.grey[500],
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
-                      const Spacer(),
-                      // Progress bar
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          backgroundColor: Colors.grey[700],
-                          color: Theme.of(context).colorScheme.primary,
-                          minHeight: 3,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
+                      )
+                    else
                       Text(
                         _formatRemaining(item.durationMs - item.positionMs),
-                        style: TextStyle(color: Colors.grey[500], fontSize: 10),
+                        style: const TextStyle(
+                          color: Color(0xFF8E8E93),
+                          fontSize: 12,
+                        ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
             ],

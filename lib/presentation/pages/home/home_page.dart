@@ -628,11 +628,11 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildCategoriesSection() {
     final categories = [
-      (ContentType.movie, Icons.movie, Colors.blue),
-      (ContentType.series, Icons.tv, Colors.green),
-      (ContentType.cartoon, Icons.animation, Colors.orange),
-      (ContentType.anime, Icons.auto_awesome, Colors.pink),
-      (ContentType.dorama, Icons.filter_vintage, Colors.deepPurple),
+      (ContentType.movie, Icons.movie_outlined),
+      (ContentType.series, Icons.tv_outlined),
+      (ContentType.cartoon, Icons.animation_outlined),
+      (ContentType.anime, Icons.auto_awesome_outlined),
+      (ContentType.dorama, Icons.filter_vintage_outlined),
     ];
 
     return Column(
@@ -658,8 +658,10 @@ class _HomePageState extends State<HomePage> {
         ),
         SizedBox(
           height: 100,
-          child: Scrollbar(
-            controller: _categoriesController,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: ListView.builder(
               controller: _categoriesController,
               scrollDirection: Axis.horizontal,
@@ -667,13 +669,12 @@ class _HomePageState extends State<HomePage> {
               itemCount: categories.length + 1, // +1 for HDRezka
               itemBuilder: (context, index) {
                 if (index < categories.length) {
-                  final (type, icon, color) = categories[index];
+                  final (type, icon) = categories[index];
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: _HomeSquareTile(
                       label: type.pluralName,
                       icon: icon,
-                      color: color,
                       onTap: () => context.push('/category?type=${type.name}'),
                     ),
                   );
@@ -683,8 +684,7 @@ class _HomePageState extends State<HomePage> {
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: _HomeSquareTile(
                       label: 'HDREZKA',
-                      icon: Icons.play_circle_filled,
-                      color: Colors.orange,
+                      icon: Icons.play_circle_outline,
                       onTap: () => context.push('/provider/hdrezka'),
                     ),
                   );
@@ -721,8 +721,10 @@ class _HomePageState extends State<HomePage> {
         ),
         SizedBox(
           height: 56,
-          child: Scrollbar(
-            controller: _providersController,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: ListView.builder(
               controller: _providersController,
               scrollDirection: Axis.horizontal,
@@ -887,25 +889,24 @@ class _HomePageState extends State<HomePage> {
 class _HomeSquareTile extends StatelessWidget {
   final String label;
   final IconData icon;
-  final Color color;
   final VoidCallback onTap;
 
   const _HomeSquareTile({
     required this.label,
     required this.icon,
-    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
     return SizedBox(
       width: 100,
       child: Card(
-        color: color.withValues(alpha: 0.1),
+        color: Colors.white.withValues(alpha: 0.05),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: color.withValues(alpha: 0.2)),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
         ),
         child: InkWell(
           onTap: () {
@@ -916,13 +917,13 @@ class _HomeSquareTile extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 32, color: color),
+              Icon(icon, size: 28, color: accent),
               const SizedBox(height: 8),
               Text(
                 label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.bold,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
                   fontSize: 12,
                 ),
                 maxLines: 1,

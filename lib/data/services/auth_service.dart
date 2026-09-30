@@ -158,7 +158,9 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Link social provider to existing account
+  /// Link social provider to existing account via loopback OAuth flow.
+  /// Passes the current access token as link_token so the server attaches
+  /// the provider to this account instead of creating a new one.
   Future<void> linkSocialAccount(String provider) async {
     if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
     Logger.i('Attempting to link provider: $provider', tag: _tag);
@@ -169,8 +171,12 @@ class AuthService extends ChangeNotifier {
       if (provider == 'discord' ||
           provider == 'telegram' ||
           provider == 'google') {
-        await _server.signInWithOAuthLoopback(provider);
+        await _server.signInWithOAuthLoopback(
+          provider,
+          linkToken: _server.accessToken,
+        );
         await fetchLinkedProviders();
+        notifyListeners();
         Logger.i('Provider $provider linked successfully', tag: _tag);
       } else {
         throw Exception('Непідтримуваний провайдер: $provider');
@@ -184,12 +190,23 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Unlink social provider
+  /// Unlink social provider via Oxide Server (keeps at least one login method).
   Future<void> unlinkSocialAccount(String provider) async {
     if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
     Logger.i('Attempting to unlink provider: $provider', tag: _tag);
-    _linkedProviders.remove(provider);
-    notifyListeners();
+    _setLoading(true);
+    _error = null;
+    try {
+      await _server.unlinkProvider(provider);
+      await fetchLinkedProviders();
+      notifyListeners();
+    } catch (e) {
+      Logger.e('Unlinking failed', tag: _tag, error: e);
+      _error = _translateError(e.toString());
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
   }
 
   /// Fetch list of linked providers from Oxide Server
@@ -312,6 +329,14 @@ class AuthService extends ChangeNotifier {
     return false;
   }
 
+  /// Reload user profile from server (verification status, linked providers)
+  Future<void> refreshProfile() async {
+    if (!isAuthenticated) return;
+    await _server.fetchMe();
+    await fetchLinkedProviders();
+    notifyListeners();
+  }
+
   /// Update user avatar
   Future<void> updateAvatar(String filePath) async {
     if (!isAuthenticated || userId == null) {
@@ -425,6 +450,14 @@ class AuthService extends ChangeNotifier {
     }
     if (lowerMsg.contains('invalid email')) {
       return 'Невірний формат email';
+    }
+    if (lowerMsg.contains('cannot unlink') ||
+        lowerMsg.contains('last login method')) {
+      return 'Не можна відключити останній спосіб входу';
+    }
+    if (lowerMsg.contains('already linked') ||
+        lowerMsg.contains('already прив')) {
+      return 'Цей акаунт вже прив\'язано до іншого користувача';
     }
     if (lowerMsg.contains('rate limit') || lowerMsg.contains('too many')) {
       return 'Забагато спроб. Спробуйте пізніше';

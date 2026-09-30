@@ -26,6 +26,7 @@ import (
 	"github.com/edhases/oxide-server/internal/repository/postgres"
 	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
 	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/google/uuid"
 )
 
 type AuthHandler struct {
@@ -864,6 +865,13 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Google ідентифікує користувача за email: прив'язка можлива лише
+	// до акаунту з тією ж поштою, інакше це чужий акаунт.
+	if linkUserID, linking := h.linkTargetFromState(state); linking && user.ID != linkUserID {
+		redirectOAuthError(w, r, state, "Цей Google-акаунт належить іншому користувачу")
+		return
+	}
+
 	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1095,7 +1103,12 @@ func (h *AuthHandler) TelegramCallbackWeb(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	user, err := h.getOrCreateTelegramUser(r.Context(), req)
+	user, err := func() (*domain.User, error) {
+		if linkUserID, linking := h.linkTargetFromState(state); linking {
+			return h.linkTelegramToUser(r.Context(), linkUserID, req.ID)
+		}
+		return h.getOrCreateTelegramUser(r.Context(), req)
+	}()
 	if err != nil {
 		if isSafeRedirectURL(state) {
 			sep := "?"
@@ -1156,63 +1169,9 @@ type discordUserResponse struct {
 }
 
 func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI string) (*domain.User, error) {
-	if h.discordClientID == "" || h.discordClientSecret == "" {
-		return nil, errors.New("discord credentials not configured")
-	}
-
-	form := url.Values{}
-	form.Set("client_id", h.discordClientID)
-	form.Set("client_secret", h.discordClientSecret)
-	form.Set("grant_type", "authorization_code")
-	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
-
-	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))
+	discordUser, err := h.fetchDiscordProfile(ctx, code, redirectURI)
 	if err != nil {
-		return nil, fmt.Errorf("build token request: %w", err)
-	}
-	reqHTTP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(reqHTTP)
-	if err != nil {
-		return nil, fmt.Errorf("exchange token request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var tokenResp discordTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK || tokenResp.AccessToken == "" {
-		msg := tokenResp.ErrorDesc
-		if msg == "" {
-			msg = tokenResp.Error
-		}
-		if msg == "" {
-			msg = fmt.Sprintf("discord token error (status %d)", resp.StatusCode)
-		}
-		return nil, errors.New(msg)
-	}
-
-	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://discord.com/api/users/@me", nil)
-	if err != nil {
-		return nil, fmt.Errorf("build user request: %w", err)
-	}
-	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
-
-	userResp, err := client.Do(userReq)
-	if err != nil {
-		return nil, fmt.Errorf("fetch discord user: %w", err)
-	}
-	defer userResp.Body.Close()
-
-	var discordUser discordUserResponse
-	if err := json.NewDecoder(userResp.Body).Decode(&discordUser); err != nil {
-		return nil, fmt.Errorf("decode user response: %w", err)
-	}
-	if userResp.StatusCode != http.StatusOK || discordUser.ID == "" {
-		return nil, fmt.Errorf("failed to fetch discord user info (status %d)", userResp.StatusCode)
+		return nil, err
 	}
 
 	var avatarURL string
@@ -1275,6 +1234,70 @@ func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI 
 	return newUser, nil
 }
 
+// fetchDiscordProfile обмінює OAuth-код на профіль Discord
+// (без створення користувача — для флоу прив'язки до існуючого акаунту).
+func (h *AuthHandler) fetchDiscordProfile(ctx context.Context, code, redirectURI string) (*discordUserResponse, error) {
+	if h.discordClientID == "" || h.discordClientSecret == "" {
+		return nil, errors.New("discord credentials not configured")
+	}
+
+	form := url.Values{}
+	form.Set("client_id", h.discordClientID)
+	form.Set("client_secret", h.discordClientSecret)
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+
+	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("build token request: %w", err)
+	}
+	reqHTTP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(reqHTTP)
+	if err != nil {
+		return nil, fmt.Errorf("exchange token request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var tokenResp discordTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK || tokenResp.AccessToken == "" {
+		msg := tokenResp.ErrorDesc
+		if msg == "" {
+			msg = tokenResp.Error
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("discord token error (status %d)", resp.StatusCode)
+		}
+		return nil, errors.New(msg)
+	}
+
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://discord.com/api/users/@me", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build user request: %w", err)
+	}
+	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+
+	userResp, err := client.Do(userReq)
+	if err != nil {
+		return nil, fmt.Errorf("fetch discord user: %w", err)
+	}
+	defer userResp.Body.Close()
+
+	var discordUser discordUserResponse
+	if err := json.NewDecoder(userResp.Body).Decode(&discordUser); err != nil {
+		return nil, fmt.Errorf("decode user response: %w", err)
+	}
+	if userResp.StatusCode != http.StatusOK || discordUser.ID == "" {
+		return nil, fmt.Errorf("failed to fetch discord user info (status %d)", userResp.StatusCode)
+	}
+	return &discordUser, nil
+}
+
 // DiscordLogin — GET /api/v1/auth/discord/login та GET /auth/discord
 func (h *AuthHandler) DiscordLogin(w http.ResponseWriter, r *http.Request) {
 	if h.discordClientID == "" {
@@ -1325,7 +1348,16 @@ func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.processDiscordCode(r.Context(), code, h.discordRedirectURI)
+	user, err := func() (*domain.User, error) {
+		if linkUserID, linking := h.linkTargetFromState(state); linking {
+			profile, fetchErr := h.fetchDiscordProfile(r.Context(), code, h.discordRedirectURI)
+			if fetchErr != nil {
+				return nil, fetchErr
+			}
+			return h.linkDiscordToUser(r.Context(), linkUserID, profile.ID)
+		}
+		return h.processDiscordCode(r.Context(), code, h.discordRedirectURI)
+	}()
 	if err != nil {
 		if isSafeRedirectURL(state) {
 			sep := "?"
@@ -1387,6 +1419,177 @@ func (h *AuthHandler) DiscordAuthAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.respondWithTokens(w, r, user)
+}
+
+// ---- OAuth link/unlink --------------------------------------------------------
+
+// linkTargetFromState витягує link_token з OAuth state (URL loopback-редиректу
+// вигляду http://127.0.0.1:PORT/callback?link_token=JWT) і повертає ID
+// залогіненого користувача, до якого треба прив'язати провайдер.
+// Повертає false, якщо це звичайний вхід (без прив'язки).
+func (h *AuthHandler) linkTargetFromState(state string) (uuid.UUID, bool) {
+	u, err := url.Parse(state)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	token := u.Query().Get("link_token")
+	if token == "" {
+		return uuid.Nil, false
+	}
+	claims, err := auth.ValidateAccessToken(token, h.jwtSecret)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return claims.UserID, true
+}
+
+// redirectOAuthError повертає помилку в loopback-редирект або HTML-сторінкою.
+func redirectOAuthError(w http.ResponseWriter, r *http.Request, state, msg string) {
+	if isSafeRedirectURL(state) {
+		sep := "?"
+		if strings.Contains(state, "?") {
+			sep = "&"
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(msg)), http.StatusTemporaryRedirect)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка авторизації", msg, "", "", "")))
+}
+
+// linkTelegramToUser прив'язує Telegram ID до вказаного користувача.
+// Повертає помилку, якщо ID вже належить іншому користувачу.
+func (h *AuthHandler) linkTelegramToUser(ctx context.Context, linkUserID uuid.UUID, telegramID int64) (*domain.User, error) {
+	if owner, err := h.userRepo.GetUserByTelegramID(ctx, telegramID); err == nil {
+		if owner.ID == linkUserID {
+			return owner, nil
+		}
+		return nil, errors.New("цей Telegram-акаунт вже прив'язано до іншого користувача")
+	}
+	linkUser, err := h.userRepo.GetUserByID(ctx, linkUserID)
+	if err != nil {
+		return nil, errors.New("сесія для прив'язки недійсна, увійдіть заново")
+	}
+	if err := h.userRepo.LinkTelegram(ctx, linkUserID, telegramID); err != nil {
+		return nil, fmt.Errorf("не вдалося прив'язати Telegram: %w", err)
+	}
+	linkUser.TelegramID = &telegramID
+	return linkUser, nil
+}
+
+// linkDiscordToUser прив'язує Discord ID до вказаного користувача.
+func (h *AuthHandler) linkDiscordToUser(ctx context.Context, linkUserID uuid.UUID, discordID string) (*domain.User, error) {
+	if owner, err := h.userRepo.GetUserByDiscordID(ctx, discordID); err == nil {
+		if owner.ID == linkUserID {
+			return owner, nil
+		}
+		return nil, errors.New("цей Discord-акаунт вже прив'язано до іншого користувача")
+	}
+	linkUser, err := h.userRepo.GetUserByID(ctx, linkUserID)
+	if err != nil {
+		return nil, errors.New("сесія для прив'язки недійсна, увійдіть заново")
+	}
+	if err := h.userRepo.LinkDiscord(ctx, linkUserID, discordID); err != nil {
+		return nil, fmt.Errorf("не вдалося прив'язати Discord: %w", err)
+	}
+	linkUser.DiscordID = &discordID
+	return linkUser, nil
+}
+
+// UnlinkProvider — POST /api/v1/auth/unlink (авторизований)
+// Body: {"provider": "telegram" | "discord"}
+func (h *AuthHandler) UnlinkProvider(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.Provider != "telegram" && body.Provider != "discord") {
+		jsonError(w, "provider must be telegram or discord", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.userRepo.GetUserByID(r.Context(), userID)
+	if err != nil {
+		jsonError(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	// Не даємо відв'язати останній спосіб входу: OAuth-акаунти з
+	// плейсхолдер-поштою не мають пароля, тож втратять доступ назавжди.
+	if isPlaceholderEmail(user.Email) {
+		remaining := 0
+		if body.Provider != "telegram" && user.TelegramID != nil {
+			remaining++
+		}
+		if body.Provider != "discord" && user.DiscordID != nil {
+			remaining++
+		}
+		if remaining == 0 {
+			jsonError(w, "cannot unlink the last login method", http.StatusBadRequest)
+			return
+		}
+	}
+
+	switch body.Provider {
+	case "telegram":
+		if err := h.userRepo.UnlinkTelegram(r.Context(), userID); err != nil {
+			jsonError(w, "failed to unlink telegram", http.StatusInternalServerError)
+			return
+		}
+	case "discord":
+		if err := h.userRepo.UnlinkDiscord(r.Context(), userID); err != nil {
+			jsonError(w, "failed to unlink discord", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	updated, err := h.userRepo.GetUserByID(r.Context(), userID)
+	if err != nil {
+		jsonError(w, "failed to reload profile", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(updated)
+}
+
+// isPlaceholderEmail перевіряє службові пошти OAuth-користувачів без пароля.
+func isPlaceholderEmail(email string) bool {
+	return strings.HasSuffix(email, "@telegram.oxide") || strings.HasSuffix(email, "@discord.oxide")
+}
+
+// RequireVerifiedEmail — middleware для ендпоінтів цінності акаунту (синхронізація).
+// Без підтвердженої пошти акаунт вважається неактивним: повертає 403.
+// Якщо поштовий сервіс не налаштовано, всі акаунти авто-верифіковані — пропускає.
+func (h *AuthHandler) RequireVerifiedEmail() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !h.emailSvc.IsConfigured() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			userID, ok := middleware.GetUserIDFromContext(r.Context())
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			user, err := h.userRepo.GetUserByID(r.Context(), userID)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !user.IsVerified {
+				jsonError(w, "email not verified", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -1692,5 +1895,3 @@ func isSafeRedirectURL(rawURL string) bool {
 	}
 	return false
 }
-
-

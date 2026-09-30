@@ -107,15 +107,20 @@ func NewRouter(
 			r.Put("/auth/profile", authH.UpdateProfile)
 			r.Post("/auth/avatar", authH.UploadAvatar)
 			r.Post("/auth/change-password", authH.ChangePassword)
+			r.Post("/auth/unlink", authH.UnlinkProvider)
 			r.Delete("/auth/account", authH.DeleteAccount)
 
-			r.Route("/sync", func(r chi.Router) {
-				r.Get("/history", syncH.GetHistory)
-				r.Post("/history", syncH.SaveProgress)
-				r.Get("/continue-watching", syncH.GetContinueWatching)
-				r.Get("/favorites", syncH.GetFavorites)
-				r.Post("/favorites/toggle", syncH.ToggleFavorite)
-				r.Delete("/favorites", syncH.RemoveFavorite)
+			r.Group(func(r chi.Router) {
+				// Синхронізація — цінність акаунту: тільки для підтверджених пошт
+				r.Use(authH.RequireVerifiedEmail())
+				r.Route("/sync", func(r chi.Router) {
+					r.Get("/history", syncH.GetHistory)
+					r.Post("/history", syncH.SaveProgress)
+					r.Get("/continue-watching", syncH.GetContinueWatching)
+					r.Get("/favorites", syncH.GetFavorites)
+					r.Post("/favorites/toggle", syncH.ToggleFavorite)
+					r.Delete("/favorites", syncH.RemoveFavorite)
+				})
 			})
 		})
 	})
@@ -145,4 +150,3 @@ func fileServerNoListing(root string) http.Handler {
 		http.FileServer(fs).ServeHTTP(w, r)
 	})
 }
-

@@ -25,9 +25,6 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   String? _error;
-  bool _success = false;
-  bool _isResending = false;
-  String? _resendMessage;
 
   @override
   void dispose() {
@@ -58,8 +55,10 @@ class _RegisterPageState extends State<RegisterPage> {
           // Якщо email вже верифікований або авто-підтвердження активне
           context.go('/');
         } else {
-          // Показуємо екран підтвердження
-          setState(() => _success = true);
+          // Акаунт неактивний до підтвердження — ведемо на екран верифікації
+          context.go(
+            '/verify-email?email=${Uri.encodeQueryComponent(_emailController.text.trim())}',
+          );
         }
       }
     } catch (e) {
@@ -73,10 +72,6 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_success) {
-      return _buildSuccessScreen();
-    }
-
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
@@ -395,138 +390,6 @@ class _RegisterPageState extends State<RegisterPage> {
                 ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _resendVerificationEmail() async {
-    setState(() {
-      _isResending = true;
-      _resendMessage = null;
-    });
-
-    try {
-      await _authService.requestVerification(_emailController.text.trim());
-      if (mounted) {
-        setState(() {
-          _resendMessage = 'Новий лист успішно надіслано!';
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _resendMessage = 'Не вдалося надіслати: ${e.toString()}';
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isResending = false;
-        });
-      }
-    }
-  }
-
-  Widget _buildSuccessScreen() {
-    return Scaffold(
-      backgroundColor: AppTheme.backgroundColor,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.email_outlined,
-                  size: 64,
-                  color: Colors.green,
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Перевірте пошту!',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Ми надіслали лист для підтвердження на\n${_emailController.text}',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.white.withValues(alpha: 0.7),
-                ),
-                textAlign: TextAlign.center,
-              ),
-              if (_resendMessage != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _resendMessage!,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: _resendMessage!.contains('успішно')
-                        ? Colors.greenAccent
-                        : Colors.orangeAccent,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: OutlinedButton(
-                  onPressed: _isResending ? null : _resendVerificationEmail,
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppTheme.primaryColor),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: _isResending
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text(
-                          'Надіслати лист повторно',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: () => context.go('/login'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text('Перейти до входу'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => context.go('/'),
-                child: const Text('Продовжити на головну'),
-              ),
-            ],
           ),
         ),
       ),

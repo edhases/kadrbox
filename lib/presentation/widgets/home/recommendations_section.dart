@@ -62,8 +62,10 @@ class _RecommendationsSectionState extends State<RecommendationsSection> {
                 enabled:
                     _recommendationService.isLoading &&
                     _recommendationService.recommendations.isEmpty,
-                child: Scrollbar(
-                  controller: _scrollController,
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(scrollbars: false),
                   child: ListView.builder(
                     controller: _scrollController,
                     scrollDirection: Axis.horizontal,
@@ -99,7 +101,7 @@ class _RecommendationSkeletonCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 130,
+      width: 120,
       margin: const EdgeInsets.only(right: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,7 +146,7 @@ class _RecommendationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 130,
+      width: 120,
       margin: const EdgeInsets.only(right: 12),
       child: GestureDetector(
         onTap: () {
@@ -157,7 +159,7 @@ class _RecommendationCard extends StatelessWidget {
           children: [
             Expanded(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -165,25 +167,46 @@ class _RecommendationCard extends StatelessWidget {
                       CachedNetworkImage(
                         imageUrl: item.posterUrl!,
                         fit: BoxFit.cover,
+                        placeholder: (_, __) => Container(
+                          color: const Color(0xFF1E1E1E),
+                          child: const Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF333333),
+                              ),
+                            ),
+                          ),
+                        ),
                         errorWidget: (_, __, ___) => Container(
-                          color: Colors.grey[800],
-                          child: const Icon(Icons.movie, size: 40),
+                          color: const Color(0xFF1E1E1E),
+                          child: const Icon(
+                            Icons.movie_outlined,
+                            size: 32,
+                            color: Color(0xFF555555),
+                          ),
                         ),
                       )
                     else
                       Container(
-                        color: Colors.grey[800],
-                        child: const Icon(Icons.movie, size: 40),
+                        color: const Color(0xFF1E1E1E),
+                        child: const Icon(
+                          Icons.movie_outlined,
+                          size: 32,
+                          color: Color(0xFF555555),
+                        ),
                       ),
 
                     // Rating badge
                     if (item.rating != null && item.rating! > 0)
                       Positioned(
-                        top: 8,
-                        right: 8,
+                        top: 6,
+                        right: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
+                            horizontal: 5,
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
@@ -195,7 +218,7 @@ class _RecommendationCard extends StatelessWidget {
                             children: [
                               const Icon(
                                 Icons.star,
-                                size: 10,
+                                size: 9,
                                 color: Colors.amber,
                               ),
                               const SizedBox(width: 2),
@@ -203,7 +226,7 @@ class _RecommendationCard extends StatelessWidget {
                                 item.rating!.toStringAsFixed(1),
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 10,
+                                  fontSize: 9,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -215,23 +238,25 @@ class _RecommendationCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               item.title,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 13,
+                color: Colors.white,
+                height: 1.3,
+              ),
             ),
-            if (item.year != null)
+            if (item.year != null) ...[
+              const SizedBox(height: 2),
               Text(
                 item.year.toString(),
-                style: TextStyle(
-                  color: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.color?.withOpacity(0.7),
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12),
               ),
+            ],
           ],
         ),
       ),
