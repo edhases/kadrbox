@@ -21,7 +21,6 @@ class UpdateGuard extends StatefulWidget {
 class _UpdateGuardState extends State<UpdateGuard> {
   final _updateService = GetIt.instance<UpdateService>();
   final _settings = GetIt.instance<SettingsService>();
-  bool _isChecking = true;
   bool _mustUpdate = false;
 
   @override
@@ -33,27 +32,28 @@ class _UpdateGuardState extends State<UpdateGuard> {
   Future<void> _initializeApp() async {
     // 1. Request Android permissions if needed
     if (Platform.isAndroid) {
-      await [Permission.storage, Permission.notification].request();
+      try {
+        await [Permission.storage, Permission.notification].request();
+      } catch (_) {}
     }
 
-    // 2. Check for updates
+    // 2. Check for updates in background (non-blocking)
     if (_settings.state.updateNotify) {
-      final (result, _) = await _updateService.checkForUpdate();
-      if (mounted) {
-        setState(() {
-          _mustUpdate = result == UpdateCheckResult.forcedUpdate;
-          _isChecking = false;
-        });
-
-        if (result == UpdateCheckResult.updateAvailable) {
-          _showOptionalUpdateDialog();
+      try {
+        final (result, _) = await _updateService
+            .checkForUpdate()
+            .timeout(const Duration(seconds: 5));
+        if (mounted) {
+          if (result == UpdateCheckResult.forcedUpdate) {
+            setState(() {
+              _mustUpdate = true;
+            });
+          } else if (result == UpdateCheckResult.updateAvailable) {
+            _showOptionalUpdateDialog();
+          }
         }
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          _isChecking = false;
-        });
+      } catch (_) {
+        // Network timeout or error - app continues to function normally
       }
     }
   }
@@ -87,25 +87,6 @@ class _UpdateGuardState extends State<UpdateGuard> {
   Widget build(BuildContext context) {
     if (_mustUpdate) {
       return _buildForcedUpdateScreen();
-    }
-
-    if (_isChecking) {
-      return Scaffold(
-        backgroundColor: AppTheme.backgroundColor,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(
-                AppStrings.of(context).loading,
-                style: const TextStyle(color: Colors.white70),
-              ),
-            ],
-          ),
-        ),
-      );
     }
 
     return widget.child;

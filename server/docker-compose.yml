@@ -19,6 +19,8 @@ services:
       - SMTP_FROM=${SMTP_FROM:-Oxide Film <noreply@oxideteam.pp.ua>}
       - APP_URL=${APP_URL:-https://film.oxideteam.pp.ua}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-https://film.oxideteam.pp.ua/api/v1/auth/google/callback}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-oxidefilmbot}
       - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}

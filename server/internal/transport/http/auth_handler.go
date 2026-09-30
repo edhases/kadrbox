@@ -34,6 +34,8 @@ type AuthHandler struct {
 	emailSvc            *email.Service
 	jwtSecret           string
 	googleClientID      string
+	googleClientSecret  string
+	googleRedirectURI   string
 	telegramBotToken    string
 	telegramBotUsername string
 	discordClientID     string
@@ -56,6 +58,15 @@ func NewAuthHandler(
 		jwtSecret:      jwtSecret,
 		googleClientID: googleClientID,
 	}
+}
+
+// SetGoogleOAuth конфігурує параметри OAuth2 для Google
+func (h *AuthHandler) SetGoogleOAuth(clientID, clientSecret, redirectURI string) {
+	if clientID != "" {
+		h.googleClientID = clientID
+	}
+	h.googleClientSecret = clientSecret
+	h.googleRedirectURI = redirectURI
 }
 
 // SetOAuth конфігурує параметри сторонньої автентифікації (Telegram, Discord)
@@ -657,6 +668,223 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.respondWithTokens(w, r, user)
+}
+
+// GoogleLogin — GET /api/v1/auth/google/login та GET /auth/google
+func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	if h.googleClientID == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Google недоступний", "GOOGLE_CLIENT_ID не налаштований на сервері", "", "", "")))
+		return
+	}
+
+	redirectURI := h.googleRedirectURI
+	if redirectURI == "" {
+		redirectURI = fmt.Sprintf("%s/api/v1/auth/google/callback", h.appURL)
+	}
+
+	params := url.Values{}
+	params.Set("client_id", h.googleClientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("response_type", "code")
+	params.Set("scope", "openid email profile")
+	params.Set("access_type", "offline")
+	params.Set("prompt", "select_account")
+
+	if state := r.URL.Query().Get("state"); state != "" {
+		params.Set("state", state)
+	} else if redirect := r.URL.Query().Get("redirect_to"); redirect != "" {
+		params.Set("state", redirect)
+	}
+
+	authURL := "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode()
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+type googleTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
+	Error        string `json:"error"`
+	ErrorDesc    string `json:"error_description"`
+}
+
+type googleUserInfoResponse struct {
+	Sub           string `json:"sub"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	Picture       string `json:"picture"`
+}
+
+func (h *AuthHandler) processGoogleCode(ctx context.Context, code, redirectURI string) (*domain.User, error) {
+	if h.googleClientID == "" {
+		return nil, errors.New("GOOGLE_CLIENT_ID not configured")
+	}
+
+	form := url.Values{}
+	form.Set("client_id", h.googleClientID)
+	if h.googleClientSecret != "" {
+		form.Set("client_secret", h.googleClientSecret)
+	}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+
+	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://oauth2.googleapis.com/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("build token request: %w", err)
+	}
+	reqHTTP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(reqHTTP)
+	if err != nil {
+		return nil, fmt.Errorf("exchange token request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var tokenResp googleTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK || tokenResp.AccessToken == "" {
+		msg := tokenResp.ErrorDesc
+		if msg == "" {
+			msg = tokenResp.Error
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("google token error (status %d)", resp.StatusCode)
+		}
+		return nil, errors.New(msg)
+	}
+
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.googleapis.com/oauth2/v3/userinfo", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build user info request: %w", err)
+	}
+	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+
+	userResp, err := client.Do(userReq)
+	if err != nil {
+		return nil, fmt.Errorf("fetch google user: %w", err)
+	}
+	defer userResp.Body.Close()
+
+	var gUser googleUserInfoResponse
+	if err := json.NewDecoder(userResp.Body).Decode(&gUser); err != nil {
+		return nil, fmt.Errorf("decode user response: %w", err)
+	}
+	if userResp.StatusCode != http.StatusOK || gUser.Email == "" {
+		return nil, fmt.Errorf("failed to fetch google user info (status %d)", userResp.StatusCode)
+	}
+
+	user, err := h.userRepo.GetUserByEmail(ctx, gUser.Email)
+	if err == nil {
+		if !user.IsVerified {
+			_ = h.userRepo.MarkEmailVerified(ctx, user.ID)
+			user.IsVerified = true
+		}
+		if user.AvatarURL == "" && gUser.Picture != "" {
+			if updated, err := h.userRepo.UpdateProfile(ctx, user.ID, "", "", gUser.Picture); err == nil {
+				user = updated
+			}
+		}
+		return user, nil
+	}
+
+	username := gUser.Name
+	if username == "" {
+		username = strings.Split(gUser.Email, "@")[0]
+	}
+	if len([]rune(username)) > 100 {
+		username = string([]rune(username)[:100])
+	}
+
+	randomPass, _ := generateToken()
+	hash, err := auth.HashPassword(randomPass)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	newUser, err := h.userRepo.CreateOAuthUser(ctx, gUser.Email, hash, username, gUser.Picture, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create google user: %w", err)
+	}
+	return newUser, nil
+}
+
+// GoogleCallback — GET /api/v1/auth/google/callback
+func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if code == "" {
+		errDesc := r.URL.Query().Get("error_description")
+		if errDesc == "" {
+			errDesc = r.URL.Query().Get("error")
+		}
+		if errDesc == "" {
+			errDesc = "Авторизацію через Google було скасовано."
+		}
+		if isSafeRedirectURL(state) {
+			sep := "?"
+			if strings.Contains(state, "?") {
+				sep = "&"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(errDesc)), http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка Google", errDesc, "", "", "")))
+		return
+	}
+
+	redirectURI := h.googleRedirectURI
+	if redirectURI == "" {
+		redirectURI = fmt.Sprintf("%s/api/v1/auth/google/callback", h.appURL)
+	}
+
+	user, err := h.processGoogleCode(r.Context(), code, redirectURI)
+	if err != nil {
+		if isSafeRedirectURL(state) {
+			sep := "?"
+			if strings.Contains(state, "?") {
+				sep = "&"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(err.Error())), http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка авторизації", err.Error(), "", "", "")))
+		return
+	}
+
+	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка токена", "Не вдалося згенерувати токен сесії", "", "", "")))
+		return
+	}
+
+	refreshToken := auth.GenerateRefreshToken()
+	_ = h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour)
+
+	if isSafeRedirectURL(state) {
+		sep := "?"
+		if strings.Contains(state, "?") {
+			sep = "&"
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s%saccess_token=%s&refresh_token=%s", state, sep, accessToken, refreshToken), http.StatusTemporaryRedirect)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(renderOAuthStatusHTML(true, "Вхід через Google успішний!", "Повертаємося у додаток Oxide Film...", "google", accessToken, refreshToken)))
 }
 
 // ---- Telegram Auth ----------------------------------------------------------
@@ -1382,6 +1610,8 @@ func renderOAuthStatusHTML(success bool, title, message, provider, accessToken, 
 		accentColor = "#5865F2"
 	} else if provider == "telegram" {
 		accentColor = "#229ED9"
+	} else if provider == "google" {
+		accentColor = "#EA4335"
 	}
 
 	deepLink := fmt.Sprintf("oxide://auth/%s?access_token=%s&refresh_token=%s", provider, accessToken, refreshToken)

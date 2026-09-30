@@ -18,11 +18,6 @@ class AppConfig {
     return '$scheme://${uri.host}$port/api/v1/ws/watch-party';
   }
 
-  // PocketBase legacy fallback URL
-  static const String backendUrl =
-      'https://oxide.skystreamua.space'; // Production server
-  static String get adminUrl => '$backendUrl/_/';
-
   // TMDB API (user should set their own key)
   static const String tmdbBaseUrl = 'https://api.themoviedb.org/3';
   static const String tmdbImageBaseUrl = 'https://image.tmdb.org/t/p';

@@ -2,9 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:oxide_film/data/services/services.dart';
 import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/data/services/pocketbase_service.dart'; // Added import
-// ignore: depend_on_referenced_packages
-// For list equality if needed
+import 'package:oxide_film/data/services/oxide_server_service.dart';
 
 // Manual Mocks
 class MockWatchPartyBackend implements WatchPartyBackend {
@@ -56,26 +54,26 @@ class MockSettingsService extends Fake implements SettingsService {
   }
 }
 
-class MockPocketBaseService extends Fake implements PocketBaseService {}
+class MockOxideServerService extends Fake implements OxideServerService {}
 
 void main() {
   late WatchPartyService service;
   late MockWatchPartyBackend mockBackend;
   late MockSettingsService mockSettings;
-  late MockPocketBaseService mockPocketBase;
+  late MockOxideServerService mockServer;
 
   setUp(() {
     GetIt.I.reset();
     mockSettings = MockSettingsService();
-    mockPocketBase = MockPocketBaseService();
+    mockServer = MockOxideServerService();
     GetIt.I.registerSingleton<SettingsService>(mockSettings);
-    GetIt.I.registerSingleton<PocketBaseService>(mockPocketBase);
+    GetIt.I.registerSingleton<OxideServerService>(mockServer);
 
     mockBackend = MockWatchPartyBackend();
 
     // Inject factory to return our mock backend
     service = WatchPartyService(
-      pocketBase: mockPocketBase,
+      server: mockServer,
       settings: mockSettings,
       backendFactory: (_) => mockBackend,
     );

@@ -62,6 +62,7 @@ func NewRouter(
 	r.Get("/reset-password", authH.ResetPasswordWeb)
 	r.Get("/auth/telegram", authH.TelegramLoginWeb)
 	r.Get("/auth/discord", authH.DiscordLogin)
+	r.Get("/auth/google", authH.GoogleLogin)
 
 	// WebSocket Watch Party
 	r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
@@ -81,6 +82,8 @@ func NewRouter(
 			r.Post("/forgot-password", authH.ForgotPassword)
 			r.Post("/reset-password", authH.ResetPassword)
 			r.Post("/google", authH.GoogleAuth)
+			r.Get("/google/login", authH.GoogleLogin)
+			r.Get("/google/callback", authH.GoogleCallback)
 			r.Post("/telegram", authH.TelegramAuth)
 			r.Get("/telegram/login", authH.TelegramLoginWeb)
 			r.Get("/telegram/callback", authH.TelegramCallbackWeb)

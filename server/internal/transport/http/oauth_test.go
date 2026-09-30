@@ -193,3 +193,52 @@ func TestDiscordAuthAPIErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestGoogleOAuth(t *testing.T) {
+	t.Run("error when client_id is not configured", func(t *testing.T) {
+		h := transporthttp.NewAuthHandler(nil, nil, nil, "jwtsecret", "")
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/login", nil)
+		rr := httptest.NewRecorder()
+		h.GoogleLogin(rr, req)
+
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected 503, got %d", rr.Code)
+		}
+	})
+
+	t.Run("redirects to google auth when configured", func(t *testing.T) {
+		h := transporthttp.NewAuthHandler(nil, nil, nil, "jwtsecret", "google-client-id")
+		h.SetGoogleOAuth("google-client-id", "google-secret", "https://film.oxideteam.pp.ua/api/v1/auth/google/callback")
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/login?redirect_to=http://127.0.0.1:9999/callback", nil)
+		rr := httptest.NewRecorder()
+		h.GoogleLogin(rr, req)
+
+		if rr.Code != http.StatusTemporaryRedirect {
+			t.Errorf("expected 307, got %d", rr.Code)
+		}
+
+		loc := rr.Header().Get("Location")
+		if !strings.HasPrefix(loc, "https://accounts.google.com/o/oauth2/v2/auth") {
+			t.Errorf("expected redirect to accounts.google.com, got: %s", loc)
+		}
+		if !strings.Contains(loc, "client_id=google-client-id") {
+			t.Errorf("client_id missing from redirect URL: %s", loc)
+		}
+	})
+
+	t.Run("callback handles missing code", func(t *testing.T) {
+		h := transporthttp.NewAuthHandler(nil, nil, nil, "jwtsecret", "google-client-id")
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/callback", nil)
+		rr := httptest.NewRecorder()
+		h.GoogleCallback(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 when code is missing, got %d", rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), "Помилка Google") {
+			t.Errorf("expected error page in response, got: %s", rr.Body.String())
+		}
+	})
+}
+

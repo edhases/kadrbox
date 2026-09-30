@@ -94,6 +94,7 @@ func main() {
 	}
 
 	authHandler := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, cfg.JWTSecret, cfg.GoogleClientID)
+	authHandler.SetGoogleOAuth(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURI)
 	authHandler.SetOAuth(
 		cfg.TelegramBotToken,
 		cfg.TelegramBotUsername,
@@ -102,6 +103,9 @@ func main() {
 		cfg.DiscordRedirectURI,
 		cfg.AppURL,
 	)
+	if cfg.GoogleClientID != "" {
+		log.Println("[OAuth] Google auth configured ✓")
+	}
 	if cfg.TelegramBotToken != "" {
 		log.Println("[OAuth] Telegram auth configured ✓ (bot: @" + cfg.TelegramBotUsername + ")")
 	}

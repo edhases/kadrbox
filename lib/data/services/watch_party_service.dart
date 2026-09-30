@@ -3,16 +3,14 @@ import 'dart:convert';
 import 'dart:io' show WebSocket;
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:pocketbase/pocketbase.dart' hide SettingsService;
 import 'package:peerdart/peerdart.dart';
 import 'package:get_it/get_it.dart';
 import 'oxide_server_service.dart';
-import 'pocketbase_service.dart';
 import 'settings_service.dart';
 import '../../core/utils/logger.dart';
 
 /// Watch party connection backend type
-enum WatchPartyBackendType { pocketbase, peerdart, none }
+enum WatchPartyBackendType { server, peerdart, none }
 
 /// Room state for watch party
 enum WatchPartyState { idle, hosting, joining, connected, error }
@@ -140,207 +138,7 @@ abstract class WatchPartyBackend {
   void sendMessage(String targetId, WatchPartyMessage message);
 }
 
-/// PocketBase Backend Implementation
-class _PocketBaseBackend implements WatchPartyBackend {
-  final PocketBaseService _pocketBase;
-  UnsubscribeFunc? _messageSub;
-  UnsubscribeFunc? _roomSub;
-  String? _roomId;
-  String? _roomCode;
-  String? _myId;
-  final String _tag = 'WatchParty_PocketBase';
 
-  _PocketBaseBackend(this._pocketBase);
-
-  @override
-  Future<void> connect({
-    required String roomCode,
-    required bool isHost,
-    required String myId,
-    required String myName,
-    required Function(WatchPartyMessage) onMessage,
-    void Function()? onDisconnected,
-  }) async {
-    try {
-      _roomCode = roomCode;
-      _myId = myId;
-
-      if (isHost) {
-        // Create room
-        Logger.d('Creating room: $roomCode', tag: _tag);
-        final room = await _pocketBase.pb
-            .collection('watch_party_rooms')
-            .create(
-              body: {
-                'room_code': roomCode,
-                'host_id': myId,
-                'host_name': myName,
-                'participants': [
-                  {
-                    'id': myId,
-                    'name': myName,
-                    'joinedAt': DateTime.now().toIso8601String(),
-                  },
-                ],
-                'current_position': 0,
-                'is_playing': false,
-                'playback_speed': 1.0,
-              },
-            );
-        _roomId = room.id;
-        Logger.i('✅ Room created: $_roomId', tag: _tag);
-      } else {
-        // Find and join room
-        Logger.d('Joining room: $roomCode', tag: _tag);
-        final rooms = await _pocketBase.pb
-            .collection('watch_party_rooms')
-            .getList(filter: 'room_code = "$roomCode"');
-
-        if (rooms.items.isEmpty) {
-          throw Exception('Room not found: $roomCode');
-        }
-
-        _roomId = rooms.items.first.id;
-        final currentParticipants =
-            rooms.items.first.data['participants'] as List? ?? [];
-
-        // Add ourselves to participants
-        final updatedParticipants = [
-          ...currentParticipants,
-          {
-            'id': myId,
-            'name': myName,
-            'joinedAt': DateTime.now().toIso8601String(),
-          },
-        ];
-
-        await _pocketBase.pb
-            .collection('watch_party_rooms')
-            .update(_roomId!, body: {'participants': updatedParticipants});
-
-        Logger.i('✅ Joined room: $_roomId', tag: _tag);
-
-        // Notify others that we joined
-        onMessage(
-          WatchPartyMessage(
-            type: WatchPartyMessageType.userJoined,
-            senderId: myId,
-            senderName: myName,
-          ),
-        );
-      }
-
-      // Subscribe to messages
-      _messageSub = await _pocketBase.pb
-          .collection('watch_party_messages')
-          .subscribe('*', (e) {
-            if (e.action == 'create' && e.record != null) {
-              final record = e.record!;
-              final senderId = record.data['sender_id'] as String?;
-
-              // Ignore our own messages
-              if (senderId == myId) return;
-
-              try {
-                final message = WatchPartyMessage(
-                  type: WatchPartyMessageType.values.firstWhere(
-                    (t) => t.name == record.data['action'],
-                    orElse: () => WatchPartyMessageType.unknown,
-                  ),
-                  senderId: senderId ?? '',
-                  senderName: record.data['sender_name'] as String?,
-                  payload: record.data['payload'],
-                  timestamp: DateTime.parse(
-                    record.get<String>('created'),
-                  ).toUtc(),
-                );
-
-                Logger.d('Received message: ${message.type.name}', tag: _tag);
-                onMessage(message);
-              } catch (e) {
-                Logger.w('Failed to parse message: $e', tag: _tag);
-              }
-            }
-          }, filter: 'room_code = "$roomCode"');
-
-      Logger.i('✅ Subscribed to messages', tag: _tag);
-    } catch (e) {
-      Logger.e('PocketBase connection failed', tag: _tag, error: e);
-      rethrow;
-    }
-  }
-
-  @override
-  Future<void> disconnect() async {
-    Logger.d('Disconnecting...', tag: _tag);
-
-    // Unsubscribe from realtime
-    _messageSub?.call();
-    _roomSub?.call();
-
-    // Remove from participants
-    if (_roomId != null && _myId != null) {
-      try {
-        final room = await _pocketBase.pb
-            .collection('watch_party_rooms')
-            .getOne(_roomId!);
-        final participants = (room.data['participants'] as List? ?? [])
-            .where((p) => p['id'] != _myId)
-            .toList();
-
-        if (participants.isEmpty) {
-          // Delete room if empty
-          await _pocketBase.pb.collection('watch_party_rooms').delete(_roomId!);
-          Logger.d('Room deleted (no participants)', tag: _tag);
-        } else {
-          await _pocketBase.pb
-              .collection('watch_party_rooms')
-              .update(_roomId!, body: {'participants': participants});
-          Logger.d('Removed from participants', tag: _tag);
-        }
-      } catch (e) {
-        Logger.w('Failed to cleanup room: $e', tag: _tag);
-      }
-    }
-
-    _roomId = null;
-    _roomCode = null;
-    _myId = null;
-  }
-
-  @override
-  void sendBroadcast(WatchPartyMessage message) {
-    if (_roomCode == null) {
-      Logger.w('Cannot send broadcast: not connected', tag: _tag);
-      return;
-    }
-
-    _pocketBase.pb
-        .collection('watch_party_messages')
-        .create(
-          body: {
-            'room_code': _roomCode,
-            'sender_id': message.senderId,
-            'sender_name': message.senderName,
-            'action': message.type.name,
-            'payload': message.payload,
-          },
-        )
-        .then(
-          (_) {},
-          onError: (e) {
-            Logger.w('Failed to send broadcast: $e', tag: _tag);
-          },
-        );
-  }
-
-  @override
-  void sendMessage(String targetId, WatchPartyMessage message) {
-    // PocketBase doesn't support direct messaging
-    // We broadcast everything and clients filter
-    sendBroadcast(message);
-  }
-}
 
 /// Oxide Go Server WebSocket Backend Implementation
 class _OxideServerBackend implements WatchPartyBackend {
@@ -663,17 +461,14 @@ class WatchPartyService extends ChangeNotifier {
   bool get isSynced => _correctionMode == SyncCorrectionMode.none;
 
   // Dependency Injection for testing & backend selection
-  final OxideServerService? _server;
-  final PocketBaseService _pocketBase;
+  final OxideServerService _server;
   final WatchPartyBackend Function(WatchPartyBackendType)? _backendFactory;
 
   WatchPartyService({
-    OxideServerService? server,
-    required PocketBaseService pocketBase,
+    required OxideServerService server,
     required SettingsService settings,
     WatchPartyBackend Function(WatchPartyBackendType)? backendFactory,
   }) : _server = server,
-       _pocketBase = pocketBase,
        _backendFactory = backendFactory {
     _loadName(settings);
   }
@@ -719,13 +514,13 @@ class WatchPartyService extends ChangeNotifier {
     _currentMediaTitle = mediaTitle;
     _isHost = true;
 
-    // 1. Try Supabase
+    // 1. Try Oxide Server WebSocket
     try {
-      Logger.i('Hosting with Supabase: $roomCode', tag: _tag);
-      await _initBackend(WatchPartyBackendType.pocketbase, roomCode);
+      Logger.i('Hosting with Oxide Server: $roomCode', tag: _tag);
+      await _initBackend(WatchPartyBackendType.server, roomCode);
     } catch (e) {
       Logger.w(
-        'Supabase hosting failed ($e), falling back to PeerDart',
+        'Oxide Server hosting failed ($e), falling back to PeerDart',
         tag: _tag,
       );
 
@@ -796,13 +591,13 @@ class WatchPartyService extends ChangeNotifier {
     _isHost = false;
     _currentRoomCode = roomCode.toUpperCase();
 
-    // 1. Try Supabase
+    // 1. Try Oxide Server WebSocket
     try {
-      Logger.i('Joining with Supabase: $_currentRoomCode', tag: _tag);
-      await _initBackend(WatchPartyBackendType.pocketbase, _currentRoomCode!);
+      Logger.i('Joining with Oxide Server: $_currentRoomCode', tag: _tag);
+      await _initBackend(WatchPartyBackendType.server, _currentRoomCode!);
     } catch (e) {
       Logger.w(
-        'Supabase join failed ($e), falling back to PeerDart',
+        'Oxide Server join failed ($e), falling back to PeerDart',
         tag: _tag,
       );
 
@@ -860,12 +655,8 @@ class WatchPartyService extends ChangeNotifier {
 
     if (_backendFactory != null) {
       _backend = _backendFactory(type);
-    } else if (type == WatchPartyBackendType.pocketbase) {
-      if (_server != null) {
-        _backend = _OxideServerBackend(_server);
-      } else {
-        _backend = _PocketBaseBackend(_pocketBase);
-      }
+    } else if (type == WatchPartyBackendType.server) {
+      _backend = _OxideServerBackend(_server);
     } else {
       _backend = _PeerDartBackend();
     }

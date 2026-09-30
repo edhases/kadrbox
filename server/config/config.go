@@ -20,6 +20,8 @@ type Config struct {
 	BaseProxyURL        string
 	AppURL              string
 	GoogleClientID      string
+	GoogleClientSecret  string
+	GoogleRedirectURI   string
 	TelegramBotToken    string
 	TelegramBotUsername string
 	DiscordClientID     string
@@ -55,6 +57,8 @@ func Load() *Config {
 		BaseProxyURL:        getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
 		AppURL:              getEnv("APP_URL", "https://film.oxideteam.pp.ua"),
 		GoogleClientID:      getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:  getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURI:   getEnv("GOOGLE_REDIRECT_URI", "https://film.oxideteam.pp.ua/api/v1/auth/google/callback"),
 		TelegramBotToken:    getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramBotUsername: getEnv("TELEGRAM_BOT_USERNAME", "oxidefilmbot"),
 		DiscordClientID:     getEnv("DISCORD_CLIENT_ID", ""),

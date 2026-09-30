@@ -402,12 +402,12 @@ class _WatchPartyPageState extends State<WatchPartyPage> {
     final statusBadge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: _service.backendType == WatchPartyBackendType.pocketbase
+        color: _service.backendType == WatchPartyBackendType.server
             ? Colors.blue.withValues(alpha: 0.1)
             : Colors.green.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: _service.backendType == WatchPartyBackendType.pocketbase
+          color: _service.backendType == WatchPartyBackendType.server
               ? Colors.blue.withValues(alpha: 0.3)
               : Colors.green.withValues(alpha: 0.3),
         ),
@@ -416,21 +416,21 @@ class _WatchPartyPageState extends State<WatchPartyPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            _service.backendType == WatchPartyBackendType.pocketbase
+            _service.backendType == WatchPartyBackendType.server
                 ? Icons.cloud
                 : Icons.hub,
             size: 14,
-            color: _service.backendType == WatchPartyBackendType.pocketbase
+            color: _service.backendType == WatchPartyBackendType.server
                 ? Colors.blue
                 : Colors.green,
           ),
           const SizedBox(width: 4),
           Text(
-            _service.backendType == WatchPartyBackendType.pocketbase
+            _service.backendType == WatchPartyBackendType.server
                 ? 'Cloud'
                 : 'P2P',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: _service.backendType == WatchPartyBackendType.pocketbase
+              color: _service.backendType == WatchPartyBackendType.server
                   ? Colors.blue
                   : Colors.green,
               fontWeight: FontWeight.bold,

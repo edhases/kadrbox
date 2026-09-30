@@ -22,7 +22,7 @@ class MockWatchPartyService extends ChangeNotifier
   List<ChatMessage> chatMessages = [];
 
   @override
-  WatchPartyBackendType backendType = WatchPartyBackendType.pocketbase;
+  WatchPartyBackendType backendType = WatchPartyBackendType.server;
 
   @override
   WatchPartyRoom? room;

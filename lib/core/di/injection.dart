@@ -22,7 +22,6 @@ import '../../data/services/video_player_service.dart';
 import '../../data/services/watch_party_service.dart';
 import '../../data/services/oxide_server_service.dart';
 import '../../data/services/auth_service.dart';
-import '../../data/services/pocketbase_service.dart';
 import '../../data/services/search_service.dart';
 import '../../data/services/url_resolver_service.dart';
 import '../../data/services/recommendation_service.dart';
@@ -63,9 +62,6 @@ Future<void> configureDependencies() async {
   final serverService = OxideServerService(prefs, apiClient);
   getIt.registerSingleton<OxideServerService>(serverService);
 
-  // PocketBase backend service (legacy fallback)
-  getIt.registerSingleton<PocketBaseService>(PocketBaseService(prefs));
-
   // Database (must be early)
   final database = AppDatabase();
   getIt.registerSingleton<AppDatabase>(database);
@@ -75,12 +71,9 @@ Future<void> configureDependencies() async {
     () => UrlResolverService(getIt<SharedPreferences>()),
   );
 
-  // Auth service (supports both Oxide Server and PocketBase fallback)
+  // Auth service (Oxide Server)
   getIt.registerLazySingleton<AuthService>(
-    () => AuthService(
-      getIt<OxideServerService>(),
-      getIt<PocketBaseService>(),
-    ),
+    () => AuthService(getIt<OxideServerService>()),
   );
 
   // Services
@@ -92,7 +85,6 @@ Future<void> configureDependencies() async {
     () => FavoritesService(
       database: database,
       server: getIt<OxideServerService>(),
-      pocketBase: getIt<PocketBaseService>(),
       authService: getIt<AuthService>(),
     ),
   );
@@ -100,7 +92,6 @@ Future<void> configureDependencies() async {
     () => HistoryService(
       database: database,
       server: getIt<OxideServerService>(),
-      pocketBase: getIt<PocketBaseService>(),
       authService: getIt<AuthService>(),
     ),
   );
@@ -114,7 +105,6 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<WatchPartyService>(
     () => WatchPartyService(
       server: getIt<OxideServerService>(),
-      pocketBase: getIt<PocketBaseService>(),
       settings: getIt<SettingsService>(),
     ),
   );
