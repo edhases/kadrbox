@@ -40,9 +40,9 @@ class _UpdateGuardState extends State<UpdateGuard> {
     // 2. Check for updates in background (non-blocking)
     if (_settings.state.updateNotify) {
       try {
-        final (result, _) = await _updateService
-            .checkForUpdate()
-            .timeout(const Duration(seconds: 5));
+        final (result, _) = await _updateService.checkForUpdate().timeout(
+          const Duration(seconds: 5),
+        );
         if (mounted) {
           if (result == UpdateCheckResult.forcedUpdate) {
             setState(() {

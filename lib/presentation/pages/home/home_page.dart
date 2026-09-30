@@ -161,8 +161,11 @@ class _HomePageState extends State<HomePage> {
           _allItems = allItems;
           _applyFilter();
           _isLoading = false;
-          if (allItems.isEmpty && errors.length == providers.length && providers.isNotEmpty) {
-            _error = 'Не вдалося завантажити контент. Перевірте з\'єднання з мережею.';
+          if (allItems.isEmpty &&
+              errors.length == providers.length &&
+              providers.isNotEmpty) {
+            _error =
+                'Не вдалося завантажити контент. Перевірте з\'єднання з мережею.';
           }
         });
       }

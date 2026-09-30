@@ -128,8 +128,7 @@ class AppRouter {
               // Support both query params and extra data
               final extra = state.extra as Map<String, dynamic>?;
               final url =
-                  extra?['url'] as String? ??
-                  state.uri.queryParameters['url'];
+                  extra?['url'] as String? ?? state.uri.queryParameters['url'];
               if (url == null || url.isEmpty) {
                 return Scaffold(
                   appBar: AppBar(),

@@ -140,11 +140,15 @@ class FavoritesService extends ChangeNotifier {
 
       if (_server.isAuthenticated) {
         final records = await _server.getFavorites();
-        debugPrint('[Favorites] Found ${records.length} cloud favorites from Oxide Server');
+        debugPrint(
+          '[Favorites] Found ${records.length} cloud favorites from Oxide Server',
+        );
 
         for (final cloudData in records) {
-          final mediaId = (cloudData['mediaId'] ?? cloudData['media_id']) as String?;
-          final providerId = (cloudData['providerId'] ?? cloudData['provider_id']) as String?;
+          final mediaId =
+              (cloudData['mediaId'] ?? cloudData['media_id']) as String?;
+          final providerId =
+              (cloudData['providerId'] ?? cloudData['provider_id']) as String?;
           if (mediaId == null || providerId == null) continue;
 
           final localExists = await _dao.isFavorite(mediaId, providerId);
@@ -153,11 +157,17 @@ class FavoritesService extends ChangeNotifier {
               mediaId: mediaId,
               providerId: providerId,
               title: (cloudData['title'] ?? '') as String,
-              posterUrl: (cloudData['posterUrl'] ?? cloudData['poster_url']) as String?,
+              posterUrl:
+                  (cloudData['posterUrl'] ?? cloudData['poster_url'])
+                      as String?,
               year: cloudData['year'] as int?,
-              mediaType: (cloudData['mediaType'] ?? cloudData['media_type'] ?? 'movie') as String,
+              mediaType:
+                  (cloudData['mediaType'] ?? cloudData['media_type'] ?? 'movie')
+                      as String,
               rating: (cloudData['rating'] as num?)?.toDouble(),
-              ratingSource: (cloudData['ratingSource'] ?? cloudData['rating_source']) as String?,
+              ratingSource:
+                  (cloudData['ratingSource'] ?? cloudData['rating_source'])
+                      as String?,
             );
           }
         }

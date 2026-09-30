@@ -282,20 +282,26 @@ class SyncService extends ChangeNotifier {
     final providerId = (data['providerId'] ?? data['provider_id'])?.toString();
     final title = data['title']?.toString();
     if (mediaId == null || providerId == null || title == null) {
-      Logger.w('Skipping invalid favorite backup record: missing required fields', tag: _tag);
+      Logger.w(
+        'Skipping invalid favorite backup record: missing required fields',
+        tag: _tag,
+      );
       return;
     }
 
     try {
       final rawYear = data['year'];
-      final year = rawYear is int ? rawYear : int.tryParse(rawYear?.toString() ?? '');
+      final year = rawYear is int
+          ? rawYear
+          : int.tryParse(rawYear?.toString() ?? '');
       await _favoritesDao.add(
         mediaId: mediaId,
         providerId: providerId,
         title: title,
         posterUrl: (data['posterUrl'] ?? data['poster_url'])?.toString(),
         year: year,
-        mediaType: (data['mediaType'] ?? data['media_type'])?.toString() ?? 'unknown',
+        mediaType:
+            (data['mediaType'] ?? data['media_type'])?.toString() ?? 'unknown',
       );
     } catch (e) {
       Logger.w('Failed to import favorite $mediaId: $e', tag: _tag);
@@ -307,21 +313,34 @@ class SyncService extends ChangeNotifier {
     final providerId = (data['providerId'] ?? data['provider_id'])?.toString();
     final title = data['title']?.toString();
     if (mediaId == null || providerId == null || title == null) {
-      Logger.w('Skipping invalid history backup record: missing required fields', tag: _tag);
+      Logger.w(
+        'Skipping invalid history backup record: missing required fields',
+        tag: _tag,
+      );
       return;
     }
 
     try {
       final rawYear = data['year'];
-      final year = rawYear is int ? rawYear : int.tryParse(rawYear?.toString() ?? '');
+      final year = rawYear is int
+          ? rawYear
+          : int.tryParse(rawYear?.toString() ?? '');
       final rawPos = data['positionMs'] ?? data['position_ms'];
-      final positionMs = rawPos is int ? rawPos : (int.tryParse(rawPos?.toString() ?? '') ?? 0);
+      final positionMs = rawPos is int
+          ? rawPos
+          : (int.tryParse(rawPos?.toString() ?? '') ?? 0);
       final rawDur = data['durationMs'] ?? data['duration_ms'];
-      final durationMs = rawDur is int ? rawDur : (int.tryParse(rawDur?.toString() ?? '') ?? 0);
+      final durationMs = rawDur is int
+          ? rawDur
+          : (int.tryParse(rawDur?.toString() ?? '') ?? 0);
       final rawSeason = data['season'];
-      final season = rawSeason is int ? rawSeason : int.tryParse(rawSeason?.toString() ?? '');
+      final season = rawSeason is int
+          ? rawSeason
+          : int.tryParse(rawSeason?.toString() ?? '');
       final rawEpisode = data['episode'];
-      final episode = rawEpisode is int ? rawEpisode : int.tryParse(rawEpisode?.toString() ?? '');
+      final episode = rawEpisode is int
+          ? rawEpisode
+          : int.tryParse(rawEpisode?.toString() ?? '');
 
       await _historyDao.saveProgress(
         mediaId: mediaId,
@@ -329,13 +348,16 @@ class SyncService extends ChangeNotifier {
         title: title,
         posterUrl: (data['posterUrl'] ?? data['poster_url'])?.toString(),
         year: year,
-        mediaType: (data['mediaType'] ?? data['media_type'])?.toString() ?? 'movie',
+        mediaType:
+            (data['mediaType'] ?? data['media_type'])?.toString() ?? 'movie',
         positionMs: positionMs,
         durationMs: durationMs,
         season: season,
         episode: episode,
-        episodeTitle: (data['episodeTitle'] ?? data['episode_title'])?.toString(),
-        lastStreamUrl: (data['lastStreamUrl'] ?? data['last_stream_url'])?.toString(),
+        episodeTitle: (data['episodeTitle'] ?? data['episode_title'])
+            ?.toString(),
+        lastStreamUrl: (data['lastStreamUrl'] ?? data['last_stream_url'])
+            ?.toString(),
         voiceover: data['voiceover']?.toString(),
       );
     } catch (e) {

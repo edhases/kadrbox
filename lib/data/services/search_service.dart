@@ -190,39 +190,41 @@ class SearchService {
     final controller = StreamController<AggregatedSearchResult>();
 
     for (final provider in providers) {
-      _searchProvider(provider, query, type: type, page: page).then((result) {
-        results.add(result);
-        completedCount++;
-        if (!controller.isClosed) {
-          controller.add(
-            AggregatedSearchResult(
-              query: query,
-              providerResults: List.from(results),
-              totalDuration: stopwatch.elapsed,
-              isComplete: completedCount == providers.length,
-            ),
-          );
-        }
-        if (completedCount == providers.length && !controller.isClosed) {
-          controller.close();
-        }
-      }).catchError((e) {
-        Logger.w('Stream search error for ${provider.name}: $e', tag: _tag);
-        completedCount++;
-        if (!controller.isClosed) {
-          controller.add(
-            AggregatedSearchResult(
-              query: query,
-              providerResults: List.from(results),
-              totalDuration: stopwatch.elapsed,
-              isComplete: completedCount == providers.length,
-            ),
-          );
-        }
-        if (completedCount == providers.length && !controller.isClosed) {
-          controller.close();
-        }
-      });
+      _searchProvider(provider, query, type: type, page: page)
+          .then((result) {
+            results.add(result);
+            completedCount++;
+            if (!controller.isClosed) {
+              controller.add(
+                AggregatedSearchResult(
+                  query: query,
+                  providerResults: List.from(results),
+                  totalDuration: stopwatch.elapsed,
+                  isComplete: completedCount == providers.length,
+                ),
+              );
+            }
+            if (completedCount == providers.length && !controller.isClosed) {
+              controller.close();
+            }
+          })
+          .catchError((e) {
+            Logger.w('Stream search error for ${provider.name}: $e', tag: _tag);
+            completedCount++;
+            if (!controller.isClosed) {
+              controller.add(
+                AggregatedSearchResult(
+                  query: query,
+                  providerResults: List.from(results),
+                  totalDuration: stopwatch.elapsed,
+                  isComplete: completedCount == providers.length,
+                ),
+              );
+            }
+            if (completedCount == providers.length && !controller.isClosed) {
+              controller.close();
+            }
+          });
     }
 
     yield* controller.stream;

@@ -543,9 +543,9 @@ class _LoginPageState extends State<LoginPage> {
               } catch (e) {
                 if (mounted) {
                   final err = _authService.error ?? e.toString();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Помилка: $err')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Помилка: $err')));
                 }
               }
             },

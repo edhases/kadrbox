@@ -192,7 +192,8 @@ class HistoryService extends ChangeNotifier {
         final serverRecords = await _server.getHistory();
         for (final data in serverRecords) {
           final mediaId = (data['mediaId'] ?? data['media_id']) as String?;
-          final providerId = (data['providerId'] ?? data['provider_id']) as String?;
+          final providerId =
+              (data['providerId'] ?? data['provider_id']) as String?;
           if (mediaId == null || providerId == null) continue;
 
           final season = data['season'] as int?;
@@ -205,23 +206,33 @@ class HistoryService extends ChangeNotifier {
             episode: episode,
           );
 
-          final watchedAtStr = (data['watchedAt'] ?? data['watched_at']) as String?;
-          final cloudWatchedAt = watchedAtStr != null ? DateTime.parse(watchedAtStr) : DateTime.now();
+          final watchedAtStr =
+              (data['watchedAt'] ?? data['watched_at']) as String?;
+          final cloudWatchedAt = watchedAtStr != null
+              ? DateTime.parse(watchedAtStr)
+              : DateTime.now();
 
-          if (localItem == null || localItem.watchedAt.isBefore(cloudWatchedAt)) {
+          if (localItem == null ||
+              localItem.watchedAt.isBefore(cloudWatchedAt)) {
             await _dao.saveProgress(
               mediaId: mediaId,
               providerId: providerId,
               title: (data['title'] ?? '') as String,
               posterUrl: (data['posterUrl'] ?? data['poster_url']) as String?,
               year: data['year'] as int?,
-              mediaType: (data['mediaType'] ?? data['media_type'] ?? 'movie') as String,
-              positionMs: (data['positionMs'] ?? data['position_ms'] ?? 0) as int,
-              durationMs: (data['durationMs'] ?? data['duration_ms'] ?? 0) as int,
+              mediaType:
+                  (data['mediaType'] ?? data['media_type'] ?? 'movie')
+                      as String,
+              positionMs:
+                  (data['positionMs'] ?? data['position_ms'] ?? 0) as int,
+              durationMs:
+                  (data['durationMs'] ?? data['duration_ms'] ?? 0) as int,
               season: season,
               episode: episode,
-              episodeTitle: (data['episodeTitle'] ?? data['episode_title']) as String?,
-              lastStreamUrl: (data['lastStreamUrl'] ?? data['last_stream_url']) as String?,
+              episodeTitle:
+                  (data['episodeTitle'] ?? data['episode_title']) as String?,
+              lastStreamUrl:
+                  (data['lastStreamUrl'] ?? data['last_stream_url']) as String?,
               voiceover: data['voiceover'] as String?,
               watchedAt: cloudWatchedAt,
             );

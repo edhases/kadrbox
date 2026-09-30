@@ -35,7 +35,6 @@ class MockHistoryService extends ChangeNotifier implements HistoryService {
   @override
   Future<int> get count async => _mockHistory.length;
 
-
   @override
   String formatRemaining(WatchHistoryData item) => '';
 
@@ -128,7 +127,6 @@ class MockFavoritesService extends ChangeNotifier implements FavoritesService {
   @override
   Stream<bool> watchIsFavorite(String mediaId, String providerId) =>
       Stream.value(false);
-
 }
 
 class MockMediaItemsDao implements MediaItemsDao {

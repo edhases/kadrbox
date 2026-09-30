@@ -405,8 +405,7 @@ class PlayerController extends ChangeNotifier with WindowListener {
       // Or we can prefer 'ukr'/'ua' if the locale is 'uk'.
       final preferredLang =
           _settingsService.state.subtitleLanguage; // 'uk' by default
-      if (preferredLang == 'uk' &&
-          (currentUrl.isEmpty)) {
+      if (preferredLang == 'uk' && (currentUrl.isEmpty)) {
         final ukrStream = streams!.firstWhereOrNull((s) {
           final v = s.voiceover?.toLowerCase() ?? '';
           final l = s.language?.toLowerCase() ?? '';

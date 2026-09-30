@@ -309,13 +309,25 @@ class AppTheme {
         behavior: SnackBarBehavior.floating,
       ),
       textTheme: const TextTheme(
-        titleLarge: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
-        titleMedium: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
-        titleSmall: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+        titleLarge: TextStyle(
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
+        titleMedium: TextStyle(
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
+        titleSmall: TextStyle(
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
         bodyLarge: TextStyle(color: Colors.black87),
         bodyMedium: TextStyle(color: Colors.black54),
         bodySmall: TextStyle(color: Colors.grey),
-        labelLarge: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+        labelLarge: TextStyle(
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
         labelMedium: TextStyle(color: Colors.black54),
         labelSmall: TextStyle(color: Colors.grey),
       ),

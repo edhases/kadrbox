@@ -138,8 +138,6 @@ abstract class WatchPartyBackend {
   void sendMessage(String targetId, WatchPartyMessage message);
 }
 
-
-
 /// Oxide Go Server WebSocket Backend Implementation
 class _OxideServerBackend implements WatchPartyBackend {
   final OxideServerService _server;
@@ -197,7 +195,11 @@ class _OxideServerBackend implements WatchPartyBackend {
         },
       );
     } catch (e) {
-      Logger.e('Failed to connect to Oxide Server WebSocket', tag: _tag, error: e);
+      Logger.e(
+        'Failed to connect to Oxide Server WebSocket',
+        tag: _tag,
+        error: e,
+      );
       rethrow;
     }
   }
@@ -214,10 +216,7 @@ class _OxideServerBackend implements WatchPartyBackend {
   @override
   void sendBroadcast(WatchPartyMessage message) {
     if (_ws != null && _ws!.readyState == WebSocket.open) {
-      final json = jsonEncode({
-        ...message.toJson(),
-        'roomCode': _roomCode,
-      });
+      final json = jsonEncode({...message.toJson(), 'roomCode': _roomCode});
       _ws!.add(json);
     }
   }
@@ -268,11 +267,13 @@ class _PeerDartBackend implements WatchPartyBackend {
       });
 
       Future<void> waitPeerOpen() => completer.future.timeout(
-            const Duration(seconds: 10),
-            onTimeout: () {
-              throw TimeoutException('Не вдалося з\'єднатися з сигнальним сервером PeerDart');
-            },
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException(
+            'Не вдалося з\'єднатися з сигнальним сервером PeerDart',
           );
+        },
+      );
 
       // Host logic
       if (isHost) {

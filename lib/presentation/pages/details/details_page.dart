@@ -210,7 +210,8 @@ class _DetailsPageState extends State<DetailsPage> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Hero(
-                      tag: 'media_poster_${widget.providerId}_${widget.mediaId}',
+                      tag:
+                          'media_poster_${widget.providerId}_${widget.mediaId}',
                       child: _buildPoster(),
                     ),
                   ),

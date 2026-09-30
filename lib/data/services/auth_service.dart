@@ -119,7 +119,9 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      if (provider == 'discord' || provider == 'telegram' || provider == 'google') {
+      if (provider == 'discord' ||
+          provider == 'telegram' ||
+          provider == 'google') {
         await _server.signInWithOAuthLoopback(provider);
       } else {
         throw Exception('Непідтримуваний провайдер авторизації: $provider');
@@ -164,7 +166,9 @@ class AuthService extends ChangeNotifier {
     _error = null;
 
     try {
-      if (provider == 'discord' || provider == 'telegram' || provider == 'google') {
+      if (provider == 'discord' ||
+          provider == 'telegram' ||
+          provider == 'google') {
         await _server.signInWithOAuthLoopback(provider);
         await fetchLinkedProviders();
         Logger.i('Provider $provider linked successfully', tag: _tag);
