@@ -133,7 +133,10 @@ func (p *UakinoProvider) fetchCatalog(ctx context.Context, reqURL string) ([]dom
 		return nil, fmt.Errorf("parse catalog html: %w", err)
 	}
 
-	var items []domain.MediaItem
+	// Initialised non-nil so an empty catalogue serialises as `[]`, not
+	// `null`. json.Marshal turns a nil slice into `null`, which every client
+	// then has to special-case.
+	items := []domain.MediaItem{}
 	doc.Find(".movie-item, .short-story").Each(func(i int, s *goquery.Selection) {
 		linkElem := s.Find(".movie-title a, a.movie-title, h2.title a")
 		title := strings.TrimSpace(linkElem.Text())

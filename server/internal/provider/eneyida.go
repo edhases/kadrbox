@@ -123,7 +123,10 @@ func (p *EneyidaProvider) fetchCatalog(ctx context.Context, reqURL string) ([]do
 		return nil, fmt.Errorf("parse eneyida catalog: %w", err)
 	}
 
-	var items []domain.MediaItem
+	// Initialised non-nil so an empty catalogue serialises as `[]`, not
+	// `null`. json.Marshal turns a nil slice into `null`, which every client
+	// then has to special-case.
+	items := []domain.MediaItem{}
 	doc.Find("article.short, .short-story").Each(func(i int, s *goquery.Selection) {
 		linkElem := s.Find("h2.short_title a, .short_title a, a.short_btn")
 		title := strings.TrimSpace(linkElem.Text())
