@@ -15,7 +15,9 @@ class ApiClient {
   final CookieJar _cookieJar = CookieJar();
   late final UserAgentService _uaService;
 
-  ApiClient({UserAgentService? uaService, SharedPreferences? prefs}) {
+  /// [dio] is a test seam: when provided, the client uses it as-is and does
+  /// not install cookie/retry interceptors. Production code never passes it.
+  ApiClient({UserAgentService? uaService, SharedPreferences? prefs, Dio? dio}) {
     if (uaService != null) {
       _uaService = uaService;
     } else if (prefs != null) {
@@ -23,6 +25,11 @@ class ApiClient {
     } else {
       // No prefs available (e.g. early init): use stateless fallback UA.
       _uaService = UserAgentService.fallback();
+    }
+
+    if (dio != null) {
+      _dio = dio;
+      return;
     }
 
     _dio = Dio(

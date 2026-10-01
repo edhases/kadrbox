@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get_it/get_it.dart';
 
 import '../../core/config/app_config.dart';
+import '../../core/error/exceptions.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
 import '../../domain/entities/entities.dart';
@@ -73,9 +74,8 @@ class StreamProbe {
 /// implementation — so a provider added in backend Go code appears
 /// in the app without an app update.
 ///
-/// Search/details/streams are proxied through `/api/v1/content/*`.
-/// Catalog/popular listings are not supported server-side yet,
-/// so [getPopular]/[getNew]/[getByCategory] return empty lists.
+/// Search/details/streams/popular/category are proxied through
+/// `/api/v1/content/*`; the backend owns parsing, scoring and clustering.
 ///
 /// ## Error contract
 ///
@@ -84,8 +84,19 @@ class StreamProbe {
 /// `ApiClient`) instead of returning `[]`. An empty list therefore means
 /// "the server answered successfully with no results", which is a
 /// distinguishable state. Callers that aggregate several providers must wrap
-/// these calls in a try/catch (search_service, home_page, category_page,
+/// these calls in a try/catch (home_page, category_page,
 /// provider_page and recommendation_service already do).
+///
+/// ## Request hygiene
+///
+/// Home startup fires the same popular/details URL from several uncoordinated
+/// paths at once (home grid, recommendations, catalog sync). Identical
+/// concurrent reads therefore share one network call ([_coalesce]). Details
+/// bodies are additionally cached briefly ([_detailsTtl]) because the same
+/// 47KB payload was refetched a minute later. Identical 5xx/network failures
+/// on idempotent catalog reads are suppressed briefly ([_failureTtl]) so a
+/// burst from several UI paths does not hammer a struggling upstream.
+/// Signed stream URLs are never cached — only coalesced while in flight.
 class ServerBackedProvider extends ContentProvider {
   static const _tag = 'ServerBackedProvider';
 
@@ -93,7 +104,85 @@ class ServerBackedProvider extends ContentProvider {
 
   ApiClient get _api => GetIt.instance<ApiClient>();
 
-  ServerBackedProvider(this.entry);
+  ServerBackedProvider(this.entry, {DateTime Function()? clock})
+    : _now = clock ?? DateTime.now;
+
+  final DateTime Function() _now;
+
+  /// Identical reads currently awaiting a response, keyed by a string that
+  /// captures everything actually sent to the server.
+  final Map<String, Future<Object?>> _inFlight = {};
+
+  /// Recently fetched details, by request key. Catalog metadata is stable on
+  /// a two-minute timescale; signed playback URLs are never stored here.
+  final Map<String, _Timed<MediaDetails>> _detailsCache = {};
+  static const Duration _detailsTtl = Duration(seconds: 120);
+
+  /// Recent 5xx/network failures on idempotent catalog reads, by request key.
+  /// Short enough that an explicit user retry still reaches the server.
+  final Map<String, _Timed<Object>> _failureCache = {};
+  static const Duration _failureTtl = Duration(seconds: 30);
+
+  /// Run [load], or join an identical read that is already in flight.
+  ///
+  /// Every waiter gets the same result or the same error. The entry is
+  /// removed as soon as the future settles, so this only merges genuinely
+  /// concurrent calls — sequential calls always hit the network (or the
+  /// caches above) again.
+  Future<T> _coalesce<T>(String key, Future<T> Function() load) {
+    final existing = _inFlight[key];
+    if (existing is Future<T>) return existing;
+    final future = load();
+    _inFlight[key] = future;
+    // Both callbacks consume the outcome, so the derived future always
+    // completes normally. Using whenComplete here instead would leave an
+    // unlistened erroring future behind on every shared failure — an
+    // unhandled async error in production.
+    future.then<void>(
+      (_) {
+        if (identical(_inFlight[key], future)) _inFlight.remove(key);
+      },
+      onError: (_) {
+        if (identical(_inFlight[key], future)) _inFlight.remove(key);
+      },
+    );
+    return future;
+  }
+
+  /// Re-run [load], suppressing it when the identical read failed with a
+  /// retryable error moments ago. 4xx, auth and parsing errors are never
+  /// suppressed: those are either the caller's fault or permanent.
+  Future<T> _guarded<T>(String key, Future<T> Function() load) {
+    final failure = _failureCache[key];
+    if (failure != null) {
+      if (_now().isAfter(failure.until)) {
+        _failureCache.remove(key);
+      } else {
+        throw failure.value;
+      }
+    }
+    return _coalesce(key, () async {
+      try {
+        return await load();
+      } catch (e) {
+        if (e is NetworkException ||
+            (e is ServerException && e.statusCode >= 500)) {
+          _failureCache[key] = _Timed(e, _now().add(_failureTtl));
+        }
+        rethrow;
+      }
+    });
+  }
+
+  MediaDetails? _cachedDetails(String key) {
+    final entry = _detailsCache[key];
+    if (entry == null) return null;
+    if (_now().isAfter(entry.until)) {
+      _detailsCache.remove(key);
+      return null;
+    }
+    return entry.value;
+  }
 
   @override
   String get id => entry.id;
@@ -146,29 +235,32 @@ class ServerBackedProvider extends ContentProvider {
     ContentType? type,
     int page = 1,
   }) async {
-    final rawData = await _api.getRawJson(
-      '$_base/search',
-      queryParameters: {'q': query},
-    );
+    // The key covers what is actually sent: `type` is narrowed client-side
+    // afterwards and `page` is deliberately not sent at all.
+    final envelope = await _coalesce('search:$query', () async {
+      final rawData = await _api.getRawJson(
+        '$_base/search',
+        queryParameters: {'q': query},
+      );
 
-    SearchEnvelope envelope;
-    if (rawData is Map) {
-      envelope = SearchEnvelope.fromJson(
-        Map<String, dynamic>.from(rawData),
-        _mapItem,
-      );
-    } else if (rawData is List) {
-      envelope = _legacyEnvelope(query, rawData);
-    } else {
-      throw FormatException(
-        'Unexpected /content/search response: '
-        '${rawData.runtimeType} (${rawData.toString().length} chars)',
-        query,
-      );
-    }
+      if (rawData is Map) {
+        return SearchEnvelope.fromJson(
+          Map<String, dynamic>.from(rawData),
+          _mapItem,
+        );
+      } else if (rawData is List) {
+        return _legacyEnvelope(query, rawData);
+      } else {
+        throw FormatException(
+          'Unexpected /content/search response: '
+          '${rawData.runtimeType} (${rawData.toString().length} chars)',
+          query,
+        );
+      }
+    });
 
     if (type != null) {
-      envelope = SearchEnvelope(
+      return SearchEnvelope(
         query: envelope.query,
         canonical: envelope.canonical,
         tookMs: envelope.tookMs,
@@ -249,28 +341,39 @@ class ServerBackedProvider extends ContentProvider {
   }) async {
     // Legacy per-provider path. Kept for callers that genuinely need one
     // provider; the search UI uses [searchEnvelope] instead.
-    final list = await _api.getJsonList(
-      '$_base/search',
-      queryParameters: {'q': query, 'provider': id},
-    );
-    final items = list
-        .whereType<Map>()
-        .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-        .where((i) => i.title.isNotEmpty)
-        .toList();
+    final items = await _coalesce('search-one:$id:$query', () async {
+      final list = await _api.getJsonList(
+        '$_base/search',
+        queryParameters: {'q': query, 'provider': id},
+      );
+      return list
+          .whereType<Map>()
+          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+          .where((i) => i.title.isNotEmpty)
+          .toList();
+    });
+    final result = List<MediaItem>.of(items);
     if (type != null) {
-      return items.where((i) => i.type == type).toList();
+      return result.where((i) => i.type == type).toList();
     }
-    return items;
+    return result;
   }
 
   @override
   Future<MediaDetails> getDetails(String id) async {
-    final res = await _api.getJson(
-      '$_base/details',
-      queryParameters: {'provider': this.id, 'url': id},
-    );
-    return _mapDetails(res);
+    final key = 'details:${this.id}:$id';
+    final cached = _cachedDetails(key);
+    if (cached != null) return cached;
+
+    final details = await _guarded(key, () async {
+      final res = await _api.getJson(
+        '$_base/details',
+        queryParameters: {'provider': this.id, 'url': id},
+      );
+      return _mapDetails(res);
+    });
+    _detailsCache[key] = _Timed(details, _now().add(_detailsTtl));
+    return details;
   }
 
   @override
@@ -279,31 +382,43 @@ class ServerBackedProvider extends ContentProvider {
     int? season,
     int? episode,
   }) async {
-    final params = <String, dynamic>{'provider': this.id, 'url': id};
-    if (season != null) params['season'] = season;
-    if (episode != null) params['episode'] = episode;
-    final res = await _api.getJson('$_base/streams', queryParameters: params);
-    final streams = res['streams'];
-    if (streams is! List) return [];
-    return streams
-        .whereType<Map>()
-        .map((e) => _mapStream(Map<String, dynamic>.from(e)))
-        .toList();
+    // Signed playback URLs are never cached; identical concurrent reads share
+    // one request and each waiter gets its own list.
+    final key = 'streams:${this.id}:$id:s$season:e$episode';
+    final streams = await _coalesce(key, () async {
+      final params = <String, dynamic>{'provider': this.id, 'url': id};
+      if (season != null) params['season'] = season;
+      if (episode != null) params['episode'] = episode;
+      final res = await _api.getJson('$_base/streams', queryParameters: params);
+      final streams = res['streams'];
+      if (streams is! List) return <StreamSource>[];
+      return streams
+          .whereType<Map>()
+          .map((e) => _mapStream(Map<String, dynamic>.from(e)))
+          .toList();
+    });
+    return List<StreamSource>.of(streams);
   }
 
   @override
   Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async {
     final params = <String, dynamic>{'provider': id, 'page': page};
     if (type != null) params['type'] = type.name;
-    final list = await _api.getJsonList(
-      '$_base/popular',
-      queryParameters: params,
-    );
-    return list
-        .whereType<Map>()
-        .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-        .where((i) => i.title.isNotEmpty)
-        .toList();
+    // A null body (Eneyida answers `200` with JSON `null`) is normalised to
+    // `[]` by ApiClient.getJsonList, so an empty catalogue stays an empty
+    // catalogue and never a crash.
+    final items = await _guarded('popular:$params', () async {
+      final list = await _api.getJsonList(
+        '$_base/popular',
+        queryParameters: params,
+      );
+      return list
+          .whereType<Map>()
+          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+          .where((i) => i.title.isNotEmpty)
+          .toList();
+    });
+    return List<MediaItem>.of(items);
   }
 
   @override
@@ -322,15 +437,18 @@ class ServerBackedProvider extends ContentProvider {
       'page': page,
     };
     if (type != null) params['type'] = type.name;
-    final list = await _api.getJsonList(
-      '$_base/category',
-      queryParameters: params,
-    );
-    return list
-        .whereType<Map>()
-        .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-        .where((i) => i.title.isNotEmpty)
-        .toList();
+    final items = await _guarded('category:$params', () async {
+      final list = await _api.getJsonList(
+        '$_base/category',
+        queryParameters: params,
+      );
+      return list
+          .whereType<Map>()
+          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+          .where((i) => i.title.isNotEmpty)
+          .toList();
+    });
+    return List<MediaItem>.of(items);
   }
 
   // --- mapping ---------------------------------------------------------------
@@ -831,4 +949,12 @@ class ServerBackedProvider extends ContentProvider {
       httpStatus: status,
     );
   }
+}
+
+/// A value with a deadline: a cached response or a recent failure.
+class _Timed<T> {
+  const _Timed(this.value, this.until);
+
+  final T value;
+  final DateTime until;
 }
