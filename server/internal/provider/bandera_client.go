@@ -50,6 +50,13 @@ func NewBanderaClient(baseURL string, client *http.Client) *BanderaClient {
 	}
 }
 
+// SetSourcesTTL встановлює TTL кешу для джерел
+func (c *BanderaClient) SetSourcesTTL(d time.Duration) {
+	c.sourcesMu.Lock()
+	defer c.sourcesMu.Unlock()
+	c.sourcesTTL = d
+}
+
 // GetSources виконує GET /sources із кешуванням на 10 хвилин
 func (c *BanderaClient) GetSources(ctx context.Context) (map[string]SourceMeta, error) {
 	c.sourcesMu.RLock()

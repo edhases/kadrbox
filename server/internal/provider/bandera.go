@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
 )
@@ -76,23 +79,27 @@ func generateStableContentID(source, title string, year int, ref json.RawMessage
 	return GenerateStableContentID(source, title, year, ref)
 }
 
-// Search виконує пошук у Bandera Online
-func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
-	items, err := p.client.Search(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("bandera search (%s): %w", query, err)
-	}
-
+// convertSearchItems конвертує елементи відповіді Bandera в domain.MediaItem
+func (p *BanderaProvider) convertSearchItems(rawItems []BanderaSearchItem) []domain.MediaItem {
 	var results []domain.MediaItem
-	for _, item := range items {
+	for _, item := range rawItems {
 		year := ParseFlexibleYear(item.Year)
 		stableID := generateStableContentID(item.Source, item.Title, year, item.Ref)
+
+		mediaType := item.Type.String()
+		if mediaType == "" {
+			if item.Serial.Int() == 1 {
+				mediaType = "series"
+			} else {
+				mediaType = "movie"
+			}
+		}
 
 		payload := BanderaItemPayload{
 			ID:        stableID,
 			Source:    item.Source,
 			Ref:       item.Ref,
-			Type:      item.Type.String(),
+			Type:      mediaType,
 			Title:     item.Title,
 			Poster:    item.Poster.String(),
 			Year:      year,
@@ -102,11 +109,6 @@ func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.Me
 		payloadBytes, err := json.Marshal(payload)
 		if err != nil {
 			continue
-		}
-
-		mediaType := item.Type.String()
-		if mediaType == "" {
-			mediaType = "movie"
 		}
 
 		results = append(results, domain.MediaItem{
@@ -120,8 +122,72 @@ func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.Me
 			URL:           string(payloadBytes),
 		})
 	}
+	return results
+}
 
-	return results, nil
+// rankAndSortMediaItems дедуплікує елементи за назвою та роком, та сортує за цільовим типом та роком (новіші спочатку).
+func rankAndSortMediaItems(items []domain.MediaItem, targetType string) []domain.MediaItem {
+	if len(items) <= 1 {
+		return items
+	}
+
+	seen := make(map[string]int)
+	var unique []domain.MediaItem
+
+	for _, item := range items {
+		normTitle := strings.ToLower(strings.TrimSpace(item.Title))
+		key := fmt.Sprintf("%s:%d", normTitle, item.Year)
+		if idx, exists := seen[key]; exists {
+			if unique[idx].PosterURL == "" && item.PosterURL != "" {
+				unique[idx].PosterURL = item.PosterURL
+			}
+			if unique[idx].Rating == 0 && item.Rating > 0 {
+				unique[idx].Rating = item.Rating
+			}
+			continue
+		}
+		seen[key] = len(unique)
+		unique = append(unique, item)
+	}
+
+	sort.SliceStable(unique, func(i, j int) bool {
+		a := unique[i]
+		b := unique[j]
+
+		// 1. Пріоритет за типом контенту (якщо вказано)
+		if targetType != "" {
+			aMatch := a.Type == targetType
+			bMatch := b.Type == targetType
+			if aMatch != bMatch {
+				return aMatch
+			}
+		}
+
+		// 2. Пріоритет за роком (найновіші першими)
+		if a.Year != b.Year {
+			return a.Year > b.Year
+		}
+
+		// 3. За наявністю постера
+		aHasPoster := a.PosterURL != ""
+		bHasPoster := b.PosterURL != ""
+		if aHasPoster != bHasPoster {
+			return aHasPoster
+		}
+
+		return false
+	})
+
+	return unique
+}
+
+// Search виконує пошук у Bandera Online
+func (p *BanderaProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
+	items, err := p.client.Search(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("bandera search (%s): %w", query, err)
+	}
+	return p.convertSearchItems(items), nil
 }
 
 // SearchWithMeta виконує пошук та повертає повну відповідь BanderaSearchResponse (з Items та Meta.Statuses)
@@ -129,27 +195,92 @@ func (p *BanderaProvider) SearchWithMeta(ctx context.Context, query string, year
 	return p.client.SearchWithMeta(ctx, query, year, serial)
 }
 
-// GetPopular виконує пошук типових назв як фолбек популярного
+// GetPopular виконує пошук типових назв за типом контенту та правильно сортує результати
 func (p *BanderaProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
-	queries := []string{"фільм", "серіал", "мультфільм", "2024", "2023"}
 	if page < 1 {
 		page = 1
 	}
+
+	var queries []string
+	var serial int
+	switch contentType {
+	case "series":
+		queries = []string{"серіал", "драма", "2024", "детектив", "комедія"}
+		serial = 1
+	case "anime":
+		queries = []string{"аніме", "клинок", "магічна битва", "атака титанів", "соло"}
+	case "movie":
+		queries = []string{"фільм", "2024", "бойовик", "трилер", "комедія"}
+		serial = 0
+	default:
+		queries = []string{"фільм", "серіал", "мультфільм", "2024", "2023"}
+	}
+
 	q := queries[(page-1)%len(queries)]
-	return p.Search(ctx, q)
+	var items []domain.MediaItem
+	var err error
+
+	if serial > 0 || contentType == "series" || contentType == "movie" {
+		resp, sErr := p.SearchWithMeta(ctx, q, 0, serial)
+		if sErr == nil && resp != nil && len(resp.Items) > 0 {
+			items = p.convertSearchItems(resp.Items)
+		} else {
+			items, err = p.Search(ctx, q)
+		}
+	} else {
+		items, err = p.Search(ctx, q)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return rankAndSortMediaItems(items, contentType), nil
 }
 
-// GetNew перенаправляє на GetPopular
+// GetNew виконує пошук новинок поточного або останніх років із сортуванням
 func (p *BanderaProvider) GetNew(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
+	if page < 1 {
+		page = 1
+	}
+	currentYear := time.Now().Year()
+	years := []int{currentYear, currentYear - 1, currentYear - 2}
+	year := years[(page-1)%len(years)]
+
+	var serial int
+	if contentType == "series" {
+		serial = 1
+	}
+
+	resp, err := p.SearchWithMeta(ctx, strconv.Itoa(year), year, serial)
+	if err == nil && resp != nil && len(resp.Items) > 0 {
+		items := p.convertSearchItems(resp.Items)
+		return rankAndSortMediaItems(items, contentType), nil
+	}
+
 	return p.GetPopular(ctx, contentType, page)
 }
 
-// GetByCategory перенаправляє на Search за назвою категорії
+// GetByCategory виконує пошук за назвою категорії із сортуванням
 func (p *BanderaProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
 	if category == "" {
 		return p.GetPopular(ctx, contentType, page)
 	}
-	return p.Search(ctx, category)
+	var serial int
+	if contentType == "series" {
+		serial = 1
+	}
+	resp, err := p.SearchWithMeta(ctx, category, 0, serial)
+	var items []domain.MediaItem
+	if err == nil && resp != nil && len(resp.Items) > 0 {
+		items = p.convertSearchItems(resp.Items)
+	} else {
+		items, err = p.Search(ctx, category)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return rankAndSortMediaItems(items, contentType), nil
 }
 
 // GetDetails розбирає карточку контенту, формує сезони, серії та озвучки
@@ -186,6 +317,8 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 		}
 		if contentResp.Info.Image.String() != "" {
 			posterURL = contentResp.Info.Image.String()
+		} else if contentResp.Info.Poster.String() != "" {
+			posterURL = contentResp.Info.Poster.String()
 		}
 		if y := ParseFlexibleYear(contentResp.Info.Year); y > 0 {
 			year = y
@@ -198,6 +331,9 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 			}
 		}
 		duration = contentResp.Info.EpisodeTime.String()
+		if duration == "" {
+			duration = contentResp.Info.Duration.String()
+		}
 		trailerURL = contentResp.Info.Trailer.String()
 		genres = contentResp.Info.Genres
 		rating = contentResp.Info.Rating.Float64()
@@ -214,39 +350,13 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 	var voiceovers []domain.Voiceover
 	var seasons []domain.Season
 
-	// Якщо є голоси/озвучки (серіали або багатоваріантний дубляж)
-	if len(contentResp.Voices) > 0 {
-		buildSeasonsForVoice := func(v BanderaVoice) []domain.Season {
-			var voiceSeasons []domain.Season
-			if len(v.Seasons) > 0 {
-				for sIdx, s := range v.Seasons {
-					sNum := ParseSeasonNumber(s.Title, sIdx+1)
-					var episodes []domain.Episode
-					for _, ep := range s.Episodes {
-						epTitle := ep.Title.String()
-						if epTitle == "" {
-							epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
-						}
-						streamRefBytes, _ := json.Marshal(BanderaStreamRef{
-							Source:      payload.Source,
-							Ref:         ep.Ref,
-							IsStreamRef: true,
-						})
-						episodes = append(episodes, domain.Episode{
-							Number: ep.Number.Int(),
-							Title:  epTitle,
-							URL:    string(streamRefBytes),
-						})
-					}
-					voiceSeasons = append(voiceSeasons, domain.Season{
-						Number:   sNum,
-						Title:    fmt.Sprintf("Сезон %d", sNum),
-						Episodes: episodes,
-					})
-				}
-			} else if len(v.Episodes) > 0 {
+	buildSeasonsForVoice := func(v BanderaVoice) []domain.Season {
+		var voiceSeasons []domain.Season
+		if len(v.Seasons) > 0 {
+			for sIdx, s := range v.Seasons {
+				sNum := ParseSeasonNumber(s.Title, sIdx+1)
 				var episodes []domain.Episode
-				for _, ep := range v.Episodes {
+				for _, ep := range s.Episodes {
 					epTitle := ep.Title.String()
 					if epTitle == "" {
 						epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
@@ -263,14 +373,40 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 					})
 				}
 				voiceSeasons = append(voiceSeasons, domain.Season{
-					Number:   1,
-					Title:    "Сезон 1",
+					Number:   sNum,
+					Title:    fmt.Sprintf("Сезон %d", sNum),
 					Episodes: episodes,
 				})
 			}
-			return voiceSeasons
+		} else if len(v.Episodes) > 0 {
+			var episodes []domain.Episode
+			for _, ep := range v.Episodes {
+				epTitle := ep.Title.String()
+				if epTitle == "" {
+					epTitle = fmt.Sprintf("Серія %d", ep.Number.Int())
+				}
+				streamRefBytes, _ := json.Marshal(BanderaStreamRef{
+					Source:      payload.Source,
+					Ref:         ep.Ref,
+					IsStreamRef: true,
+				})
+				episodes = append(episodes, domain.Episode{
+					Number: ep.Number.Int(),
+					Title:  epTitle,
+					URL:    string(streamRefBytes),
+				})
+			}
+			voiceSeasons = append(voiceSeasons, domain.Season{
+				Number:   1,
+				Title:    "Сезон 1",
+				Episodes: episodes,
+			})
 		}
+		return voiceSeasons
+	}
 
+	// Якщо є голоси/озвучки (серіали або багатоваріантний дубляж)
+	if len(contentResp.Voices) > 0 {
 		for _, v := range contentResp.Voices {
 			vName := v.DisplayName.String()
 			if vName == "" {
@@ -288,6 +424,20 @@ func (p *BanderaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 		if len(voiceovers) > 0 {
 			seasons = voiceovers[0].Seasons
 		}
+	} else if len(contentResp.Seasons) > 0 || len(contentResp.Episodes) > 0 {
+		// Серіал без розбивки по голосах (напряму сезони/епізоди)
+		vSeasons := buildSeasonsForVoice(BanderaVoice{
+			ID:          "default",
+			DisplayName: "Основна",
+			Seasons:     contentResp.Seasons,
+			Episodes:    contentResp.Episodes,
+		})
+		voiceovers = append(voiceovers, domain.Voiceover{
+			ID:      "default",
+			Name:    "Основна",
+			Seasons: vSeasons,
+		})
+		seasons = vSeasons
 	} else if len(contentResp.Streams) > 0 {
 		// Для фільмів зі списком стрімів
 		for i, st := range contentResp.Streams {
@@ -373,16 +523,48 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 			// Якщо це фільм
 			streamIdx := 0
 			if voiceID != "" {
-				if idx, err := strconv.Atoi(voiceID); err == nil && idx < len(contentResp.Streams) {
+				if idx, err := strconv.Atoi(voiceID); err == nil && idx >= 0 && idx < len(contentResp.Streams) {
 					streamIdx = idx
 				}
 			}
 			st := contentResp.Streams[streamIdx]
+
+			// Якщо потік уже містить прямий URL (без потреби виклику /stream)
+			if len(st.Ref) == 0 && st.URL.String() != "" {
+				cleanURL, parsedQuality := ParsePackedStreamURL(st.URL.String())
+				quality := st.Quality.String()
+				if quality == "" || quality == "auto" {
+					quality = parsedQuality
+				}
+				playableURL, directURL, requiresProxy := WrapStreamURL(targetSource, "inner", cleanURL)
+				headers := BuildStreamHeaders(playableURL, requiresProxy)
+				return &domain.ContentStreamsResponse{
+					ProviderID: p.ID(),
+					Streams: []domain.StreamSource{{
+						Quality:       quality,
+						URL:           playableURL,
+						DirectURL:     directURL,
+						RequiresProxy: requiresProxy,
+						Headers:       headers,
+					}},
+					Subtitles: MergeSubtitles(st.Subtitles, nil),
+				}, nil
+			}
+
 			targetStreamRef = st.Ref
 			itemSubtitles = st.Subtitles
-		} else if len(contentResp.Voices) > 0 {
+		} else if len(contentResp.Voices) > 0 || len(contentResp.Seasons) > 0 || len(contentResp.Episodes) > 0 {
 			// Якщо це серіал
-			ref, subs, found := SelectEpisodeRef(contentResp.Voices, season, episode, voiceID)
+			voices := contentResp.Voices
+			if len(voices) == 0 {
+				voices = []BanderaVoice{{
+					ID:          "default",
+					DisplayName: "Основна",
+					Seasons:     contentResp.Seasons,
+					Episodes:    contentResp.Episodes,
+				}}
+			}
+			ref, subs, found := SelectEpisodeRef(voices, season, episode, voiceID)
 			if !found {
 				return nil, fmt.Errorf("no matching stream found for season %d episode %d voice %s", season, episode, voiceID)
 			}

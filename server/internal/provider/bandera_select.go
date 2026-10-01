@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 )
 
@@ -72,7 +73,9 @@ func ValidateStreamRef(meta SourceMeta, refRaw json.RawMessage) error {
 	return nil
 }
 
-// ParseSeasonNumber парсить номер сезону з json.RawMessage (може бути int або string).
+var reSeasonDigits = regexp.MustCompile(`\d+`)
+
+// ParseSeasonNumber парсить номер сезону з json.RawMessage (може бути int або string, наприклад "1", "Сезон 2", "s03").
 func ParseSeasonNumber(raw json.RawMessage, defaultNum int) int {
 	if len(raw) == 0 {
 		return defaultNum
@@ -85,6 +88,11 @@ func ParseSeasonNumber(raw json.RawMessage, defaultNum int) int {
 	if err := json.Unmarshal(raw, &str); err == nil {
 		if n, err := strconv.Atoi(str); err == nil && n > 0 {
 			return n
+		}
+		if match := reSeasonDigits.FindString(str); match != "" {
+			if n, err := strconv.Atoi(match); err == nil && n > 0 {
+				return n
+			}
 		}
 	}
 	return defaultNum

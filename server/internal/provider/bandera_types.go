@@ -213,14 +213,19 @@ func (s BanderaSourceStatus) GetElapsedMs() int64 {
 }
 
 type BanderaSearchItem struct {
-	Source   string          `json:"source"`
-	Title    string          `json:"title"`
-	TitleEn  FlexibleString  `json:"title_en"`
-	Poster   FlexibleString  `json:"poster"`
-	Type     FlexibleString  `json:"type"`
-	Year     json.RawMessage `json:"year"`
-	Ref      json.RawMessage `json:"ref"`
-	GroupKey FlexibleString  `json:"group_key"`
+	Source      string          `json:"source"`
+	Title       string          `json:"title"`
+	TitleEn     FlexibleString  `json:"title_en"`
+	Poster      FlexibleString  `json:"poster"`
+	Type        FlexibleString  `json:"type"`
+	Year        json.RawMessage `json:"year"`
+	Ref         json.RawMessage `json:"ref"`
+	GroupKey    FlexibleString  `json:"group_key"`
+	IMDbID      FlexibleString  `json:"imdb_id,omitempty"`
+	TMDBID      FlexibleInt     `json:"tmdb_id,omitempty"`
+	KinopoiskID FlexibleString  `json:"kinopoisk_id,omitempty"`
+	MalID       FlexibleInt     `json:"mal_id,omitempty"`
+	Serial      FlexibleInt     `json:"serial,omitempty"`
 }
 
 // BanderaItemPayload серіалізується в MediaItem.URL та повертається в клієнт
@@ -251,12 +256,67 @@ type BanderaContentRequest struct {
 }
 
 type BanderaContentResponse struct {
-	OK      bool                `json:"ok"`
-	Source  string              `json:"source"`
-	Type    string              `json:"type"`
-	Info    *BanderaContentInfo `json:"info"`
-	Streams []BanderaStreamItem `json:"streams"`
-	Voices  []BanderaVoice      `json:"voices"`
+	OK       bool                `json:"ok"`
+	Source   string              `json:"source"`
+	Type     string              `json:"type"`
+	Info     *BanderaContentInfo `json:"info"`
+	Streams  []BanderaStreamItem `json:"streams"`
+	Voices   []BanderaVoice      `json:"voices"`
+	Seasons  []BanderaSeason     `json:"seasons,omitempty"`
+	Episodes []BanderaEpisode    `json:"episodes,omitempty"`
+}
+
+type FlexibleGenres []string
+
+func (f *FlexibleGenres) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*f = nil
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(b, &list); err == nil {
+		var clean []string
+		for _, s := range list {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				clean = append(clean, s)
+			}
+		}
+		*f = clean
+		return nil
+	}
+	var str string
+	if err := json.Unmarshal(b, &str); err == nil {
+		var clean []string
+		for _, part := range strings.Split(str, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				clean = append(clean, part)
+			}
+		}
+		*f = clean
+		return nil
+	}
+	var objList []struct {
+		Name  string `json:"name"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(b, &objList); err == nil {
+		var clean []string
+		for _, obj := range objList {
+			n := strings.TrimSpace(obj.Name)
+			if n == "" {
+				n = strings.TrimSpace(obj.Title)
+			}
+			if n != "" {
+				clean = append(clean, n)
+			}
+		}
+		*f = clean
+		return nil
+	}
+	*f = nil
+	return nil
 }
 
 type BanderaContentInfo struct {
@@ -264,12 +324,17 @@ type BanderaContentInfo struct {
 	TitleEn     FlexibleString  `json:"title_en"`
 	Description FlexibleString  `json:"description"`
 	Image       FlexibleString  `json:"image"`
+	Poster      FlexibleString  `json:"poster,omitempty"`
 	ReleaseDate FlexibleString  `json:"release_date"`
 	EpisodeTime FlexibleString  `json:"episode_time"`
+	Duration    FlexibleString  `json:"duration,omitempty"`
 	Trailer     FlexibleString  `json:"trailer"`
-	Genres      []string        `json:"genres"`
+	Genres      FlexibleGenres  `json:"genres"`
 	Rating      FlexibleFloat   `json:"rating"`
 	Year        json.RawMessage `json:"year"`
+	Actors      FlexibleGenres  `json:"actors,omitempty"`
+	Director    FlexibleString  `json:"director,omitempty"`
+	Country     FlexibleString  `json:"country,omitempty"`
 }
 
 type BanderaStreamItem struct {
