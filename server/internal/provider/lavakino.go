@@ -174,7 +174,7 @@ func (p *LavakinoProvider) parseCatalogHtml(html string) ([]domain.MediaItem, er
 		lowerHref := strings.ToLower(href)
 		if strings.Contains(lowerHref, "serial") {
 			mediaType = "series"
-		} else if strings.Contains(lowerHref, "mult") {
+		} else if strings.Contains(lowerHref, "mult") || strings.Contains(lowerHref, "cartoon") {
 			mediaType = "cartoon"
 		} else if strings.Contains(lowerHref, "anime") {
 			mediaType = "anime"
@@ -306,7 +306,7 @@ func (p *LavakinoProvider) GetDetails(ctx context.Context, itemURL string) (*dom
 	lowerHref := strings.ToLower(itemURL)
 	if strings.Contains(lowerHref, "serial") {
 		mediaType = "series"
-	} else if strings.Contains(lowerHref, "mult") {
+	} else if strings.Contains(lowerHref, "mult") || strings.Contains(lowerHref, "cartoon") {
 		mediaType = "cartoon"
 	} else if strings.Contains(lowerHref, "anime") {
 		mediaType = "anime"
