@@ -51,7 +51,7 @@ func (p *BanderaProvider) Describe() domain.ProviderInfo {
 		ID:                   p.ID(),
 		Name:                 p.Name(),
 		BaseURL:              p.BaseURL(),
-		ShowOnHome:           false, // Поки GetPopular не є справжнім рейтингом, вимикаємо показ на головній
+		ShowOnHome:           true,
 		SearchEnabledDefault: true,
 		HasFixedStreams:      false,
 		ContentTypes:         []string{"movie", "series", "anime"},

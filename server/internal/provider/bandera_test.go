@@ -13,7 +13,7 @@ import (
 	"github.com/edhases/oxide-server/internal/provider"
 )
 
-// 1. Тест Describe (ShowOnHome має бути false)
+// 1. Тест Describe (ShowOnHome має бути true)
 func TestBanderaProviderDescribe(t *testing.T) {
 	p := provider.NewBanderaProvider()
 	if p.ID() != "bandera" {
@@ -27,8 +27,8 @@ func TestBanderaProviderDescribe(t *testing.T) {
 	}
 
 	desc := p.Describe()
-	if desc.ShowOnHome {
-		t.Errorf("expected ShowOnHome false (disabled from home until real popularity endpoint exists)")
+	if !desc.ShowOnHome {
+		t.Errorf("expected ShowOnHome true")
 	}
 	if !desc.SearchEnabledDefault {
 		t.Errorf("expected SearchEnabledDefault true")
