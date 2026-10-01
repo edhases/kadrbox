@@ -85,29 +85,46 @@ class DownloadService extends ChangeNotifier {
     }
   }
 
+  StreamSubscription<List<Download>>? _downloadsSub;
+  Timer? _initTimer;
+  bool _isDisposed = false;
+
   void _listenToDownloads() {
-    _dao.watchAll().listen((downloads) {
+    _downloadsSub = _dao.watchAll().listen((downloads) {
+      if (_isDisposed) return;
       _downloads = downloads;
       notifyListeners();
     });
-    _init();
+    _initTimer = Timer(const Duration(seconds: 2), () {
+      if (!_isDisposed) _init();
+    });
   }
 
   void _init() async {
-    // Wait a bit for other services to settle
-    await Future.delayed(const Duration(seconds: 2));
+    if (_isDisposed) return;
+    try {
+      final downloads = await _dao.getAll();
+      if (_isDisposed) return;
+      final interrupted = downloads.where(
+        (d) =>
+            d.status == DownloadStatus.downloading ||
+            d.status == DownloadStatus.pending,
+      );
 
-    // Auto-resume interrupted downloads
-    final downloads = await _dao.getAll();
-    final interrupted = downloads.where(
-      (d) =>
-          d.status == DownloadStatus.downloading ||
-          d.status == DownloadStatus.pending,
-    );
-
-    for (final download in interrupted) {
-      resumeDownload(download.id);
+      for (final download in interrupted) {
+        resumeDownload(download.id);
+      }
+    } catch (e) {
+      Logger.w('Failed to auto-resume downloads: $e', tag: _tag);
     }
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    _initTimer?.cancel();
+    _downloadsSub?.cancel();
+    super.dispose();
   }
 
   /// Update active tasks and wakelock
