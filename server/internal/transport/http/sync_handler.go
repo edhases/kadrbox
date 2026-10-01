@@ -7,16 +7,15 @@ import (
 	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
-	"github.com/edhases/oxide-server/internal/repository/postgres"
 	"github.com/edhases/oxide-server/internal/transport/http/middleware"
 )
 
 type SyncHandler struct {
-	historyRepo   *postgres.HistoryRepository
-	favoritesRepo *postgres.FavoritesRepository
+	historyRepo   HistoryStore
+	favoritesRepo FavoritesStore
 }
 
-func NewSyncHandler(historyRepo *postgres.HistoryRepository, favoritesRepo *postgres.FavoritesRepository) *SyncHandler {
+func NewSyncHandler(historyRepo HistoryStore, favoritesRepo FavoritesStore) *SyncHandler {
 	return &SyncHandler{
 		historyRepo:   historyRepo,
 		favoritesRepo: favoritesRepo,

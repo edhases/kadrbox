@@ -24,14 +24,13 @@ import (
 	"github.com/edhases/oxide-server/internal/domain"
 	"github.com/edhases/oxide-server/internal/email"
 	"github.com/edhases/oxide-server/internal/repository/postgres"
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
 	"github.com/edhases/oxide-server/internal/transport/http/middleware"
 	"github.com/google/uuid"
 )
 
 type AuthHandler struct {
-	userRepo            *postgres.UserRepository
-	redisClient         *redisRepo.RedisClient
+	userRepo            UserStore
+	redisClient         RefreshStore
 	emailSvc            *email.Service
 	jwtSecret           string
 	googleClientID      string
@@ -46,8 +45,8 @@ type AuthHandler struct {
 }
 
 func NewAuthHandler(
-	userRepo *postgres.UserRepository,
-	redisClient *redisRepo.RedisClient,
+	userRepo UserStore,
+	redisClient RefreshStore,
 	emailSvc *email.Service,
 	jwtSecret string,
 	googleClientID string,

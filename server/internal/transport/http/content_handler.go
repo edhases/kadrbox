@@ -11,16 +11,15 @@ import (
 
 	"github.com/edhases/oxide-server/internal/domain"
 	"github.com/edhases/oxide-server/internal/provider"
-	"github.com/edhases/oxide-server/internal/repository/postgres"
 	"github.com/edhases/oxide-server/internal/search"
 )
 
 type ContentHandler struct {
 	registry  *provider.Registry
-	cacheRepo *postgres.CacheRepository
+	cacheRepo ContentCache
 }
 
-func NewContentHandler(registry *provider.Registry, cacheRepo *postgres.CacheRepository) *ContentHandler {
+func NewContentHandler(registry *provider.Registry, cacheRepo ContentCache) *ContentHandler {
 	return &ContentHandler{
 		registry:  registry,
 		cacheRepo: cacheRepo,
