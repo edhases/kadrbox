@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../../core/error/exceptions.dart';
 import '../../core/utils/logger.dart';
 import '../../domain/entities/entities.dart';
 import '../database/app_database.dart';
@@ -22,6 +23,9 @@ class FavoritesService extends ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
+  bool _cloudSyncDisabled = false;
+  VoidCallback? _authListener;
+
   StreamSubscription<List<Favorite>>? _subscription;
   Timer? _syncTimer;
 
@@ -36,6 +40,16 @@ class FavoritesService extends ChangeNotifier {
   }
 
   void _init() {
+    _authListener = () {
+      if (!_authService.isAuthenticated) {
+        _cloudSyncDisabled = true;
+      } else {
+        _cloudSyncDisabled = false;
+        _pullFromCloud();
+      }
+    };
+    _authService.addListener(_authListener!);
+
     Logger.d('Initializing favorites service...', tag: 'Favorites');
     _subscription = _dao.watchAll().listen((items) {
       Logger.d('Favorites updated: ${items.length} items', tag: 'Favorites');
@@ -126,11 +140,23 @@ class FavoritesService extends ChangeNotifier {
     return _dao.watchIsFavorite(mediaId, providerId);
   }
 
+  bool _isAuthError(dynamic e) {
+    if (e is ServerException && e.statusCode == 401) return true;
+    final msg = e.toString().toLowerCase();
+    return msg.contains('http_401') ||
+        msg.contains('401') ||
+        msg.contains('invalid or expired');
+  }
+
   // ==================== Cloud Sync Methods ====================
 
   /// Pull favorites from cloud and merge with local (called on startup)
   Future<void> _pullFromCloud() async {
-    if (!_authService.isAuthenticated) return;
+    if (!_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled) {
+      return;
+    }
 
     try {
       final user = _authService.currentUser;
@@ -174,13 +200,23 @@ class FavoritesService extends ChangeNotifier {
         debugPrint('[Favorites] Server cloud pull complete');
       }
     } catch (e) {
-      debugPrint('[Favorites] Pull error: $e');
+      if (_isAuthError(e)) {
+        _cloudSyncDisabled = true;
+        debugPrint('[Favorites] Pull token expired, skipping sync');
+      } else {
+        debugPrint('[Favorites] Pull error: $e');
+      }
     }
   }
 
   /// Sync local favorites to cloud (periodic)
   Future<void> _syncToCloud() async {
-    if (!_authService.isAuthenticated || _isSyncing) return;
+    if (!_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled ||
+        _isSyncing) {
+      return;
+    }
 
     try {
       _isSyncing = true;
@@ -193,7 +229,19 @@ class FavoritesService extends ChangeNotifier {
       debugPrint('[Favorites] Syncing ${localFavs.length} favorites to cloud');
 
       for (final fav in localFavs) {
-        await _syncSingleItemToCloud(fav, true);
+        if (_cloudSyncDisabled || !_server.isAuthenticated) break;
+
+        try {
+          await _syncSingleItemToCloud(fav, true);
+        } catch (e) {
+          if (_isAuthError(e)) {
+            debugPrint(
+              '[Favorites] Token expired, stopping batch sync immediately',
+            );
+            _cloudSyncDisabled = true;
+            break;
+          }
+        }
       }
 
       debugPrint('[Favorites] Sync to cloud complete');
@@ -207,7 +255,11 @@ class FavoritesService extends ChangeNotifier {
 
   /// Sync single item to cloud in background
   void _syncSingleItem(String mediaId, String providerId, bool isFavorite) {
-    if (!_authService.isAuthenticated) return;
+    if (!_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled) {
+      return;
+    }
 
     // Run in background (don't await)
     Future.microtask(() async {
@@ -223,7 +275,13 @@ class FavoritesService extends ChangeNotifier {
   /// Helper to sync single favorite to cloud
   Future<void> _syncSingleItemToCloud(Favorite? fav, bool isFavorite) async {
     final user = _authService.currentUser;
-    if (user == null || fav == null) return;
+    if (user == null ||
+        fav == null ||
+        !_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled) {
+      return;
+    }
 
     try {
       if (_server.isAuthenticated) {
@@ -249,6 +307,10 @@ class FavoritesService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('[Favorites] Cloud sync error: $e');
+      if (_isAuthError(e)) {
+        _cloudSyncDisabled = true;
+        rethrow;
+      }
     }
   }
 
@@ -259,6 +321,9 @@ class FavoritesService extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_authListener != null) {
+      _authService.removeListener(_authListener!);
+    }
     _subscription?.cancel();
     _syncTimer?.cancel();
     super.dispose();

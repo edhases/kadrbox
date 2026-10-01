@@ -83,6 +83,9 @@ func (p *LavakinoProvider) GetPopular(ctx context.Context, contentType string, p
 	}
 	html, err := p.client.Get(ctx, reqURL, p.baseURL)
 	if err != nil {
+		if strings.Contains(err.Error(), "status 404") {
+			return []domain.MediaItem{}, nil
+		}
 		return nil, fmt.Errorf("lavakino get popular: %w", err)
 	}
 	return p.parseCatalogHtml(html)
@@ -104,6 +107,9 @@ func (p *LavakinoProvider) GetByCategory(ctx context.Context, category, contentT
 	}
 	html, err := p.client.Get(ctx, reqURL, p.baseURL)
 	if err != nil {
+		if strings.Contains(err.Error(), "status 404") {
+			return []domain.MediaItem{}, nil
+		}
 		return nil, fmt.Errorf("lavakino get category: %w", err)
 	}
 	return p.parseCatalogHtml(html)
@@ -112,11 +118,11 @@ func (p *LavakinoProvider) GetByCategory(ctx context.Context, category, contentT
 func (p *LavakinoProvider) getSection(contentType string) string {
 	switch contentType {
 	case "movie":
-		return "film"
+		return "filmys"
 	case "series":
-		return "serial"
+		return "serialy"
 	case "cartoon":
-		return "mult"
+		return "cartoonss"
 	case "anime":
 		return "anime"
 	default:

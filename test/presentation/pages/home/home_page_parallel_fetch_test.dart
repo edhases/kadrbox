@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:oxide_film/data/providers/provider_registry.dart';
 import 'package:oxide_film/domain/entities/entities.dart';
@@ -13,11 +14,13 @@ import 'package:oxide_film/domain/repositories/content_provider.dart';
 import 'package:oxide_film/data/services/recommendation_service.dart';
 import 'package:oxide_film/data/services/episode_update_service.dart';
 import 'package:oxide_film/data/services/history_service.dart';
+import 'package:oxide_film/data/services/favorites_service.dart';
+import 'package:oxide_film/data/services/download_service.dart';
 
 import '../../../helpers/mock_services.dart';
 import 'package:mocktail/mocktail.dart';
 
-class _FakeProvider implements ContentProvider {
+class _FakeProvider extends ContentProvider {
   @override
   final String id;
 
@@ -148,6 +151,17 @@ void main() {
     when(() => mockHistoryService.addListener(any())).thenReturn(null);
     when(() => mockHistoryService.removeListener(any())).thenReturn(null);
     GetIt.I.registerSingleton<HistoryService>(mockHistoryService);
+
+    final mockFavoritesService = MockFavoritesService();
+    when(() => mockFavoritesService.isFavorite(any(), any())).thenReturn(false);
+    when(() => mockFavoritesService.favorites).thenReturn([]);
+    when(() => mockFavoritesService.addListener(any())).thenReturn(null);
+    when(() => mockFavoritesService.removeListener(any())).thenReturn(null);
+    GetIt.I.registerSingleton<FavoritesService>(mockFavoritesService);
+
+    final mockDownloadService = MockDownloadService();
+    when(() => mockDownloadService.getLocalPosterPath(any(), any())).thenReturn(null);
+    GetIt.I.registerSingleton<DownloadService>(mockDownloadService);
   });
 
   tearDown(() {
@@ -193,7 +207,16 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: HomePage())));
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const Scaffold(body: HomePage()),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
     // Allow async content to load
     await tester.pumpAndSettle(const Duration(seconds: 1));

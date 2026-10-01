@@ -8,6 +8,7 @@ import 'package:oxide_film/domain/entities/entities.dart';
 import 'package:oxide_film/presentation/widgets/media_card.dart';
 import 'package:oxide_film/presentation/widgets/rating_badge.dart';
 import 'package:oxide_film/data/services/settings_service.dart';
+import 'package:oxide_film/data/services/download_service.dart';
 import '../../helpers/mock_services.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -17,20 +18,26 @@ void main() {
 
     setUp(() {
       mockSettings = MockSettingsService();
-      // Default UI settings enabling ratings/years
+      const uiSettings = UISettings(showRatings: true, showYears: true);
+      when(() => mockSettings.uiSettings).thenReturn(uiSettings);
       when(() => mockSettings.state).thenReturn(
-        const SettingsState(
-          uiSettings: UISettings(showRatings: true, showYears: true),
-        ),
+        const SettingsState(uiSettings: uiSettings),
       );
 
       GetIt.I.registerSingleton<SettingsService>(mockSettings);
+
+      final mockDownloadService = MockDownloadService();
+      when(() => mockDownloadService.getLocalPosterPath(any(), any())).thenReturn(null);
+      GetIt.I.registerSingleton<DownloadService>(mockDownloadService);
     });
 
     tearDown(() {
       // Cleanup GetIt registration
       if (GetIt.I.isRegistered<SettingsService>()) {
         GetIt.I.unregister<SettingsService>();
+      }
+      if (GetIt.I.isRegistered<DownloadService>()) {
+        GetIt.I.unregister<DownloadService>();
       }
     });
 
@@ -61,10 +68,10 @@ void main() {
         );
 
         // Placeholder icon present
-        expect(find.byIcon(Icons.movie), findsWidgets);
+        expect(find.byIcon(Icons.movie_outlined), findsWidgets);
 
-        // RatingBadge present and displays rating 8.5
-        expect(find.byType(RatingBadge), findsOneWidget);
+        // Rating badge present and displays rating 8.5
+        expect(find.byIcon(Icons.star_rounded), findsOneWidget);
         expect(find.text('8.5'), findsOneWidget);
       },
     );

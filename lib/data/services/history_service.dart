@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../../core/error/exceptions.dart';
 import '../database/app_database.dart';
 import '../database/dao/history_dao.dart';
 import 'oxide_server_service.dart';
@@ -30,6 +31,9 @@ class HistoryService extends ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
+  bool _cloudSyncDisabled = false;
+  VoidCallback? _authListener;
+
   StreamSubscription<List<WatchHistoryData>>? _historySubscription;
   StreamSubscription<List<WatchHistoryData>>? _continueSubscription;
   Timer? _syncTimer;
@@ -45,6 +49,15 @@ class HistoryService extends ChangeNotifier {
   }
 
   void _init() {
+    _authListener = () {
+      if (!_authService.isAuthenticated) {
+        _cloudSyncDisabled = true;
+      } else {
+        _cloudSyncDisabled = false;
+        _pullFromCloud();
+      }
+    };
+    _authService.addListener(_authListener!);
     // Cleanup duplicates on startup (fire and forget)
     _dao.cleanupDuplicates().then((count) {
       if (count > 0) {
@@ -114,7 +127,9 @@ class HistoryService extends ChangeNotifier {
       providerId: providerId,
       season: season,
       episode: episode,
-    );
+    ).catchError((e) {
+      // Ignored: _cloudSyncDisabled is handled inside _syncSingleItemToCloud
+    });
   }
 
   /// Get last position for media
@@ -176,13 +191,25 @@ class HistoryService extends ChangeNotifier {
     return '${remaining.inMinutes}хв залишилось';
   }
 
+  bool _isAuthError(dynamic e) {
+    if (e is ServerException && e.statusCode == 401) return true;
+    final msg = e.toString().toLowerCase();
+    return msg.contains('http_401') ||
+        msg.contains('401') ||
+        msg.contains('invalid or expired');
+  }
+
   // ============================================================================
   // Cloud Sync Methods
   // ============================================================================
 
   /// Pull latest history from cloud and merge with local
   Future<void> _pullFromCloud() async {
-    if (!_authService.isAuthenticated) return;
+    if (!_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled) {
+      return;
+    }
 
     try {
       _isSyncing = true;
@@ -242,9 +269,8 @@ class HistoryService extends ChangeNotifier {
         return;
       }
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('HTTP_401') ||
-          msg.contains('invalid or expired token')) {
+      if (_isAuthError(e)) {
+        _cloudSyncDisabled = true;
         debugPrint('⚠️ Cloud pull: token expired, skipping sync');
       } else {
         debugPrint('⚠️ Failed to pull from cloud: $e');
@@ -257,7 +283,11 @@ class HistoryService extends ChangeNotifier {
 
   /// Sync all local history to cloud
   Future<void> _syncToCloud() async {
-    if (!_authService.isAuthenticated) return;
+    if (!_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled) {
+      return;
+    }
 
     try {
       _isSyncing = true;
@@ -265,10 +295,9 @@ class HistoryService extends ChangeNotifier {
 
       final localHistory = await _dao.getAll(limit: 500);
       int synced = 0;
-      bool tokenExpired = false;
 
       for (final item in localHistory) {
-        if (tokenExpired) break; // зупиняємо якщо токен протух — не спамимо
+        if (_cloudSyncDisabled || !_server.isAuthenticated) break;
 
         try {
           await _syncSingleItemToCloud(
@@ -279,12 +308,12 @@ class HistoryService extends ChangeNotifier {
           );
           synced++;
         } catch (e) {
-          final msg = e.toString();
-          // Якщо токен протух — зупиняємо весь батч, не пробуємо решту
-          if (msg.contains('HTTP_401') ||
-              msg.contains('invalid or expired token')) {
-            debugPrint('Cloud sync: token expired, stopping batch sync');
-            tokenExpired = true;
+          if (_isAuthError(e)) {
+            debugPrint(
+              'Cloud sync: token expired, stopping batch sync immediately',
+            );
+            _cloudSyncDisabled = true;
+            break;
           } else {
             debugPrint('Failed to sync ${item.mediaId}: $e');
           }
@@ -307,7 +336,11 @@ class HistoryService extends ChangeNotifier {
     int? season,
     int? episode,
   }) async {
-    if (!_authService.isAuthenticated) return;
+    if (!_authService.isAuthenticated ||
+        !_server.isAuthenticated ||
+        _cloudSyncDisabled) {
+      return;
+    }
 
     try {
       final localItem = await _dao.getForMedia(
@@ -347,6 +380,10 @@ class HistoryService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Failed to sync item to cloud: $e');
+      if (_isAuthError(e)) {
+        _cloudSyncDisabled = true;
+        rethrow;
+      }
     }
   }
 
@@ -358,6 +395,9 @@ class HistoryService extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_authListener != null) {
+      _authService.removeListener(_authListener!);
+    }
     _historySubscription?.cancel();
     _continueSubscription?.cancel();
     _syncTimer?.cancel();

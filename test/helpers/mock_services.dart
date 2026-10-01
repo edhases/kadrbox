@@ -4,6 +4,8 @@
 import 'package:mocktail/mocktail.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:oxide_film/data/services/history_service.dart';
+import 'package:oxide_film/data/services/favorites_service.dart';
+import 'package:oxide_film/data/services/download_service.dart';
 import 'package:oxide_film/data/services/settings_service.dart';
 import 'package:oxide_film/data/services/watch_party_service.dart';
 import 'package:oxide_film/core/network/api_client.dart';
@@ -12,6 +14,10 @@ import 'package:oxide_film/data/services/episode_update_service.dart';
 import 'package:oxide_film/data/services/user_agent_service.dart';
 
 class MockHistoryService extends Mock implements HistoryService {}
+
+class MockFavoritesService extends Mock implements FavoritesService {}
+
+class MockDownloadService extends Mock implements DownloadService {}
 
 class MockSettingsService extends Mock implements SettingsService {}
 

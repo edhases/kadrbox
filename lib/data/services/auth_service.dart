@@ -59,10 +59,21 @@ class AuthService extends ChangeNotifier {
   String get displayName => userName ?? userEmail?.split('@').first ?? 'Гість';
 
   AuthService(this._server) {
+    _server.onAuthExpired = _onAuthExpired;
     if (isAuthenticated) {
       Logger.i('User already authenticated: $userEmail', tag: _tag);
       fetchLinkedProviders();
     }
+  }
+
+  void _onAuthExpired() {
+    Logger.w(
+      'Auth expired notification received from OxideServerService',
+      tag: _tag,
+    );
+    _linkedProviders = [];
+    _error = null;
+    notifyListeners();
   }
 
   /// Sign up with email and password
@@ -324,7 +335,12 @@ class AuthService extends ChangeNotifier {
   /// Refresh authentication token
   Future<bool> refreshAuth() async {
     if (_server.isAuthenticated) {
-      return await _server.refreshAuth();
+      final success = await _server.refreshAuth();
+      if (!success && !_server.isAuthenticated) {
+        _linkedProviders = [];
+        notifyListeners();
+      }
+      return success;
     }
     return false;
   }

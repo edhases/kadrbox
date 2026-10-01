@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -23,6 +24,10 @@ class OxideServerService {
   String? _accessToken;
   String? _refreshToken;
   Map<String, dynamic>? _user;
+
+  /// Callback when session expires (401 on refresh or sync).
+  VoidCallback? onAuthExpired;
+  Future<bool>? _refreshFuture;
 
   OxideServerService(this._prefs, this._apiClient) {
     _loadState();
@@ -56,6 +61,19 @@ class OxideServerService {
   bool get isVerified => (_user?['is_verified'] as bool?) ?? false;
   Map<String, dynamic>? get user => _user;
   String? get accessToken => _accessToken;
+
+  bool _isUnauthorized(dynamic e) {
+    if (e is ServerException && e.statusCode == 401) return true;
+    final str = e.toString().toLowerCase();
+    return str.contains('http_401') ||
+        str.contains('401') ||
+        str.contains('invalid or expired');
+  }
+
+  Future<void> _handleAuthExpired() async {
+    Logger.w('Auth expired or invalid, clearing session and notifying listeners', tag: _tag);
+    await signOut();
+  }
 
   // ===========================================================================
   // Authentication & Profile
@@ -409,11 +427,26 @@ class OxideServerService {
     await _prefs.remove(_refreshKey);
     await _prefs.remove(_userKey);
     Logger.i('User signed out and tokens cleared', tag: _tag);
+    onAuthExpired?.call();
   }
 
-  /// Refresh auth access token
-  Future<bool> refreshAuth() async {
-    if (_refreshToken == null || _refreshToken!.isEmpty) return false;
+  /// Refresh auth access token with single-flight deduplication
+  Future<bool> refreshAuth() {
+    if (_refreshFuture != null) {
+      return _refreshFuture!;
+    }
+    final future = _doRefreshAuth();
+    _refreshFuture = future;
+    return future.whenComplete(() {
+      _refreshFuture = null;
+    });
+  }
+
+  Future<bool> _doRefreshAuth() async {
+    if (_refreshToken == null || _refreshToken!.isEmpty) {
+      await _handleAuthExpired();
+      return false;
+    }
 
     final url = '${AppConfig.serverApiUrl}/auth/refresh';
     try {
@@ -433,18 +466,16 @@ class OxideServerService {
         Logger.d('Auth token refreshed successfully', tag: _tag);
         return true;
       }
+      await _handleAuthExpired();
       return false;
     } catch (e) {
       Logger.w('Failed to refresh token: $e', tag: _tag);
-      final errorStr = e.toString().toLowerCase();
-      if ((e is ServerException && e.statusCode == 401) ||
-          errorStr.contains('401') ||
-          errorStr.contains('invalid or expired')) {
+      if (_isUnauthorized(e)) {
         Logger.i(
           'Refresh token is invalid or expired, clearing session',
           tag: _tag,
         );
-        await signOut();
+        await _handleAuthExpired();
       }
       return false;
     }
@@ -631,6 +662,10 @@ class OxideServerService {
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       Logger.w('Failed to get history from server: $e', tag: _tag);
+      if (_isUnauthorized(e)) {
+        await _handleAuthExpired();
+        rethrow;
+      }
       return [];
     }
   }
@@ -675,6 +710,10 @@ class OxideServerService {
       await _apiClient.post(url, data: payload);
     } catch (e) {
       Logger.w('Failed to sync history item to server: $e', tag: _tag);
+      if (_isUnauthorized(e)) {
+        await _handleAuthExpired();
+        rethrow;
+      }
     }
   }
 
@@ -692,6 +731,10 @@ class OxideServerService {
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       Logger.w('Failed to get continue-watching from server: $e', tag: _tag);
+      if (_isUnauthorized(e)) {
+        await _handleAuthExpired();
+        rethrow;
+      }
       return [];
     }
   }
@@ -715,6 +758,10 @@ class OxideServerService {
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       Logger.w('Failed to get favorites from server: $e', tag: _tag);
+      if (_isUnauthorized(e)) {
+        await _handleAuthExpired();
+        rethrow;
+      }
       return [];
     }
   }
@@ -751,6 +798,10 @@ class OxideServerService {
       }
     } catch (e) {
       Logger.w('Failed to toggle favorite on server: $e', tag: _tag);
+      if (_isUnauthorized(e)) {
+        await _handleAuthExpired();
+        rethrow;
+      }
     }
     return false;
   }
@@ -769,6 +820,10 @@ class OxideServerService {
       );
     } catch (e) {
       Logger.w('Failed to remove favorite from server: $e', tag: _tag);
+      if (_isUnauthorized(e)) {
+        await _handleAuthExpired();
+        rethrow;
+      }
     }
   }
 
