@@ -7,6 +7,9 @@ type StreamSource struct {
 	DirectURL     string            `json:"direct_url"`    // Пряме CDN посилання
 	RequiresProxy bool              `json:"requires_proxy"`
 	Headers       map[string]string `json:"headers"`       // Важливо: Referer, User-Agent для передачі в media_kit!
+	Voiceover     string            `json:"voiceover,omitempty"`
+	Language      string            `json:"language,omitempty"`
+	Player        string            `json:"player,omitempty"`
 }
 
 // SubtitleSource описує субтитри

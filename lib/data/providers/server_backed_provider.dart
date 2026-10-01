@@ -533,12 +533,16 @@ class ServerBackedProvider extends ContentProvider {
         _asString(json['voiceover']) ??
         _asString(json['audio']) ??
         _asString(json['dub']);
+    final player =
+        _asString(json['player']) ??
+        _asString(json['source_name']);
     return StreamSource(
       url: url,
       quality: _mapQuality(_asString(json['quality'])),
       type: _mapStreamType(url),
       language: language,
-      voiceover: voiceover,
+      voiceover: voiceover ?? player,
+      sourceName: player,
       headers: headers is Map
           ? headers.map((k, v) => MapEntry(k.toString(), v.toString()))
           : null,

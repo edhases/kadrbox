@@ -531,24 +531,46 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 
 			// Якщо потік уже містить прямий URL (без потреби виклику /stream)
 			if len(st.Ref) == 0 && st.URL.String() != "" {
-				cleanURL, parsedQuality := ParsePackedStreamURL(st.URL.String())
-				quality := st.Quality.String()
-				if quality == "" || quality == "auto" {
-					quality = parsedQuality
-				}
-				playableURL, directURL, requiresProxy := WrapStreamURL(targetSource, "inner", cleanURL)
-				headers := BuildStreamHeaders(playableURL, requiresProxy)
-				return &domain.ContentStreamsResponse{
-					ProviderID: p.ID(),
-					Streams: []domain.StreamSource{{
+				var directStreams []domain.StreamSource
+				var allSubs []BanderaSubtitleItem
+				for i, sItem := range contentResp.Streams {
+					if voiceID != "" {
+						if idx, err := strconv.Atoi(voiceID); err == nil && idx != i {
+							continue
+						}
+					}
+					if sItem.URL.String() == "" {
+						continue
+					}
+					cleanURL, parsedQuality := ParsePackedStreamURL(sItem.URL.String())
+					quality := sItem.Quality.String()
+					if quality == "" || quality == "auto" {
+						quality = parsedQuality
+					}
+					vName := sItem.Title.String()
+					if vName == "" {
+						vName = fmt.Sprintf("Джерело %d", i+1)
+					}
+					playableURL, directURL, requiresProxy := WrapStreamURL(targetSource, "inner", cleanURL)
+					headers := BuildStreamHeaders(playableURL, requiresProxy)
+					directStreams = append(directStreams, domain.StreamSource{
 						Quality:       quality,
 						URL:           playableURL,
 						DirectURL:     directURL,
 						RequiresProxy: requiresProxy,
 						Headers:       headers,
-					}},
-					Subtitles: MergeSubtitles(st.Subtitles, nil),
-				}, nil
+						Player:        targetSource,
+						Voiceover:     vName,
+					})
+					allSubs = append(allSubs, sItem.Subtitles...)
+				}
+				if len(directStreams) > 0 {
+					return &domain.ContentStreamsResponse{
+						ProviderID: p.ID(),
+						Streams:    directStreams,
+						Subtitles:  MergeSubtitles(allSubs, nil),
+					}, nil
+				}
 			}
 
 			targetStreamRef = st.Ref
@@ -594,6 +616,10 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 
 	// 6. Формуємо стріми з урахуванням правил proxy та заголовків
 	var streams []domain.StreamSource
+	streamVoiceover := targetSource
+	if voiceID != "" {
+		streamVoiceover = voiceID
+	}
 	for _, s := range streamResp.Streams {
 		rawURL := s.URL.String()
 		if rawURL == "" {
@@ -615,6 +641,8 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 			DirectURL:     directURL,
 			RequiresProxy: requiresProxy,
 			Headers:       headers,
+			Player:        targetSource,
+			Voiceover:     streamVoiceover,
 		})
 	}
 

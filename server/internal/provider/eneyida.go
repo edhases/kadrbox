@@ -331,5 +331,5 @@ func (p *EneyidaProvider) GetStreams(ctx context.Context, itemURL string, season
 	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
 	defer cancel()
 
-	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html)
+	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html, season, episode, voiceID)
 }

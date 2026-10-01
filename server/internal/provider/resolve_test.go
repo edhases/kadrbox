@@ -10,7 +10,9 @@ package provider
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -394,3 +396,242 @@ func TestCharsetOf(t *testing.T) {
 		}
 	}
 }
+
+func TestParseMultiQualityString(t *testing.T) {
+	raw := "[1080p]https://cdn.example/video_1080.m3u8,[720p]https://cdn.example/video_720.m3u8,[480p]https://cdn.example/video_480.m3u8"
+	streams := parseMultiQualityString(raw, "https://ashdi.vip/vod/123", "Ashdi")
+	if len(streams) != 3 {
+		t.Fatalf("expected 3 streams, got %d", len(streams))
+	}
+	if streams[0].Quality != "1080p" || streams[0].Player != "Ashdi" || streams[0].Voiceover != "Ashdi" {
+		t.Errorf("stream 0 mismatch: %+v", streams[0])
+	}
+	if streams[1].Quality != "720p" {
+		t.Errorf("stream 1 quality mismatch: %s", streams[1].Quality)
+	}
+	if streams[2].Quality != "480p" {
+		t.Errorf("stream 2 quality mismatch: %s", streams[2].Quality)
+	}
+
+	// Test " or " separator
+	rawOr := "[FullHD]https://cdn.example/1080.mp4 or [HD]https://cdn.example/720.mp4"
+	streamsOr := parseMultiQualityString(rawOr, "https://hdvbua.pro/embed/1", "HDVB")
+	if len(streamsOr) != 2 {
+		t.Fatalf("expected 2 streams for 'or' format, got %d", len(streamsOr))
+	}
+	if streamsOr[0].Quality != "1080p" || streamsOr[1].Quality != "720p" {
+		t.Errorf("unexpected qualities: %s, %s", streamsOr[0].Quality, streamsOr[1].Quality)
+	}
+}
+
+func TestParseSubtitlesFromPlayerHTML(t *testing.T) {
+	html := `<html><body>
+	<script>
+	var player = new Playerjs({
+		file: "https://cdn.example/master.m3u8",
+		subtitle: "[Українська]https://cdn.example/subs/uk.vtt,[English]https://cdn.example/subs/en.vtt"
+	});
+	</script>
+	<video>
+		<track kind="subtitles" src="https://cdn.example/subs/pl.vtt" label="Польська" srclang="pl">
+	</video>
+	</body></html>`
+
+	subs := parseSubtitlesFromPlayerHTML(html)
+	if len(subs) != 3 {
+		t.Fatalf("expected 3 subtitles, got %d", len(subs))
+	}
+	if subs[0].Label != "Українська" || subs[0].URL != "https://cdn.example/subs/uk.vtt" {
+		t.Errorf("sub 0 mismatch: %+v", subs[0])
+	}
+	if subs[1].Label != "English" || subs[1].URL != "https://cdn.example/subs/en.vtt" {
+		t.Errorf("sub 1 mismatch: %+v", subs[1])
+	}
+	if subs[2].Label != "Польська" || subs[2].URL != "https://cdn.example/subs/pl.vtt" {
+		t.Errorf("sub 2 mismatch: %+v", subs[2])
+	}
+}
+
+func TestExtractStreamsFromPlaylistTree(t *testing.T) {
+	playlistJSON := `[
+		{
+			"title": "1+1 (Дубляж)",
+			"folder": [
+				{
+					"title": "1 сезон",
+					"folder": [
+						{"title": "1 серія", "file": "[1080p]https://cdn.example/s1e1_1080.m3u8,[720p]https://cdn.example/s1e1_720.m3u8"},
+						{"title": "2 серія", "file": "https://cdn.example/s1e2.m3u8"}
+					]
+				}
+			]
+		},
+		{
+			"title": "Цікава Ідея",
+			"folder": [
+				{
+					"title": "1 сезон",
+					"folder": [
+						{"title": "1 серія", "file": "https://cdn.example/ci_s1e1.m3u8"}
+					]
+				}
+			]
+		}
+	]`
+
+	var items []playerJSPlaylistItem
+	if err := json.Unmarshal([]byte(playlistJSON), &items); err != nil {
+		t.Fatalf("unmarshal playlist failed: %v", err)
+	}
+
+	// 1. Season 1, Episode 1 (all voices if voiceID empty)
+	streams, _ := extractStreamsFromPlaylistTree(items, "https://ashdi.vip/serial/1", "Ashdi", 1, 1, "")
+	if len(streams) != 3 { // 2 qualities from 1+1, 1 from Цікава Ідея
+		t.Fatalf("expected 3 streams for s1e1 across voices, got %d", len(streams))
+	}
+	if !strings.Contains(streams[0].Voiceover, "1+1") {
+		t.Errorf("expected 1+1 voiceover, got %q", streams[0].Voiceover)
+	}
+
+	// 2. Specific voice: "Цікава Ідея"
+	streamsVoice, _ := extractStreamsFromPlaylistTree(items, "https://ashdi.vip/serial/1", "Ashdi", 1, 1, "Цікава Ідея")
+	if len(streamsVoice) != 1 {
+		t.Fatalf("expected 1 stream for Цікава Ідея, got %d", len(streamsVoice))
+	}
+	if streamsVoice[0].URL != "https://cdn.example/ci_s1e1.m3u8" {
+		t.Errorf("unexpected URL: %s", streamsVoice[0].URL)
+	}
+}
+
+func TestRankPlayerCandidates_TabsAndSelect(t *testing.T) {
+	html := `<html><body>
+		<ul class="player-tabs">
+			<li data-src="https://ashdi.vip/vod/101">Плеєр 1 (Ashdi)</li>
+			<li data-player="https://hdvbua.pro/embed/202">Плеєр 2 (HDVB - Дубляж 1+1)</li>
+		</ul>
+		<select id="player_select">
+			<option value="https://zenith.media/embed/303">Zenith</option>
+		</select>
+		<iframe id="main_frame" src="https://videohost.org/video/404" title="Videohost"></iframe>
+		<iframe src="https://google.com/recaptcha/api"></iframe>
+	</body></html>`
+
+	candidates := rankPlayerCandidates(html, "https://lavakino.net/filmys/1-test.html")
+	if len(candidates) != 4 {
+		t.Fatalf("expected 4 player candidates, got %d", len(candidates))
+	}
+
+	urls := make([]string, len(candidates))
+	for i, c := range candidates {
+		urls[i] = c.URL
+	}
+
+	// Verify all 4 players are discovered and recaptcha skipped
+	expectedHosts := []string{"ashdi.vip", "hdvbua.pro", "zenith.media", "videohost.org"}
+	for _, expected := range expectedHosts {
+		found := false
+		for _, u := range urls {
+			if strings.Contains(u, expected) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected host %q in candidates, but got %v", expected, urls)
+		}
+	}
+}
+
+func TestResolveStreamsFromItemPage_MultiplePlayers(t *testing.T) {
+	// Setup 4 mock player servers (e.g. Lavakino "Величне століття: Роксолана" with 4 players)
+	srvAshdi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><script>
+		var player = new Playerjs({
+			file: "[1080p]https://cdn.ashdi.vip/1080.m3u8,[720p]https://cdn.ashdi.vip/720.m3u8",
+			subtitle: "[Українська]https://cdn.ashdi.vip/sub_uk.vtt"
+		});
+		</script></body></html>`))
+	}))
+	defer srvAshdi.Close()
+
+	srvZenith := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><script>
+		Hls.loadSource("https://cdn.zenith.media/master.m3u8");
+		</script></body></html>`))
+	}))
+	defer srvZenith.Close()
+
+	srvHDVB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><script>
+		var p = {sources: [
+			{src: "https://cdn.hdvb.pro/1080p.m3u8", label: "1080p"},
+			{src: "https://cdn.hdvb.pro/720p.m3u8", label: "720p"}
+		]};
+		</script></body></html>`))
+	}))
+	defer srvHDVB.Close()
+
+	srvVideohost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><script>
+		var player = new Playerjs({file: "https://cdn.videohost.org/video.mp4"});
+		</script></body></html>`))
+	}))
+	defer srvVideohost.Close()
+
+	// Item page containing 4 player iframes with tabs
+	itemPageHTML := fmt.Sprintf(`<html><body>
+		<div class="tabs-box">
+			<iframe src="%s/embed/ashdi" title="Ashdi"></iframe>
+			<iframe src="%s/embed/zenith" title="Zenith"></iframe>
+			<iframe src="%s/embed/hdvb" title="HDVB"></iframe>
+			<iframe src="%s/embed/videohost" title="Videohost"></iframe>
+		</div>
+	</body></html>`, srvAshdi.URL, srvZenith.URL, srvHDVB.URL, srvVideohost.URL)
+
+	tls := covTLS(t)
+	resp, err := resolveStreamsFromItemPage(context.Background(), tls, "lavakino", "https://lavakino.net/filmys/100-velychne-stolittya.html", itemPageHTML, 0, 0, "")
+	if err != nil {
+		t.Fatalf("unexpected error resolving 4 players: %v", err)
+	}
+
+	// Ashdi gave 2, Zenith gave 1, HDVB gave 2, Videohost gave 1 -> total 6 streams!
+	if len(resp.Streams) != 6 {
+		t.Fatalf("expected 6 streams from 4 players, got %d", len(resp.Streams))
+	}
+
+	// Verify subtitle merged from Ashdi
+	if len(resp.Subtitles) != 1 || resp.Subtitles[0].Label != "Українська" {
+		t.Errorf("unexpected subtitles: %+v", resp.Subtitles)
+	}
+
+	// Verify all 4 player balancers are represented in streams
+	foundAshdi := false
+	foundZenith := false
+	foundHDVB := false
+	foundVideohost := false
+
+	for _, s := range resp.Streams {
+		if strings.Contains(s.Player, "Ashdi") {
+			foundAshdi = true
+		}
+		if strings.Contains(s.Player, "Zenith") {
+			foundZenith = true
+		}
+		if strings.Contains(s.Player, "HDVB") {
+			foundHDVB = true
+		}
+		if strings.Contains(s.Player, "Videohost") {
+			foundVideohost = true
+		}
+	}
+
+	if !foundAshdi || !foundZenith || !foundHDVB || !foundVideohost {
+		t.Errorf("all 4 players must be present in resolved streams! Ashdi=%v, Zenith=%v, HDVB=%v, Videohost=%v",
+			foundAshdi, foundZenith, foundHDVB, foundVideohost)
+	}
+}
+

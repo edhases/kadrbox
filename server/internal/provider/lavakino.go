@@ -357,5 +357,5 @@ func (p *LavakinoProvider) GetStreams(ctx context.Context, itemURL string, seaso
 	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
 	defer cancel()
 
-	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html)
+	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html, season, episode, voiceID)
 }

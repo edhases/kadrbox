@@ -352,7 +352,7 @@ func (p *UakinoProvider) GetStreams(ctx context.Context, itemURL string, season,
 	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
 	defer cancel()
 
-	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html)
+	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html, season, episode, voiceID)
 }
 
 func parseYear(text string) int {

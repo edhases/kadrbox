@@ -2,20 +2,28 @@ package provider
 
 // Shared player-page resolver for the DLE based providers (uakino, eneyida, lavakino).
 //
-// Background: every DLE item page embeds the real player in an <iframe>. Handing
-// that iframe URL to libmpv is a guaranteed 100% playback failure, because the
-// iframe serves text/html and mpv answers with
-// "Failed to recognize file format." The iframe URL must therefore never reach
-// the player: it has to be fetched and reduced to an actual media URL first.
+// Background: every DLE item page embeds the real player in an <iframe> or tabbed
+// player containers (Ashdi, Zenith, HDVB, Videohost, etc.). Handing that iframe URL
+// to libmpv is a guaranteed 100% playback failure, because the iframe serves text/html
+// and mpv answers with "Failed to recognize file format." The iframe URL must therefore
+// never reach the player: it has to be fetched and reduced to actual media URLs first.
+//
+// Modern movie and TV pages often have MULTIPLE players (e.g. up to 4 players for
+// "Величне століття: Роксолана"), each exposing different balancers, audio dubbings,
+// video qualities (1080p, 720p, 480p), and subtitles. This unified resolver discovers
+// all player candidates on the page, extracts all playable streams with their qualities
+// and dubbings, and merges subtitles into a unified ContentStreamsResponse.
 
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,8 +35,8 @@ import (
 var ErrUnresolvablePlayer = errors.New("provider: player page exposes no playable media")
 
 const (
-	// MaxPlayerIframes caps how many player iframes a single GetStreams call probes.
-	MaxPlayerIframes = 4
+	// MaxPlayerIframes caps how many player candidates a single GetStreams call probes.
+	MaxPlayerIframes = 8
 
 	// PlayerResolveTimeout is the per-call budget for the whole iframe fan-out of
 	// one GetStreams invocation, so a single hung player host cannot eat the
@@ -39,18 +47,26 @@ const (
 	defaultStreamQuality = "Auto"
 )
 
-// Package level regexps: they were previously recompiled on every call, which the
-// audit flagged (and which is measurable on the hot path of every item page).
+// Package level regexps: compiled once for high-throughput stream resolution.
 var (
-	rePlayerJSFile   = regexp.MustCompile(`file\s*:\s*["']([^"']+)["']`)
-	reSourcesBlock   = regexp.MustCompile(`(?s)sources\s*:\s*\[(.*?)\]`)
-	reSourcesSrc     = regexp.MustCompile(`src\s*:\s*["']([^"']+)["']`)
-	reHlsLoadSource  = regexp.MustCompile(`Hls\.loadSource\(\s*["']([^"']+)["']`)
-	reBase64File     = regexp.MustCompile(`["']?file["']?\s*:\s*["']([A-Za-z0-9+/=_-]{16,})["']`)
-	reBareMediaURL   = regexp.MustCompile(`["'(](https?://[^"'()\s<>]+\.(?:m3u8|mpd|mp4)(?:\?[^"'()\s<>]*)?)["')]`)
-	rePlayerPagePath = regexp.MustCompile(`(?i)/(?:embed|player|iframe|watch)`)
-	reMediaExt       = regexp.MustCompile(`(?i)\.(?:m3u8|mpd|mp4)$`)
-	reQualityToken   = regexp.MustCompile(`(?i)\b(4k|2160|1080|720|480|360)p?\b`)
+	rePlayerJSFile     = regexp.MustCompile(`file\s*:\s*["']([^"']+)["']`)
+	rePlayerJSJSONFile = regexp.MustCompile(`file\s*:\s*(\[[^"'].*?\])`)
+	reSourcesBlock     = regexp.MustCompile(`(?s)sources\s*:\s*\[(.*?)\]`)
+	reSourcesSrc       = regexp.MustCompile(`src\s*:\s*["']([^"']+)["']`)
+	reSourcesFile      = regexp.MustCompile(`file\s*:\s*["']([^"']+)["']`)
+	reSourcesLabel     = regexp.MustCompile(`(?:label|title)\s*:\s*["']([^"']+)["']`)
+	reHlsLoadSource    = regexp.MustCompile(`Hls\.loadSource\(\s*["']([^"']+)["']`)
+	reBase64File       = regexp.MustCompile(`["']?file["']?\s*:\s*["']([A-Za-z0-9+/=_-]{16,})["']`)
+	reBareMediaURL     = regexp.MustCompile(`["'(](https?://[^"'()\s<>]+\.(?:m3u8|mpd|mp4)(?:\?[^"'()\s<>]*)?)["')]`)
+	rePlayerPagePath   = regexp.MustCompile(`(?i)/(?:embed|player|iframe|watch)`)
+	reMediaExt         = regexp.MustCompile(`(?i)\.(?:m3u8|mpd|mp4)$`)
+	reQualityToken     = regexp.MustCompile(`(?i)\b(4k|2160|1080|720|480|360)p?\b`)
+	rePlayerJSSubtitle = regexp.MustCompile(`["']?subtitle(?:s)?["']?\s*:\s*["']([^"']+)["']`)
+	reTrackTag         = regexp.MustCompile(`(?i)<track[^>]+>`)
+	reSrcAttr          = regexp.MustCompile(`(?i)\bsrc\s*=\s*["']([^"']+)["']`)
+	reLabelAttr        = regexp.MustCompile(`(?i)\blabel\s*=\s*["']([^"']+)["']`)
+	reSrclangAttr      = regexp.MustCompile(`(?i)\bsrclang\s*=\s*["']([^"']+)["']`)
+	reDigits           = regexp.MustCompile(`\d+`)
 )
 
 // resolveStrategy is one extraction attempt over a chunk of player HTML.
@@ -83,9 +99,7 @@ var plainStrategies = []resolveStrategy{
 //
 // INVARIANT: this function never returns a non-media URL. On total failure it
 // returns a zero-value source together with an error wrapping ErrUnresolvablePlayer,
-// so callers can never accidentally feed an HTML page to mpv. A wrong extraction
-// here reproduces the very bug this resolver exists to fix, hence the explicit
-// validation in isPlayableMediaURL below rather than trusting the regexps.
+// so callers can never accidentally feed an HTML page to mpv.
 func ResolvePlayerHTML(ctx context.Context, client *TLSClient, playerURL, siteBaseURL string) (domain.StreamSource, error) {
 	source, _, err := resolvePlayerHTML(ctx, client, playerURL, siteBaseURL)
 	return source, err
@@ -104,7 +118,11 @@ func resolvePlayerHTML(ctx context.Context, client *TLSClient, playerURL, siteBa
 	}
 
 	if raw, strategy, ok := extractPlayableURL(page); ok {
-		return newStreamSource(raw, playerURL), strategy, nil
+		src := newStreamSource(raw, playerURL)
+		balancer := detectPlayerBalancer(playerURL)
+		src.Player = balancer
+		src.Voiceover = balancer
+		return src, strategy, nil
 	}
 
 	return domain.StreamSource{}, "none", fmt.Errorf("%w: %s", ErrUnresolvablePlayer, playerURL)
@@ -140,6 +158,9 @@ func matchSourcesBlock(text string) (string, bool) {
 			continue
 		}
 		if candidate, ok := firstCaptured(reSourcesSrc, block[1]); ok {
+			return candidate, true
+		}
+		if candidate, ok := firstCaptured(reSourcesFile, block[1]); ok {
 			return candidate, true
 		}
 	}
@@ -218,8 +239,6 @@ func newStreamSource(mediaURL, playerURL string) domain.StreamSource {
 	headers := map[string]string{
 		"User-Agent": Chrome120UserAgent,
 	}
-	// Referer/Origin must belong to the media host: the CDN validates them.
-	// Fall back to the player page when the media URL is not parseable as absolute.
 	referer := playerURL
 	if u, err := url.Parse(mediaURL); err == nil && u.Scheme != "" && u.Host != "" {
 		origin := originOf(u)
@@ -252,6 +271,33 @@ func qualityFromURL(mediaURL string) string {
 		return "4K"
 	}
 	return m[1] + "p"
+}
+
+// normalizeQualityLabel cleans up quality tokens like "1080p", "720", "4K", "FHD".
+func normalizeQualityLabel(q string) string {
+	q = strings.TrimSpace(q)
+	lower := strings.ToLower(q)
+	if strings.Contains(lower, "4k") || strings.Contains(lower, "2160") {
+		return "4K"
+	}
+	if strings.Contains(lower, "fullhd") || strings.Contains(lower, "fhd") {
+		return "1080p"
+	}
+	for _, res := range []string{"1440", "1080", "720", "480", "360"} {
+		if strings.Contains(lower, res) {
+			return res + "p"
+		}
+	}
+	if strings.EqualFold(lower, "hd") {
+		return "720p"
+	}
+	if strings.EqualFold(q, "auto") || strings.EqualFold(q, "авто") {
+		return "Auto"
+	}
+	if q != "" {
+		return q
+	}
+	return defaultStreamQuality
 }
 
 func firstCaptured(re *regexp.Regexp, text string) (string, bool) {
@@ -288,13 +334,58 @@ func decodeBase64Loose(s string) (string, error) {
 	return string(out), nil
 }
 
-// ---- iframe selection ----
+// ---- Balancer identification & candidate detection ----
+
+// detectPlayerBalancer maps candidate host/path to standard human-readable names.
+func detectPlayerBalancer(rawURL string) string {
+	lower := strings.ToLower(rawURL)
+	switch {
+	case strings.Contains(lower, "ashdi"):
+		return "Ashdi"
+	case strings.Contains(lower, "zenith"):
+		return "Zenith"
+	case strings.Contains(lower, "hdvb") || strings.Contains(lower, "vidcache") || strings.Contains(lower, "streamcdn"):
+		return "HDVB"
+	case strings.Contains(lower, "videohost"):
+		return "Videohost"
+	case strings.Contains(lower, "tortuga"):
+		return "Tortuga"
+	case strings.Contains(lower, "kodik"):
+		return "Kodik"
+	case strings.Contains(lower, "collaps"):
+		return "Collaps"
+	case strings.Contains(lower, "goodplay"):
+		return "Goodplay"
+	case strings.Contains(lower, "hydra"):
+		return "Hydra"
+	case strings.Contains(lower, "okdictator"):
+		return "Okdictator"
+	case strings.Contains(lower, "uakino"):
+		return "UAKino"
+	case strings.Contains(lower, "eneyida"):
+		return "Eneyida"
+	case strings.Contains(lower, "lavakino"):
+		return "Lavakino"
+	default:
+		if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+			parts := strings.Split(u.Host, ".")
+			if len(parts) >= 2 {
+				name := parts[len(parts)-2]
+				if len(name) > 0 {
+					return strings.ToUpper(name[:1]) + name[1:]
+				}
+			}
+			return u.Host
+		}
+		return "Плеєр"
+	}
+}
 
 // iframeHints are substrings typical for the hosts/paths that actually host a DLE player.
 var iframeHints = []string{
-	"player", "embed", "ashdi", "zenith", "hdvbua", "videohost", "kodik",
-	"megogo", "okdictator", "goodplay", "hydra", "collaps", "hls", "m3u8",
-	"mp4", "video", "media", "cdn", "stream",
+	"player", "embed", "ashdi", "zenith", "hdvbua", "hdvb", "vidcache", "streamcdn",
+	"videohost", "kodik", "megogo", "okdictator", "goodplay", "hydra", "collaps",
+	"tortuga", "hls", "m3u8", "mp4", "video", "media", "cdn", "stream",
 }
 
 // iframeSkips are comment widgets, ad slots, promo banners and social widgets that
@@ -307,50 +398,121 @@ var iframeSkips = []string{
 	"trailer", "youtube", "youtu.be", "vimeo",
 }
 
-type iframeCandidate struct {
-	url   string
-	score int
+// PlayerCandidate represents one discovered player iframe or player tab on an item page.
+type PlayerCandidate struct {
+	URL   string
+	Label string
+	Score int
 }
 
-// rankPlayerIframes returns candidate player iframe URLs ordered best first and
-// de-duplicated. Taking the FIRST <iframe> is unreliable: comment widgets, ad slots
-// and promo banners often come first, so candidates are scored and the plausible
-// player frames win.
-func rankPlayerIframes(html, itemURL string) []string {
+// isPlausiblePlayerOrMedia checks whether a raw string looks like a player or media link.
+func isPlausiblePlayerOrMedia(s string) bool {
+	if strings.HasPrefix(s, "//") || strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "/") {
+		lower := strings.ToLower(s)
+		for _, skip := range iframeSkips {
+			if strings.Contains(lower, skip) {
+				return false
+			}
+		}
+		for _, hint := range iframeHints {
+			if strings.Contains(lower, hint) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// rankPlayerCandidates extracts all player candidates from tabs, buttons, data-attributes
+// and iframes on the page, with appropriate labels and priority scoring.
+func rankPlayerCandidates(html, itemURL string) []PlayerCandidate {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil
 	}
 
 	itemHost := hostOf(itemURL)
-	var candidates []iframeCandidate
-	doc.Find("iframe").Each(func(_ int, s *goquery.Selection) {
-		sel := s.First()
-		src := strings.TrimSpace(sel.AttrOr("src", ""))
-		if src == "" {
-			src = strings.TrimSpace(sel.AttrOr("data-src", ""))
-		}
-		abs := absolutizeURL(src, itemURL)
-		if abs == "" {
+	var candidates []PlayerCandidate
+	seen := make(map[string]bool)
+
+	addCandidate := func(rawSrc, rawLabel string, bonusScore int) {
+		abs := absolutizeURL(rawSrc, itemURL)
+		if abs == "" || seen[abs] {
 			return
 		}
-		score := scorePlayerIframe(abs, itemHost)
+		score := scorePlayerIframe(abs, itemHost) + bonusScore
 		if score <= 0 {
 			return
 		}
-		candidates = append(candidates, iframeCandidate{url: abs, score: score})
+		seen[abs] = true
+
+		label := strings.TrimSpace(rawLabel)
+		balancer := detectPlayerBalancer(abs)
+		if label == "" {
+			label = balancer
+		} else if !strings.Contains(strings.ToLower(label), strings.ToLower(balancer)) && balancer != "Плеєр" {
+			label = label + " (" + balancer + ")"
+		}
+
+		candidates = append(candidates, PlayerCandidate{
+			URL:   abs,
+			Label: label,
+			Score: score,
+		})
+	}
+
+	// 1. Scan player tabs, buttons, select options and data attributes (e.g. Lavakino, Uakino tabs)
+	doc.Find("li, button, a, div, span, option").Each(func(_ int, s *goquery.Selection) {
+		for _, attr := range []string{"data-src", "data-player", "data-url", "data-iframe", "data-link", "value"} {
+			if val, ok := s.Attr(attr); ok && strings.TrimSpace(val) != "" {
+				val = strings.TrimSpace(val)
+				if isPlausiblePlayerOrMedia(val) {
+					text := strings.TrimSpace(s.Text())
+					if text == "" {
+						text, _ = s.Attr("title")
+					}
+					addCandidate(val, text, 3)
+				}
+			}
+		}
 	})
 
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	// 2. Scan all iframes
+	doc.Find("iframe").Each(func(_ int, s *goquery.Selection) {
+		src := strings.TrimSpace(s.AttrOr("src", ""))
+		if src == "" {
+			src = strings.TrimSpace(s.AttrOr("data-src", ""))
+		}
+		if src == "" {
+			src = strings.TrimSpace(s.AttrOr("data-player", ""))
+		}
+		if src == "" {
+			return
+		}
 
-	seen := make(map[string]bool, len(candidates))
+		label := strings.TrimSpace(s.AttrOr("title", ""))
+		if label == "" {
+			label = strings.TrimSpace(s.AttrOr("name", ""))
+		}
+		if label == "" {
+			parentTab := s.Closest(".tab, .tabs-b, .player-box, .tab-pane, div[id*='tab']")
+			if parentTab.Length() > 0 {
+				label = strings.TrimSpace(parentTab.AttrOr("data-title", ""))
+			}
+		}
+		addCandidate(src, label, 0)
+	})
+
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
+	return candidates
+}
+
+// rankPlayerIframes returns candidate player iframe URLs ordered best first and de-duplicated.
+func rankPlayerIframes(html, itemURL string) []string {
+	candidates := rankPlayerCandidates(html, itemURL)
 	out := make([]string, 0, len(candidates))
 	for _, c := range candidates {
-		if seen[c.url] {
-			continue
-		}
-		seen[c.url] = true
-		out = append(out, c.url)
+		out = append(out, c.URL)
 	}
 	return out
 }
@@ -378,8 +540,6 @@ func scorePlayerIframe(abs, itemHost string) int {
 	if u, err := url.Parse(abs); err == nil && reMediaExt.MatchString(u.Path) {
 		score += 2
 	}
-	// A same-host iframe without any player hint stays allowed (some DLE templates
-	// inline the player) but ranks below every real player frame.
 	return score
 }
 
@@ -417,41 +577,452 @@ func absolutizeURL(src, base string) string {
 	return src
 }
 
-// resolveStreamsFromItemPage is the shared tail of the DLE GetStreams implementations.
-// It probes the ranked player iframes (capped, deadline applied by the caller) and
-// returns the first stream that survived validation. When nothing resolves it returns
-// an EMPTY stream list together with an error wrapping ErrUnresolvablePlayer — never
-// a list of HTML pages, so the client can show "плеєр не підтримується" instead of
-// handing text/html to libmpv.
-func resolveStreamsFromItemPage(ctx context.Context, client *TLSClient, providerID, itemURL, html string) (*domain.ContentStreamsResponse, error) {
+// ---- Multi-Quality, Playlist & Subtitle Parsers ----
+
+// parseMultiQualityString parses strings like:
+// "[1080p]https://cdn/1080.m3u8,[720p]https://cdn/720.m3u8"
+// or "[1080p]https://cdn/1080.m3u8 or [720p]https://cdn/720.m3u8"
+// or a single URL.
+func parseMultiQualityString(raw, playerURL, playerLabel string) []domain.StreamSource {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var parts []string
+	if strings.Contains(raw, " or ") {
+		parts = strings.Split(raw, " or ")
+	} else if strings.Contains(raw, ",[") {
+		parts = strings.Split(raw, ",")
+	} else if strings.Contains(raw, ",") && strings.Contains(raw, "http") {
+		parts = strings.Split(raw, ",")
+	} else {
+		parts = []string{raw}
+	}
+
+	var sources []domain.StreamSource
+	seenURLs := make(map[string]bool)
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		var qLabel, mediaURL string
+		if m := reQualityBracket.FindStringSubmatch(p); len(m) == 3 {
+			qLabel = strings.TrimSpace(m[1])
+			mediaURL = strings.TrimSpace(m[2])
+		} else {
+			mediaURL = p
+		}
+
+		if !isPlayableMediaURL(mediaURL) || seenURLs[mediaURL] {
+			continue
+		}
+		seenURLs[mediaURL] = true
+
+		src := newStreamSource(mediaURL, playerURL)
+		if qLabel != "" {
+			src.Quality = normalizeQualityLabel(qLabel)
+		}
+		src.Player = playerLabel
+		src.Voiceover = playerLabel
+		sources = append(sources, src)
+	}
+
+	return sources
+}
+
+// playerJSPlaylistItem represents a node in a PlayerJS JSON playlist tree.
+type playerJSPlaylistItem struct {
+	Title    string                 `json:"title"`
+	File     json.RawMessage        `json:"file"`
+	Folder   []playerJSPlaylistItem `json:"folder"`
+	Subtitle string                 `json:"subtitle"`
+}
+
+// parseSeasonOrEpisodeNum extracts an integer number from a title string (e.g. "1 сезон", "Серія 2").
+func parseSeasonOrEpisodeNum(text string, fallback int) int {
+	text = strings.TrimSpace(text)
+	if match := reDigits.FindString(text); match != "" {
+		if n, err := strconv.Atoi(match); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+// extractStreamsFromPlaylistTree searches a PlayerJS playlist structure for streams
+// matching the requested season, episode and voice.
+func extractStreamsFromPlaylistTree(items []playerJSPlaylistItem, playerURL, playerLabel string, season, episode int, voiceID string) ([]domain.StreamSource, []domain.SubtitleSource) {
+	var streams []domain.StreamSource
+	var subs []domain.SubtitleSource
+
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	// Helper to extract file content (which may be multi-quality or direct URL)
+	processItem := func(it playerJSPlaylistItem, voiceName string) {
+		var fileStr string
+		if err := json.Unmarshal(it.File, &fileStr); err == nil && fileStr != "" {
+			itemLabel := playerLabel
+			if voiceName != "" {
+				itemLabel = voiceName
+				if playerLabel != "" && !strings.Contains(voiceName, playerLabel) {
+					itemLabel = voiceName + " (" + playerLabel + ")"
+				}
+			}
+			st := parseMultiQualityString(fileStr, playerURL, itemLabel)
+			streams = append(streams, st...)
+		}
+		if it.Subtitle != "" {
+			parsedSubs := parseSubtitlesFromPlayerHTML(it.Subtitle)
+			subs = append(subs, parsedSubs...)
+		}
+	}
+
+	// Check if this is a flat list of qualities (e.g. [{title: "1080p", file: "..."}, {title: "720p", file: "..."}])
+	isFlatQualityList := true
+	for _, it := range items {
+		if len(it.Folder) > 0 || len(it.File) == 0 {
+			isFlatQualityList = false
+			break
+		}
+	}
+	if isFlatQualityList {
+		for _, it := range items {
+			var fileStr string
+			if err := json.Unmarshal(it.File, &fileStr); err == nil && fileStr != "" {
+				st := parseMultiQualityString(fileStr, playerURL, playerLabel)
+				for i := range st {
+					if it.Title != "" {
+						st[i].Quality = normalizeQualityLabel(it.Title)
+					}
+					streams = append(streams, st[i])
+				}
+			}
+		}
+		return streams, subs
+	}
+
+	// Series folder tree traversal
+	for sIdx, rootItem := range items {
+		// If root represents a voice/dub (e.g. "1+1", "Незупиняй", "HDVB")
+		voiceName := ""
+		currentFolders := rootItem.Folder
+		if len(currentFolders) > 0 && (strings.Contains(rootItem.Title, "сезон") || strings.Contains(rootItem.Title, "Сезон")) {
+			// Root is a Season
+			sNum := parseSeasonOrEpisodeNum(rootItem.Title, sIdx+1)
+			if season > 0 && sNum != season {
+				continue
+			}
+			for eIdx, epItem := range currentFolders {
+				eNum := parseSeasonOrEpisodeNum(epItem.Title, eIdx+1)
+				if episode > 0 && eNum != episode {
+					continue
+				}
+				processItem(epItem, voiceName)
+			}
+		} else if len(currentFolders) > 0 {
+			// Root is a Voiceover Studio
+			voiceName = rootItem.Title
+			if voiceID != "" && !strings.EqualFold(voiceName, voiceID) {
+				continue
+			}
+			for sIdx2, sItem := range currentFolders {
+				if len(sItem.Folder) > 0 {
+					sNum := parseSeasonOrEpisodeNum(sItem.Title, sIdx2+1)
+					if season > 0 && sNum != season {
+						continue
+					}
+					for eIdx2, epItem := range sItem.Folder {
+						eNum := parseSeasonOrEpisodeNum(epItem.Title, eIdx2+1)
+						if episode > 0 && eNum != episode {
+							continue
+						}
+						processItem(epItem, voiceName)
+					}
+				} else {
+					// Flat episodes under voice
+					eNum := parseSeasonOrEpisodeNum(sItem.Title, sIdx2+1)
+					if episode > 0 && eNum != episode {
+						continue
+					}
+					processItem(sItem, voiceName)
+				}
+			}
+		} else {
+			// Flat episode list
+			eNum := parseSeasonOrEpisodeNum(rootItem.Title, sIdx+1)
+			if episode > 0 && eNum != episode {
+				continue
+			}
+			processItem(rootItem, "")
+		}
+	}
+
+	// Fallback if requested episode not found: extract first available item
+	if len(streams) == 0 && len(items) > 0 {
+		var firstItem *playerJSPlaylistItem
+		if len(items[0].Folder) > 0 {
+			if len(items[0].Folder[0].Folder) > 0 {
+				firstItem = &items[0].Folder[0].Folder[0]
+			} else {
+				firstItem = &items[0].Folder[0]
+			}
+		} else {
+			firstItem = &items[0]
+		}
+		if firstItem != nil {
+			processItem(*firstItem, items[0].Title)
+		}
+	}
+
+	return streams, subs
+}
+
+// parseSubtitlesFromPlayerHTML extracts subtitles from subtitle: "..." or <track> tags.
+func parseSubtitlesFromPlayerHTML(text string) []domain.SubtitleSource {
+	var subs []domain.SubtitleSource
+	seen := make(map[string]bool)
+
+	add := func(u, label, lang string) {
+		u = strings.TrimSpace(u)
+		if u == "" || seen[u] {
+			return
+		}
+		seen[u] = true
+		if label == "" {
+			label = lang
+		}
+		if label == "" {
+			label = "Субтитри"
+		}
+		subs = append(subs, domain.SubtitleSource{
+			URL:      u,
+			Label:    label,
+			Language: lang,
+		})
+	}
+
+	// 1. subtitle: "[Українська]https://...,[English]https://..."
+	for _, m := range rePlayerJSSubtitle.FindAllStringSubmatch(text, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		raw := m[1]
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if bm := reQualityBracket.FindStringSubmatch(part); len(bm) == 3 {
+				add(bm[2], bm[1], bm[1])
+			} else if strings.HasPrefix(part, "http") {
+				add(part, "Субтитри", "uk")
+			}
+		}
+	}
+
+	// 2. <track kind="subtitles" src="..." label="..." srclang="...">
+	for _, trackTag := range reTrackTag.FindAllString(text, -1) {
+		srcMatch := reSrcAttr.FindStringSubmatch(trackTag)
+		if len(srcMatch) < 2 {
+			continue
+		}
+		label := ""
+		if lm := reLabelAttr.FindStringSubmatch(trackTag); len(lm) >= 2 {
+			label = lm[1]
+		}
+		lang := ""
+		if sm := reSrclangAttr.FindStringSubmatch(trackTag); len(sm) >= 2 {
+			lang = sm[1]
+		}
+		add(srcMatch[1], label, lang)
+	}
+
+	return subs
+}
+
+// extractAllStreamsFromPlayer probes a single player URL and extracts all available
+// streams (multi-quality, playlist items) and subtitles.
+func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerURL, siteBaseURL, defaultLabel string, season, episode int, voiceID string) ([]domain.StreamSource, []domain.SubtitleSource, error) {
+	if strings.TrimSpace(playerURL) == "" {
+		return nil, nil, ErrUnresolvablePlayer
+	}
+
+	page, err := client.Get(ctx, playerURL, siteBaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch player page %s: %w", playerURL, err)
+	}
+
+	playerLabel := strings.TrimSpace(defaultLabel)
+	if playerLabel == "" {
+		playerLabel = detectPlayerBalancer(playerURL)
+	}
+
+	var allStreams []domain.StreamSource
+	var allSubs []domain.SubtitleSource
+	seenStreams := make(map[string]bool)
+
+	addStreams := func(streams []domain.StreamSource) {
+		for _, s := range streams {
+			if !seenStreams[s.URL] {
+				seenStreams[s.URL] = true
+				if s.Player == "" {
+					s.Player = playerLabel
+				}
+				if s.Voiceover == "" {
+					s.Voiceover = playerLabel
+				}
+				allStreams = append(allStreams, s)
+			}
+		}
+	}
+
+	// 1. Extract subtitles
+	subs := parseSubtitlesFromPlayerHTML(page)
+	allSubs = append(allSubs, subs...)
+
+	// 2. Strategy A: Check for PlayerJS JSON playlist tree in page or decoded base64
+	for _, jm := range rePlayerJSJSONFile.FindAllStringSubmatch(page, -1) {
+		if len(jm) >= 2 {
+			var playlistItems []playerJSPlaylistItem
+			if err := json.Unmarshal([]byte(jm[1]), &playlistItems); err == nil && len(playlistItems) > 0 {
+				st, sb := extractStreamsFromPlaylistTree(playlistItems, playerURL, playerLabel, season, episode, voiceID)
+				addStreams(st)
+				allSubs = append(allSubs, sb...)
+			}
+		}
+	}
+
+	// 3. Strategy B: Base64 PlayerJS payload decode
+	for _, b64m := range reBase64File.FindAllStringSubmatch(page, -1) {
+		if len(b64m) >= 2 {
+			if decoded, err := decodeBase64Loose(b64m[1]); err == nil {
+				// Try playlist JSON in decoded base64
+				var playlistItems []playerJSPlaylistItem
+				if err := json.Unmarshal([]byte(decoded), &playlistItems); err == nil && len(playlistItems) > 0 {
+					st, sb := extractStreamsFromPlaylistTree(playlistItems, playerURL, playerLabel, season, episode, voiceID)
+					addStreams(st)
+					allSubs = append(allSubs, sb...)
+				}
+				// Also check PlayerJS file & sources in decoded text
+				if fm := rePlayerJSFile.FindStringSubmatch(decoded); len(fm) >= 2 {
+					st := parseMultiQualityString(fm[1], playerURL, playerLabel)
+					addStreams(st)
+				}
+				// Also check subtitles in decoded text
+				allSubs = append(allSubs, parseSubtitlesFromPlayerHTML(decoded)...)
+			}
+		}
+	}
+
+	// 4. Strategy C: Plain PlayerJS file: "[1080p]https://..."
+	if len(allStreams) == 0 {
+		for _, fm := range rePlayerJSFile.FindAllStringSubmatch(page, -1) {
+			if len(fm) >= 2 {
+				st := parseMultiQualityString(fm[1], playerURL, playerLabel)
+				addStreams(st)
+			}
+		}
+	}
+
+	// 5. Strategy D: Sources block with multiple sources
+	for _, block := range reSourcesBlock.FindAllStringSubmatch(page, -1) {
+		if len(block) < 2 {
+			continue
+		}
+		for _, sm := range reSourcesSrc.FindAllStringSubmatch(block[1], -1) {
+			if len(sm) >= 2 && isPlayableMediaURL(sm[1]) {
+				src := newStreamSource(sm[1], playerURL)
+				src.Player = playerLabel
+				src.Voiceover = playerLabel
+				if lm := reSourcesLabel.FindStringSubmatch(block[1]); len(lm) >= 2 {
+					src.Quality = normalizeQualityLabel(lm[1])
+				}
+				addStreams([]domain.StreamSource{src})
+			}
+		}
+	}
+
+	// 6. Strategy E: Hls.loadSource
+	if len(allStreams) == 0 {
+		if hlsSrc, ok := firstCaptured(reHlsLoadSource, page); ok && isPlayableMediaURL(hlsSrc) {
+			src := newStreamSource(hlsSrc, playerURL)
+			src.Player = playerLabel
+			src.Voiceover = playerLabel
+			addStreams([]domain.StreamSource{src})
+		}
+	}
+
+	// 7. Strategy F: Bare media URL fallback
+	if len(allStreams) == 0 {
+		if bareSrc, ok := firstCaptured(reBareMediaURL, page); ok && isPlayableMediaURL(bareSrc) {
+			src := newStreamSource(bareSrc, playerURL)
+			src.Player = playerLabel
+			src.Voiceover = playerLabel
+			addStreams([]domain.StreamSource{src})
+		}
+	}
+
+	if len(allStreams) == 0 {
+		return nil, nil, fmt.Errorf("%w: %s", ErrUnresolvablePlayer, playerURL)
+	}
+
+	return allStreams, allSubs, nil
+}
+
+// resolveStreamsFromItemPage is the shared engine for all DLE GetStreams implementations.
+// It discovers all player candidates on the page, fetches them up to MaxPlayerIframes,
+// collects all playable streams across all balancers/qualities/dubbings, merges subtitles,
+// and returns a complete, unified stream response.
+func resolveStreamsFromItemPage(ctx context.Context, client *TLSClient, providerID, itemURL, html string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
 	resp := &domain.ContentStreamsResponse{
 		ProviderID: providerID,
 		Streams:    []domain.StreamSource{},
+		Subtitles:  []domain.SubtitleSource{},
 	}
 
-	candidates := rankPlayerIframes(html, itemURL)
+	candidates := rankPlayerCandidates(html, itemURL)
 	if len(candidates) > MaxPlayerIframes {
 		candidates = candidates[:MaxPlayerIframes]
 	}
 
+	seenStreamURLs := make(map[string]bool)
+	seenSubURLs := make(map[string]bool)
 	var lastErr error
-	for _, candidate := range candidates {
-		source, _, err := resolvePlayerHTML(ctx, client, candidate, itemURL)
+
+	for _, cand := range candidates {
+		streams, subs, err := extractAllStreamsFromPlayer(ctx, client, cand.URL, itemURL, cand.Label, season, episode, voiceID)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		resp.Streams = append(resp.Streams, source)
-		return resp, nil // early exit: one real stream is enough
+
+		for _, s := range streams {
+			if !seenStreamURLs[s.URL] {
+				seenStreamURLs[s.URL] = true
+				resp.Streams = append(resp.Streams, s)
+			}
+		}
+		for _, sub := range subs {
+			if !seenSubURLs[sub.URL] {
+				seenSubURLs[sub.URL] = true
+				resp.Subtitles = append(resp.Subtitles, sub)
+			}
+		}
 	}
 
-	err := lastErr
-	switch {
-	case err == nil:
-		err = ErrUnresolvablePlayer
-	case errors.Is(err, ErrUnresolvablePlayer):
-	default:
-		err = fmt.Errorf("%w: %w", ErrUnresolvablePlayer, err)
+	if len(resp.Streams) == 0 {
+		err := lastErr
+		switch {
+		case err == nil:
+			err = ErrUnresolvablePlayer
+		case errors.Is(err, ErrUnresolvablePlayer):
+		default:
+			err = fmt.Errorf("%w: %w", ErrUnresolvablePlayer, err)
+		}
+		return resp, fmt.Errorf("%s streams: %w", providerID, err)
 	}
-	return resp, fmt.Errorf("%s streams: %w", providerID, err)
+
+	return resp, nil
 }
