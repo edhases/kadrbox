@@ -3,10 +3,10 @@ package domain
 // StreamSource описує один потік відео з окремими заголовками для клієнтського плеєра libmpv/media_kit
 type StreamSource struct {
 	Quality       string            `json:"quality"`
-	URL           string            `json:"url"`           // URL для відтворення (може бути проксі маніфесту або direct)
-	DirectURL     string            `json:"direct_url"`    // Пряме CDN посилання
+	URL           string            `json:"url"`        // URL для відтворення (може бути проксі маніфесту або direct)
+	DirectURL     string            `json:"direct_url"` // Пряме CDN посилання
 	RequiresProxy bool              `json:"requires_proxy"`
-	Headers       map[string]string `json:"headers"`       // Важливо: Referer, User-Agent для передачі в media_kit!
+	Headers       map[string]string `json:"headers"` // Важливо: Referer, User-Agent для передачі в media_kit!
 	Voiceover     string            `json:"voiceover,omitempty"`
 	Language      string            `json:"language,omitempty"`
 	Player        string            `json:"player,omitempty"`
@@ -21,15 +21,15 @@ type SubtitleSource struct {
 
 // MediaItem описує базовий елемент каталогу/пошуку
 type MediaItem struct {
-	ID          string   `json:"id"`
-	ProviderID  string   `json:"provider_id"`
-	Title       string   `json:"title"`
-	OriginalTitle string `json:"original_title,omitempty"`
-	PosterURL   string   `json:"poster_url,omitempty"`
-	Year        int      `json:"year,omitempty"`
-	Type        string   `json:"type"` // movie, series, anime, cartoon
-	Rating      float64  `json:"rating,omitempty"`
-	URL         string   `json:"url"`
+	ID            string  `json:"id"`
+	ProviderID    string  `json:"provider_id"`
+	Title         string  `json:"title"`
+	OriginalTitle string  `json:"original_title,omitempty"`
+	PosterURL     string  `json:"poster_url,omitempty"`
+	Year          int     `json:"year,omitempty"`
+	Type          string  `json:"type"` // movie, series, anime, cartoon
+	Rating        float64 `json:"rating,omitempty"`
+	URL           string  `json:"url"`
 }
 
 // MediaDetails описує повні метадані медіа

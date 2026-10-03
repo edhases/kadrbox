@@ -20,10 +20,10 @@ type SearchSourceRef struct {
 // ScoredSearchItem розширює domain.MediaItem оцінкою релевантності та агрегованими джерелами
 type ScoredSearchItem struct {
 	domain.MediaItem
-	Score       float64           `json:"score"`
-	MatchedBy   string            `json:"matched_by"`
-	ClusterKey  string            `json:"cluster"`
-	Sources     []SearchSourceRef `json:"sources"`
+	Score      float64           `json:"score"`
+	MatchedBy  string            `json:"matched_by"`
+	ClusterKey string            `json:"cluster"`
+	Sources    []SearchSourceRef `json:"sources"`
 }
 
 // SourceStatusInfo описує статистику по окремому підджерелу (наприклад, uaflix, mikai)
