@@ -14,6 +14,12 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/oxide-server
 
+# Р‘РµР· С†С–С”С— РіСЂСѓРїРё РїР°СЂР°Р»РµР»СЊРЅС– РїСѓС€С– РІ dev/main Р·Р°РїСѓСЃРєР°Р»Рё Р± РѕРґРЅРѕС‡Р°СЃРЅС– Р·Р±С–СЂРєРё Р·
+# РѕРґРЅР°РєРѕРІРёРј С‚РµРіРѕРј latest вЂ” РїРµСЂРµРєСЂРёРІР°СЋС‡РёР№ С‚РµРі С– РІРёС‚СЂР°С‡РµРЅРёР№ cache.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -23,13 +29,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v3.3.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v3.7.1
 
       - name: Lowercase image name
         id: image_name
@@ -37,7 +43,7 @@ jobs:
           echo "LOWERCASE_IMAGE_NAME=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.3.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -45,7 +51,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v5.5.1
         with:
           images: ${{ env.REGISTRY }}/${{ env.LOWERCASE_IMAGE_NAME }}
           tags: |
@@ -54,7 +60,7 @@ jobs:
             type=sha
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6.9.0
         with:
           context: ./server
           file: ./server/Dockerfile
