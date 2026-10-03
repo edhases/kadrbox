@@ -161,9 +161,15 @@ class PlayerController extends ChangeNotifier with WindowListener {
   // Internal state
   late final Player _player;
   VideoController? _videoController;
-  final List<StreamSubscription> _subscriptions = [];
+  final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _saveProgressTimer;
   bool _isDisposed = false;
+
+  /// True while a periodic progress save is running. [Timer.periodic] does not
+  /// wait for its callback, and a save awaits a cloud sync whose timeouts run to
+  /// tens of seconds, so overlapping ticks would let an older position land
+  /// after a newer one and rewind the resume point.
+  bool _saveInFlight = false;
 
   /// Index into [_retryLadder] of the header set that last worked.
   ///
@@ -932,8 +938,19 @@ class PlayerController extends ChangeNotifier with WindowListener {
   void _startProgressSaving() {
     _saveProgressTimer = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => _saveProgress(),
+      (_) => unawaited(_saveProgressGuarded()),
     );
+  }
+
+  /// Single-flight wrapper around [_saveProgress] for the periodic timer.
+  Future<void> _saveProgressGuarded() async {
+    if (_isDisposed || _saveInFlight) return;
+    _saveInFlight = true;
+    try {
+      await _saveProgress();
+    } finally {
+      _saveInFlight = false;
+    }
   }
 
   Future<void> _saveProgress() async {
@@ -1337,6 +1354,24 @@ class PlayerController extends ChangeNotifier with WindowListener {
     _state = _state.copyWith(videoTracks: tracks, selectedVideoTrack: selected);
   }
 
+  /// For tests: drive position/duration without a real media backend.
+  @visibleForTesting
+  void setPlaybackForTest({Duration? position, Duration? duration}) {
+    _state = _state.copyWith(position: position, duration: duration);
+  }
+
+  /// For tests: run one periodic-saver tick through the single-flight guard.
+  @visibleForTesting
+  Future<void> tickProgressSaveForTest() => _saveProgressGuarded();
+
+  /// For tests: whether a periodic save is currently in flight.
+  @visibleForTesting
+  bool get saveInFlightForTest => _saveInFlight;
+
+  /// For tests: whether [dispose] has already run.
+  @visibleForTesting
+  bool get disposedForTest => _isDisposed;
+
   String buildSubtitleText(String? fallbackSubtitle) {
     final parts = <String>[];
     if (_state.currentQuality != null) {
@@ -1386,7 +1421,9 @@ class PlayerController extends ChangeNotifier with WindowListener {
 
     // Stop progress saving
     _saveProgressTimer?.cancel();
-    _saveProgress();
+    // Deliberately bypasses [_saveProgressGuarded]: this is the last chance to
+    // persist the position and the guard drops everything once _isDisposed.
+    unawaited(_saveProgress());
 
     // Stop player safely
     try {

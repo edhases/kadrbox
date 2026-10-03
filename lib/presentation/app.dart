@@ -63,7 +63,7 @@ class _OxideFilmAppState extends State<OxideFilmApp> {
         return UpdateGuard(child: child!);
       },
       localizationsDelegates: [
-        AppStringsDelegate(locale: locale),
+        const AppStringsDelegate(),
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,

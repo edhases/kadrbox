@@ -494,10 +494,15 @@ class AppStrings {
 }
 
 /// Localization delegate
+///
+/// Stateless by design: [load] derives the strings from the [Locale] it is
+/// handed, and `WidgetsApp` re-resolves every delegate whenever
+/// `MaterialApp.locale` changes. An earlier version also carried an `AppLocale`
+/// field that [shouldReload] compared against — dead weight, since the field was
+/// never consulted when building the strings, and a trap for anyone who memoised
+/// the delegate and silently broke language switching.
 class AppStringsDelegate extends LocalizationsDelegate<AppStrings> {
-  final AppLocale locale;
-
-  const AppStringsDelegate({this.locale = AppLocale.uk});
+  const AppStringsDelegate();
 
   @override
   bool isSupported(Locale locale) {
@@ -509,6 +514,9 @@ class AppStringsDelegate extends LocalizationsDelegate<AppStrings> {
     return AppStrings(AppLocale.fromCode(locale.languageCode));
   }
 
+  /// Never reloads in place: a new locale makes `WidgetsApp` build a fresh
+  /// delegate (and therefore call [load] again), which is the only path that
+  /// produces strings for the new language.
   @override
-  bool shouldReload(AppStringsDelegate old) => old.locale != locale;
+  bool shouldReload(AppStringsDelegate old) => false;
 }

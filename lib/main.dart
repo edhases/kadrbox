@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/di/injection.dart';
+import 'core/network/api_client.dart';
 import 'core/services/version_service.dart';
 import 'core/utils/logger.dart';
 import 'data/providers/provider_registry.dart';
@@ -35,6 +36,10 @@ void main() async {
         );
         return true;
       };
+
+      // Registered before DI so a resume that lands during startup is a no-op
+      // rather than a crash: onAppResumed() returns early without a token.
+      WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
 
       // Desktop window configuration (must be initialized early before engine renders)
       if (!kIsWeb &&
@@ -114,6 +119,22 @@ void main() async {
       Logger.e('Zone error', tag: 'Main', error: error, stackTrace: stack);
     },
   );
+}
+
+/// Renews the access token when the app returns to the foreground.
+///
+/// Without this, a session that expired while the app was backgrounded costs a
+/// 401 (and a full request replay) on the first request after the resume.
+class _AppLifecycleObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    try {
+      getIt<ApiClient>().onAppResumed();
+    } catch (e) {
+      Logger.w('onAppResumed hook failed: $e', tag: 'Main');
+    }
+  }
 }
 
 /// Sync backend provider catalog in background

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../data/services/recommendation_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -46,6 +48,8 @@ class _HomePageState extends State<HomePage> {
   final _settings = GetIt.instance<SettingsService>();
   final _episodeUpdateService = GetIt.instance<EpisodeUpdateService>();
   final _scrollController = ScrollController();
+  final _connectivity = Connectivity();
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   UISettings get _ui => _settings.uiSettings;
 
@@ -66,7 +70,9 @@ class _HomePageState extends State<HomePage> {
       GetIt.instance<ProviderCatalogService>().addListener(_onCatalogChanged);
     } catch (_) {}
     _checkConnectivity();
-    Connectivity().onConnectivityChanged.listen(_updateConnectivity);
+    _connectivitySub = _connectivity.onConnectivityChanged.listen(
+      _updateConnectivity,
+    );
     _loadContent();
 
     // Check for new episodes on startup
@@ -74,11 +80,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _checkConnectivity() async {
-    final result = await Connectivity().checkConnectivity();
+    final result = await _connectivity.checkConnectivity();
+    if (!mounted) return;
     _updateConnectivity(result);
   }
 
   void _updateConnectivity(List<ConnectivityResult> results) {
+    if (!mounted) return;
     final isOffline = results.contains(ConnectivityResult.none);
     if (_isOffline != isOffline) {
       setState(() => _isOffline = isOffline);
@@ -97,6 +105,10 @@ class _HomePageState extends State<HomePage> {
       );
     } catch (_) {}
     _scrollController.dispose();
+    // dispose() cannot await, but cancel() detaches the platform-channel
+    // listener synchronously enough that no further callback can fire.
+    unawaited(_connectivitySub?.cancel());
+    _connectivitySub = null;
     super.dispose();
   }
 

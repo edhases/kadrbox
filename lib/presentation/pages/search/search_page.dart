@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/logger.dart';
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/history_service.dart';
 import '../../../data/services/settings_service.dart';
@@ -32,6 +33,8 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
+  static const String _tag = 'SearchPage';
+
   final _registry = GetIt.instance<ProviderRegistry>();
   final _smartSearchService = GetIt.instance<SmartSearchService>();
   final _historyService = GetIt.instance<HistoryService>();
@@ -108,6 +111,7 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _loadRecentSearches() async {
     // Get recent searches from SmartSearchService (from database)
     final recentQueries = await _smartSearchService.getRecentSearches(limit: 5);
+    if (!mounted) return;
 
     // Fallback to history titles if no search history yet
     if (recentQueries.isEmpty) {
@@ -157,11 +161,12 @@ class _SearchPageState extends State<SearchPage> {
         });
       }
     } catch (e) {
-      // Ignore errors for suggestions
+      // Suggestions are best-effort; the search itself does not depend on them.
+      Logger.w('Failed to fetch suggestions for "$query": $e', tag: _tag);
     }
   }
 
-  StreamSubscription? _searchSubscription;
+  StreamSubscription<SmartSearchResult>? _searchSubscription;
 
   Future<void> _performSearch() async {
     final query = _searchController.text.trim();
@@ -170,6 +175,7 @@ class _SearchPageState extends State<SearchPage> {
     // Cancel previous search
     await _searchSubscription?.cancel();
     _searchSubscription = null;
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -220,6 +226,7 @@ class _SearchPageState extends State<SearchPage> {
           if (items.isEmpty) {
             suggestion = await _smartSearchService.suggestCorrection(query);
           }
+          if (!mounted) return;
 
           setState(() {
             _searchResult = result;
@@ -356,7 +363,8 @@ class _SearchPageState extends State<SearchPage> {
   /// Sources worth offering as a filter: anything with at least one result.
   List<_SourceChip> get _visibleSources {
     return [
-      for (final s in _searchResult?.envelope.allSources ?? const [])
+      for (final s
+          in _searchResult?.envelope.allSources ?? const <SearchSourceStatus>[])
         if (s.hasResults)
           _SourceChip(
             key: s.key,
@@ -368,7 +376,7 @@ class _SearchPageState extends State<SearchPage> {
 
   /// Sources that were asked and did not deliver.
   List<SearchSourceStatus> get _failedSources =>
-      _searchResult?.envelope.failedSources ?? const [];
+      _searchResult?.envelope.failedSources ?? const <SearchSourceStatus>[];
 
   bool get _hasSourceFailures => _failedSources.isNotEmpty;
 
