@@ -1,17 +1,80 @@
 name: Flutter CI
+
 on:
   push:
     paths-ignore: ['server/**', 'update.json']
   pull_request:
+
+# One run per ref. Without this two pushes in quick succession race to upload
+# artifacts and the stale run reports last.
+concurrency:
+  group: flutter-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
       - run: flutter pub get
-      - run: dart format --set-exit-if-changed lib test
+
+      # drift / json_serializable / injectable generate .g.dart files that are
+      # committed. Without this gate a schema change that forgets to regenerate
+      # merges cleanly and only fails at runtime.
+      - name: Check the code generators are declared
+        run: |
+          missing=""
+          for dep in build_runner drift_dev; do
+            if ! grep -qE "^  $dep:" pubspec.yaml; then
+              missing="$missing $dep"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::dev_dependencies is missing$missing. The committed .g.dart files (lib/data/database/app_database.g.dart is ~7.2k lines) cannot be regenerated without them, which makes any Drift schema change unmergeable. Add the generators to pubspec.yaml dev_dependencies; do not delete this check."
+            exit 1
+          fi
+
+      - name: Generated code is up to date
+        run: |
+          # --force-jit works around dart-lang/build#4905: Dart 3.10 rejects
+          # `dart compile` for any package graph containing a build hook, which
+          # is what build_runner's bootstrap uses by default. Fixed upstream in
+          # Dart 3.11; harmless once the runner's SDK is newer.
+          set -o pipefail
+          if ! dart run build_runner build --delete-conflicting-outputs --force-jit 2>&1 | tee build-runner.log; then
+            if grep -q "does not support build hooks" build-runner.log; then
+              echo "::error::build_runner cannot run on this SDK (Dart 3.10 + build hooks, dart-lang/build#4905) even with --force-jit. Bump the Flutter/Dart version in this workflow, or pin build_runner to a version that does not AOT-compile its bootstrap."
+              exit 1
+            fi
+            echo "::error::build_runner failed; see the log above."
+            exit 1
+          fi
+          if ! git diff --exit-code --stat; then
+            echo "::error::generated files are stale. Run 'dart run build_runner build --delete-conflicting-outputs' and commit the result."
+            exit 1
+          fi
+
+      - run: dart format --output=none --set-exit-if-changed lib test
+
       - run: flutter analyze
+
+      # Default concurrency on purpose: the suite is fast and the two tests that
+      # used to be order-sensitive (watch_party_service_test 'Hard Seek' and
+      # oxide_server_service_test '401 on sync') were only fixed by replacing
+      # their timing assumptions. Serialising the run would hide any recurrence,
+      # so it stays parallel.
       - run: flutter test --exclude-tags integration
+
+      - name: Report outdated dependencies
+        if: always()
+        continue-on-error: true
+        run: dart pub outdated --no-dev-dependencies || true

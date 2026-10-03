@@ -1,3 +1,17 @@
+> ## Статус документа
+>
+> - **Status:** fixed
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** селектори Eneyida виправлено на `.short_title` / `.short_img`
+>   (`provider/eneyida.go:131,138`). Слідження за редиректами реалізовано з валідацією
+>   кожного хопу (`provider/client.go:71,82`, `maxRedirects = 5`).
+> - **Зауваження:** аудит не знав про провайдера **lavakino** та про розширення **bandera**
+>   (`provider/lavakino.go`, `provider/bandera*.go`) — його висновки не покривають їх.
+>   У Lavakino роздільники навпаки `.short-title` / `.short-img` (`lavakino.go:144,151`),
+>   тобто це інша розмітка, а не помилка.
+> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 3, агент I).
+>
+> Історичні знахідки нижче **не переписані**.
 # Звіт аудиту №2: Валідація парсерів та джерел контенту (Go Parsers vs Dart Scrapers)
 
 **Дата аудиту:** 28 вересня 2026 року  

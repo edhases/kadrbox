@@ -1,3 +1,18 @@
+> ## Статус документа
+>
+> - **Status:** fixed
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** знахідка про CORS **застаріла**. Конфігурацію
+>   `AllowedOrigins: ["*"]` + `AllowCredentials: true` замінено на `AllowOriginFunc`
+>   із allow-list (`transport/http/router.go:42-50`,
+>   `transport/http/allowed_origins.go`).
+> - **⚠️ BREAKING CHANGE після цього аудиту:** запроваджено єдиний response-envelope
+>   (`transport/http/api_envelope.go`). Списки тепер повертаються як
+>   `{"data":[...],"meta":{...}}` замість голого масиву. Клієнт **має** бути оновлено
+>   синхронно — див. `docs/REMEDIATION_PLAN.md`.
+> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 2, агенти G та H).
+>
+> Історичні знахідки нижче **не переписані**.
 # Технічний аудит API контрактів та клієнт-серверної сумісності (Go Backend vs Flutter Client)
 
 **Дата аудиту:** 28 вересня 2026 року  

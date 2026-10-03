@@ -1,3 +1,13 @@
+> ## Статус документа
+>
+> - **Status:** superseded by `docs/REMEDIATION_PLAN.md`
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** аудит «тихих» помилок, зависань і падінь у клієнті та бекенді.
+>   Знахідки перенесені в `docs/REMEDIATION_PLAN.md` (Wave 2H, Wave 3J — Dart).
+> - **Вибірково перевірено на `3ab45ef`:** 401-interceptor з refresh-and-replay замість
+>   миттєвого `signOut()` та in-flight guard для `_saveProgress`
+>   (`lib/core/network/api_client.dart`, `lib/data/services/history_service.dart`).
+> - **Не переписано:** історичні знахідки залишено як є.
 # Комплексний аудит тихих помилок, зависань та аварійних завершень (Silent Failures, Freezes & Crashes Audit Report)
 
 **Проєкт:** Oxide Film (Flutter Client + Go Backend)  

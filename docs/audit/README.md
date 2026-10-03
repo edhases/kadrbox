@@ -1,35 +1,89 @@
-# Підсумковий зведений звіт аудиту перенесення проєкту Oxide Film на Go-сервер
+# Аудит Oxide Film — зведений покажчик
 
-Аудит проведено командою з **5 незалежних субагентів-аудиторів** шляхом аналізу реального коду, структур даних, мережевих відповідей та конфігурацій (без синтетичних моків).
+Цей каталог містить **8 звітів** (9 файлів, враховуючи цей покажчик). Усі вони — історичні
+записи стану коду на момент проведення аудиту.
+
+> ⚠️ **Як читати цей каталог**
+>
+> Знахідки всередині звітів **не переписуються** — вони зафіксовують те, що було відкрито тоді.
+> Кожен файл має заголовок `## Статус документа` з полями `Status` та `Verified against: <sha>`.
+> Актуальний стан виконання — у [`../REMEDIATION_PLAN.md`](../REMEDIATION_PLAN.md).
+>
+> `Status: fixed` = усі ключові знахідки звіту перевірено на вказаному коміті та виправлено.
+> `Status: superseded by docs/REMEDIATION_PLAN.md` = звіт є вхідним документом для плану;
+> його знахідки розподілені між агентами і простежуються там.
 
 ---
 
-## 🗂️ Звіти субагентів-аудиторів
+## 🗂️ Основний аудит (5 субагентів)
 
-| № | Напрямок аудиту | Файл звіту | Ключовий висновок |
-| :--- | :--- | :--- | :--- |
-| 1 | **База даних та міграції** | [01_DATABASE_MIGRATION_AUDIT.md](01_DATABASE_MIGRATION_AUDIT.md) | Схема готова, але `season/episode = 0` ламає UI клієнта ("S0 E0" для фільмів). Потрібно використати стандарт **PostgreSQL 16 `UNIQUE NULLS NOT DISTINCT`** і повернути полям `NULL`. Утиліту `cmd/migrate_pb` треба доповнити імпортом favorites та history. |
-| 2 | **Провайдери та парсери** | [02_PARSERS_AND_PROVIDERS_AUDIT.md](02_PARSERS_AND_PROVIDERS_AUDIT.md) | Виявлено застарілі селектори Eneyida (`.short-title` замість `.short_title`), блокування редиректів UAKino (`uakino.me` -> `uakino.best`), а також необхідність резолвінгу прямого HLS замість повернення iframe/HTML сторінок. |
-| 3 | **Watch Party & WebSocket** | [03_WATCH_PARTY_REALTIME_AUDIT.md](03_WATCH_PARTY_REALTIME_AUDIT.md) | Конфлікт регістру дій (Go: `USER_JOINED` vs Flutter: `userJoined`) та ключів (`sender_id` vs `senderId`). Виявлено потенційний Data Race у `hub.go` при видаленні сокетів під `RLock()`. Стан кімнат треба реально писати в Redis. |
-| 4 | **API Контракти клієнта** | [04_API_CONTRACTS_AND_CLIENT_COMPATIBILITY_AUDIT.md](04_API_CONTRACTS_AND_CLIENT_COMPATIBILITY_AUDIT.md) | Конфлікт у CORS (`AllowedOrigins: ["*"]` + `AllowCredentials: true` блокується браузерами). У `ApiClient.getJson` жорсткий каст `Map<String, dynamic>` падає при отриманні `List<dynamic>`. |
-| 5 | **Інфраструктура та ресурси** | [05_INFRASTRUCTURE_AND_RESOURCE_AUDIT.md](05_INFRASTRUCTURE_AND_RESOURCE_AUDIT.md) | **Zero Media Traffic на 100% підтверджено** (< 40 МБ трафіку/добу, 150-350 МБ RAM на весь стек). Проте ліміт RAM для app у 128 MB ризикований через витрати пам'яті Argon2id (64 MB на хеш). Потрібно 256 MB. |
+Проведено аналізом реального коду, структур даних, мережевих відповідей та конфігурацій
+(без синтетичних моків).
+
+| № | Напрямок | Звіт | Status | Ключовий висновок |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | База даних та міграції | [01_DATABASE_MIGRATION_AUDIT.md](01_DATABASE_MIGRATION_AUDIT.md) | `fixed` | `season/episode = 0` ламало UI («S0 E0» для фільмів). Потрібні `NULL` + `UNIQUE NULLS NOT DISTINCT` (PostgreSQL 16), імпорт favorites/history. **Виправлено.** |
+| 2 | Провайдери та парсери | [02_PARSERS_AND_PROVIDERS_AUDIT.md](02_PARSERS_AND_PROVIDERS_AUDIT.md) | `fixed` | Застарілі селектори Eneyida (`.short-title` → `.short_title`), блокування редиректів UAKino, резолв прямого HLS замість iframe. **Виправлено.** |
+| 3 | Watch Party & WebSocket | [03_WATCH_PARTY_REALTIME_AUDIT.md](03_WATCH_PARTY_REALTIME_AUDIT.md) | `fixed` | Конфлікт регістру/ключів (`USER_JOINED` vs `userJoined`, `sender_id` vs `senderId`), data race у `hub.go`, стан кімнат не писався в Redis. **Виправлено.** |
+| 4 | API-контракти клієнта | [04_API_CONTRACTS_AND_CLIENT_COMPATIBILITY_AUDIT.md](04_API_CONTRACTS_AND_CLIENT_COMPATIBILITY_AUDIT.md) | `fixed` | CORS `AllowedOrigins: ["*"]` + `AllowCredentials` блокується браузерами; жорсткий каст `Map<String, dynamic>` падає на `List<dynamic>`. **Виправлено.** |
+| 5 | Інфраструктура та ресурси | [05_INFRASTRUCTURE_AND_RESOURCE_AUDIT.md](05_INFRASTRUCTURE_AND_RESOURCE_AUDIT.md) | `fixed` | Zero media traffic підтверджено, але ліміт RAM 128 MB ризикований через Argon2id (64 MB на хеш) — потрібно 256 MB. **Виправлено.** |
 
 ---
 
-## 🎯 Пріоритетні виправлення для 100% стабільності продакшену
+## 🗂️ Незалежні аудити (3 звіти)
 
-1. **База даних (`server/internal/repository/postgres/migrations/000001_init.up.sql`)**:
-   - Змінити `season INT NOT NULL DEFAULT 0` -> `season INT NULL` та `episode INT NULL`.
-   - Застосувати фічу PostgreSQL 16:
-     ```sql
-     CONSTRAINT uq_user_history UNIQUE NULLS NOT DISTINCT (user_id, media_id, provider_id, season, episode)
-     ```
-   - Додати поля `rating REAL` та `rating_source VARCHAR(100)` в таблиці `favorites` та `watch_history`.
-2. **Селектори парсерів та редиректи**:
-   - Виправити селектори Eneyida на `.short_title` та `.short_img`.
-   - Дозволити `client.go` слідувати за 301/302 редиректами для дзеркал UAKino (`uakino.best`).
-3. **CORS та WebSocket Hub**:
-   - У `router.go` прибрати конфлікт `AllowCredentials` або задати точні Origin замість `*`.
-   - У `hub.go` перенести видалення клієнтів `delete(clients, client)` під повне блокування `h.mu.Lock()` та синхронізувати camelCase іменування полів із Flutter-клієнтом (`senderId`, `senderName`, `userJoined`, `userLeft`).
-4. **Ресурсний ліміт у `docker-compose.yml`**:
-   - Підняти ліміт пам'яті для `app` до `256M`, щоб уникнути OOM Killer при кількох одночасних операціях хешування Argon2id.
+Ці звіти **не входили** до основного п'ятичленного аудиту, але без них вихідний план
+(`REMEDIATION_PLAN.md`) не виник би.
+
+| # | Звіт | Рядків | Status | Про що |
+| :--- | :--- | :--- | :--- | :--- |
+| 6 | [INDEPENDENT_BUG_AUDIT_REPORT.md](INDEPENDENT_BUG_AUDIT_REPORT.md) | 602 | `superseded` | Повний перелік багів Go-бекенду та Flutter-клієнту з пріоритетами P0-P3. |
+| 7 | [OAUTH_INDEPENDENT_AUDIT_REPORT.md](OAUTH_INDEPENDENT_AUDIT_REPORT.md) | 267 | `superseded` | OAuth2 Telegram / Discord / Google: CSRF `state`, PKCE, redirect allow-list, екранування HTML. |
+| 8 | [SILENT_FAILURES_AND_CRASHES_AUDIT_REPORT.md](SILENT_FAILURES_AND_CRASHES_AUDIT_REPORT.md) | 474 | `superseded` | «Тихі» помилки, зависання та падіння — клієнт і бекенд. |
+
+---
+
+## 🎯 Пріоритетні виправлення (зведено)
+
+Усі нижче перелічені пункти станом на поточний коміт **виконано**. Деталі — у
+[`../REMEDIATION_PLAN.md`](../REMEDIATION_PLAN.md).
+
+1. **База даних** (`migrations/000001_init.up.sql`)
+   - ✅ `season INT NOT NULL DEFAULT 0` → `season INT NULL`, `episode INT NULL` (рядки 44-45)
+   - ✅ `UNIQUE NULLS NOT DISTINCT (user_id, media_id, provider_id, season, episode)`
+   - ✅ Поля `rating` та `rating_source` додано
+   - ✅ `schema_migrations` ведеться (`repository/postgres/db.go`)
+
+2. **Парсери та редиректи**
+   - ✅ Селектори Eneyida → `.short_title` / `.short_img` (`provider/eneyida.go:131,138`)
+   - ✅ `client.go` проходить 301/302 з валідацією кожного хопу (`maxRedirects = 5`)
+
+3. **CORS та WebSocket Hub**
+   - ✅ `AllowedOrigins: ["*"]` → `AllowOriginFunc` з allow-list (`router.go:42-50`)
+   - ✅ Видалення клієнтів перенесено під `h.mu.Lock()` через єдину точку `dropLocked`
+     (`ws/hub.go:421-436`); іменування вирівняно з клієнтом
+
+4. **Ресурсні ліміти**
+   - ✅ RAM для `app` піднято до `256M` (`docker-compose.yml:41`)
+
+5. **Додатково (після аудиту)**
+   - ✅ Обов'язкові env-змінні через `${VAR:?...}`; `JWT_SECRET` ≥ 32 байти з fail-closed валідацією
+   - ✅ `Redis --requirepass` + healthcheck з паролем
+   - ✅ `readHeaderTimeout` / `maxHeaderBytes` (`cmd/api/main.go:256-259`)
+   - ✅ OAuth `state` + PKCE S256, `GETDEL` для refresh-токенів, `RevokeAllForUser`
+
+---
+
+## ⚠️ Незакритий ризик: breaking change у wire-форматі
+
+Після цих аудитів запроваджено єдиний response-envelope
+(`server/internal/transport/http/api_envelope.go`):
+
+```
+success, list    {"data":[ … ],"meta":{"limit":200,"offset":0,"count":2,"total":5,"has_more":true}}
+success, object  {"data":{ … }}
+error            {"error":"…"}
+```
+
+Списки більше не повертаються гола�� масивом. **Клієнт має бути оновлено синхронно** —
+див. [`../REMEDIATION_PLAN.md`](../REMEDIATION_PLAN.md), Wave 2G/2H.

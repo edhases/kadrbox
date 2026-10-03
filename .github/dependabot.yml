@@ -1,0 +1,92 @@
+version: 2
+
+updates:
+  # Go server: module updates come in as PRs, never as direct pushes.
+  - package-ecosystem: gomod
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kiev
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "build(server):"
+    groups:
+      # Security patches for the data layer and the HTTP surface land together.
+      postgres-redis-and-drivers:
+        patterns:
+          - "jackc/pgx*"
+          - "redis/go-redis*"
+          - "testcontainers*"
+      # Patch releases only: a minor bump in the scraper stack changes parsed
+      # output and needs a human reading the diff.
+      scraper-stack-minor:
+        dependency-type: direct
+        update-types:
+          - minor
+          - patch
+        patterns:
+          - "PuerkitoBio/goquery"
+          - "bogdanfinn/*"
+          - "andybalholm/*"
+          - "cloudflare/circl"
+          - "go-chi/*"
+          - "gorilla/websocket"
+          - "golang-jwt/*"
+
+  # Flutter app.
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kiev
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - flutter
+    commit-message:
+      prefix: "build(flutter):"
+    groups:
+      # A generated-code bump must move its generator with it, or build_runner
+      # output goes stale and the CI staleness gate fails on the next run.
+      drift-and-codegen:
+        patterns:
+          - "drift"
+          - "drift_dev"
+          - "build_runner"
+          - "analyzer"
+          - "source_gen"
+      # Pinning build tooling is risky; Dependabot may only propose patch bumps.
+      build-tooling:
+        dependency-type: direct
+        update-types:
+          - patch
+        patterns:
+          - "build_runner"
+          - "flutter_lints"
+
+  # Workflows. Actions are the highest-privilege code in the repository, so they
+  # are reviewed together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kiev
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "ci:"
+    groups:
+      all-actions:
+        patterns:
+          - "*"

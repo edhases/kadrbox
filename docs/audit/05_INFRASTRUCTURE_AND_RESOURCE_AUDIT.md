@@ -1,3 +1,15 @@
+> ## Статус документа
+>
+> - **Status:** fixed
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** ліміт пам'яті `app` піднято до `256M`
+>   (`server/docker-compose.yml:41`) — рекомендація щодо Argon2id виконана.
+> - **Додатково зроблено після аудиту:** обов'язкові змінні оточення через
+>   ``, `Redis --requirepass` + healthcheck з паролем, healthcheck у
+>   Dockerfile, `readHeaderTimeout`/`maxHeaderBytes` (`cmd/api/main.go:256-259`).
+> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 0 та Wave 1, агенти A та B).
+>
+> Історичні знахідки нижче **не переписані**.
 # 05. Звіт аудиту: Інфраструктура, ресурси та безпека
 **Роль:** Аудитор 5 — Валідатор інфраструктури, ресурсів та безпеки (DevOps, Portainer, Resource & Security Auditor)  
 **Об'єкт аудиту:** Go-бекенд (`server/`), Docker-контейнеризація, CI/CD GitHub Actions, модель безпеки (Argon2id, JWT), пули з'єднань БД та горутини WebSocket Hub  

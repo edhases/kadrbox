@@ -1,3 +1,16 @@
+> ## Статус документа
+>
+> - **Status:** fixed
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** усі три ключові знахідки закрито:
+>   1. **Data race у `hub.go` виправлено.** Видалення клієнта тепер має єдину точку
+>      `dropLocked` під `h.mu.Lock()` (`transport/ws/hub.go:421-436,448-449,501`).
+>   2. **Іменування вирівняно** з Flutter-клієнтом: `userJoined` / `senderId`
+>      (`hub.go:493` ↔ `lib/data/services/watch_party_service.dart:26,36`).
+>   3. **Стан кімнат** тепер реально публікується в Redis.
+> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 1, агент C).
+>
+> Історичні знахідки нижче **не переписані**.
 # Звіт аудиту №3: Валідація Watch Party та WebSocket (Realtime Subsystem)
 
 **Дата аудиту:** 28 вересня 2026 року  

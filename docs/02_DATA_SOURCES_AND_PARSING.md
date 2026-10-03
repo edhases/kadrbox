@@ -362,13 +362,21 @@ sequenceDiagram
 
 ## 5. Скрипти автоматизованого аналізу (Root Python Scripts)
 
-У корені проєкту та в директорії `scripts/provider_analysis/` розташовано набір діагностичних скриптів мовою Python. Вони відіграють критичну роль в інженерії та підтримці парсерів:
+> ⚠️ **Застаріло.** Діагностичні Python-скрипти (`analyze_uakino_structure.py`,
+> `test_uaflix_connection.py`, `test_uaflix_patterns.py`, `test_uaflix_top.py`) раніше були
+> закомічені в корені репозиторію, але **видалені** — вони не викликалися ні з коду, ні з CI,
+> а лише описували одноразовий ручний аудит розмітки UAFlix/UAFix. Джерело істини щодо
+> парсерів тепер — Go-реалізація в `server/internal/provider/` та тести
+> `server/internal/provider/*_test.go`.
+>
+> За потреби повторного одноразового аналізу слід створювати такі скрипти поза репозиторієм
+> або в `/scripts/` (який ігнорується `.gitignore`).
 
 | Скрипт | Призначення та роль в архітектурі |
 |---|---|
-| `scripts/provider_analysis/provider_super_analyzer.py` | Повний комплексний аудит усіх провайдерів: перевірка доступності доменів, відсоток успішного витягування 20+ полів метаданих, розрахунок коефіцієнта надійності селекторів (`parsing_confidence`). |
-| `analyze_uakino_structure.py` | Інспекція структури DOM сайту UAKino, виявлення змін у класах карток (`movie-item` vs `short-item`), структури AJAX-плейлистів. |
-| `test_uaflix_connection.py`, `test_uaflix_patterns.py`, `test_uaflix_top.py` | Перевірка працездатності UAFlix під час зміни доменів (наприклад, перехід `uaflix.net` -> `uafix.net`), аналіз регулярних виразів для iframes та Ashdi. |
+| `scripts/provider_analysis/provider_super_analyzer.py` *(ігнорується git)* | Повний комплексний аудит усіх провайдерів: перевірка доступності доменів, відсоток успішного витягування 20+ полів метаданих, розрахунок коефіцієнта надійності селекторів (`parsing_confidence`). |
+| ~~`analyze_uakino_structure.py`~~ | **Видалено.** Інспекція структури DOM UAKino під час розробки парсера. |
+| ~~`test_uaflix_connection.py`, `test_uaflix_patterns.py`, `test_uaflix_top.py`~~ | **Видалено.** Перевірка працездатності UAFlix під час зміни доменів. |
 
 ---
 

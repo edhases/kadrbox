@@ -1,3 +1,15 @@
+> ## Статус документа
+>
+> - **Status:** superseded by `docs/REMEDIATION_PLAN.md`
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** аудит Telegram/Discord/Google OAuth2. Знахідки перенесені в
+>   `docs/REMEDIATION_PLAN.md` (Wave 1D — Auth & OAuth security).
+> - **Вибірково перевірено на `3ab45ef`:** серверний `state` nonce з атомарним
+>   одноразовим споживанням та PKCE S256 (`transport/http/oauth_state.go`,
+>   сховище — `redis.go:300`); точний allow-list redirect
+>   (`transport/http/oauth_redirect.go`); екранування HTML-відповіді
+>   (`transport/http/html_render.go`).
+> - **Не переписано:** історичні знахідки залишено як є.
 # Незалежний експертний аудит безпеки та надійності: Telegram & Discord OAuth2
 **Проєкт:** Oxide Film (Go Backend & Flutter Client)  
 **Роль:** Головний інженер з безпеки та аудиту якості коду (Principal Security & Reliability Auditor)  

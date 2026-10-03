@@ -1,3 +1,15 @@
+> ## Статус документа
+>
+> - **Status:** fixed
+> - **Verified against:** `3ab45ef`
+> - **Актуальність:** основні рекомендації підтверджено як реалізовані:
+>   `season`/`episode` тепер `INT NULL` (`migrations/000001_init.up.sql:44-45`),
+>   `UNIQUE NULLS NOT DISTINCT` застосовано, `rating`/`rating_source` додано,
+>   `schema_migrations` ведеться (`repository/postgres/db.go`),
+>   `CountUserFavorites` існує (`favorites_repo.go:112`).
+> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 2, агенти F та G).
+>
+> Історичні знахідки нижче **не переписані** — вони залишено як запис стану на момент аудиту.
 # Технічний аудит міграції бази даних (PostgreSQL vs PocketBase & Drift)
 
 **Дата аудиту:** 28 вересня 2026 року  

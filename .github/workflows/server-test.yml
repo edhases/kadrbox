@@ -10,6 +10,16 @@ on:
     paths:
       - 'server/**'
 
+# Overlapping runs on the same ref thrash the Go module cache and the coverage
+# artifact, and the stale run's result is uploaded last. One run per ref; a new
+# push supersedes the in-flight one.
+concurrency:
+  group: server-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -40,14 +50,55 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.23.x'
+          cache-dependency-path: server/go.sum
+
+      # The database-backed tests in internal/repository/{postgres,redis} fall
+      # back to starting their own containers when TEST_POSTGRES_DSN /
+      # TEST_REDIS_ADDR are unset. Setting them here keeps CI on the fast,
+      # already-warm service containers instead of pulling postgres:16-alpine and
+      # redis:7-alpine again per run; the container path is still exercised
+      # locally and by anyone who unsets the variables.
+
       - run: go vet ./...
-      - run: go test -race -covermode=atomic -coverprofile=coverage.out -coverpkg=./... ./...
+
+      # -race is mandatory for this codebase: the WebSocket hub and the provider
+      # cache are concurrent, and the race detector is the only thing that sees a
+      # data race between them. It needs cgo, which ubuntu-latest provides via
+      # gcc; it cannot be reproduced on a stock Windows dev box.
+      - name: Test (race detector)
+        run: go test -race -covermode=atomic -coverprofile=coverage.out -coverpkg=./... ./...
+
+      # Proves the container-backed rig is not silently skipped in CI. Without
+      # this, a broken DSN would turn every persistence test into a pass.
+      - name: Assert the database-backed tests actually ran
+        run: |
+          go test -count=1 -v -cover ./internal/repository/postgres/... ./internal/repository/redis/... \
+            | tee db-tests.log
+          if grep -qE '^(--- SKIP|    .*\.go:[0-9]+: .*Postgres unavailable)' db-tests.log; then
+            echo "::error::the database-backed repository tests skipped in CI; TEST_POSTGRES_DSN / TEST_REDIS_ADDR are not wired up"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
           path: server/coverage.out
+
       - run: go tool cover -func=coverage.out
+
+      - name: Dependency vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Report outdated modules
+        if: always()
+        continue-on-error: true
+        run: |
+          go list -m -u -f '{{if .Update}}{{.Path}} {{.Version}} -> {{.Update.Version}}{{end}}' all \
+            | grep -v '^$' || echo "all modules up to date"

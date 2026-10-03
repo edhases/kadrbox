@@ -1,18 +1,38 @@
 # Документація проєкту Oxide Film
 
-Дана директорія містить вичерпну архітектурну, технічну та користувацьку документацію кросплатформного медіа-агрегатора **Oxide Film**, підготовлену командою з 5 спеціалізованих агентів-дослідників із застосуванням графового аналізу знань (**graphify**).
+Ця директорія містить архітектурну, технічну документацію та звіти аудиту медіа-агрегатора **Oxide Film**.
+
+---
+
+## ⚠️ Актуальність документації
+
+> **Джерело істини щодо стеку — [`../README.md`](../README.md).** Розділи 01-05 нижче було
+> написано **до** міграції парсингу та авторизації на Go-сервер і містять застарілі твердження:
+>
+> | Застаріле твердження | Реальність |
+> |---|---|
+> | PocketBase (авторизація, синхронізація, Realtime SSE) | Go-бекенд у `server/`: JWT + PostgreSQL 16 + Redis |
+> | Парсинг у Dart, 6 провайдерів (UAFlix, UAKino, Eneyida, UASerials, YummyAnime, YouTube) | Парсинг у Go: `uakino`, `lavakino`, `eneyida`, `bandera` |
+> | WebRTC / PocketBase Realtime для Watch Party | Go WebSocket hub + Redis |
+> | Web (beta) | Не підтримується — каталогу `web/` немає |
+>
+> Розділи **не переписані** (занадто великі для супровідної правки), а позначені як
+> історичні. Див. також [`audit/`](audit/) та [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
 
 ---
 
 ## 📚 Структура та зміст розділів
 
-| Документ | Основні теми та зміст |
-| :--- | :--- |
-| **[01. Архітектура платформи та стек](01_TECH_STACK_AND_ARCHITECTURE.md)** | • Загальний концепт та цілі проєкту (Offline-first, агрегація медіа)<br>• Повний технологічний стек (Flutter Dart 3.10.7, Drift, GetIt, Dio, MediaKit, PocketBase тощо)<br>• Специфікація Clean Architecture (Domain, Data, Presentation, Core)<br>• Ланцюг старту та DI-реєстрації в `main.dart`<br>• Кросплатформна конфігурація (Windows безрамкові вікна, Android NDK/Permissions, Linux) |
-| **[02. Джерела даних та механізми парсингу](02_DATA_SOURCES_AND_PARSING.md)** | • Базові інтерфейси `ContentProvider`, `ResolvedUrlMixin` та `ProviderRegistry`<br>• Розбір 6 провайдерів: UAFlix, UAKino, Eneyida, UASerials, YummyAnime, YouTube<br>• Алгоритми обходу блокувань, PlayerJS парсинг<br>• Мережевий клієнт `ApiClient` (Dio, автоматичні повтори `dio_smart_retry`, збереження `CookieJar`, ротація `UserAgentService`)<br>• Винесення парсингу DOM у фонові Dart Isolates через `compute()` |
-| **[03. Локальні дані, синхронізація та сервіси](03_DATABASE_SYNC_AND_CORE_SERVICES.md)** | • Локальна база даних Drift (SQLite v9): ER-діаграма, таблиці, індекси, конвертери `DownloadStatus`<br>• Детальний розбір 6 DAO (`HistoryDao`, `FavoritesDao`, `DownloadsDao`, `SearchHistoryDao`, `SettingsDao`, `MediaItemsDao`)<br>• Інтеграція з бекендом PocketBase: автентифікація, збереження токенів, Realtime SSE синхронізація зі стратегією "Newer Timestamp Wins"<br>• Підсистема спільного перегляду **Watch Party**: дворівневий бекенд (PocketBase / WebRTC PeerDart) та багаторівневий алгоритм корекції Drift<br>• Інтеграція з TMDB API (метадані, постери, трейлери) та система безшовних OTA-оновлень (SHA-256) |
-| **[04. UI/UX, Навігація та Медіаплеєр](04_UI_UX_AND_MEDIA_PLAYER.md)** | • Повна карта екранів (Sitemap) та конфігурація `GoRouter` + `ShellRoute` (для плаваючого плеєра)<br>• Дизайн-система, токени відступів `AppSpacing`, теми (Light, Dark, AMOLED True Black, кольорові акценти)<br>• UI-компоненти: `MediaCard`, `FilterSheet`, кастомний `CustomTitleBar` для десктопу, D-Pad/TV фокусування<br>• Відеоплеєр на базі `media_kit` (libmpv): апаратне декодування `auto-copy`, мультиаудіо, HLS/DASH/MP4, субтитри, алгоритм автоматичного пониження якості при лагах, режим Picture-in-Picture та MiniPlayerOverlay<br>• Підтримка хоткеїв для клавіатури/миші та жести керування гучністю/яскравістю на мобільних пристроях |
-| **[05. Управління станом та системні потоки](05_STATE_MANAGEMENT_AND_WORKFLOWS.md)** | • Реєстр усіх сервісів та контролерів стану (`PlayerController`, `SettingsService`, `HistoryService`, `SmartSearchService` тощо)<br>• Специфікація наскрізних зв'язків між усіма шарами (UI -> Services -> Domain -> DataSources)<br>• Mermaid-діаграми станів для плеєра, пошуку та автентифікації<br>• Детальні End-to-End User Journeys (sequence diagrams): запуск, пошук із нечітким порівнянням (Fuzzy), завантаження джерел стрімінгу, збереження прогресу в БД Drift<br>• Реактивні патерни на базі Streams (Drift `watchAll()` -> UI, PocketBase SSE, WebRTC) |
+| Документ | Статус | Основні теми та зміст |
+| :--- | :--- | :--- |
+| **[01. Архітектура платформи та стек](01_TECH_STACK_AND_ARCHITECTURE.md)** | 🕐 історичний | • Загальний концепт та цілі проєкту (Offline-first, агрегація медіа)<br>• Повний технологічний стек<br>• Специфікація Clean Architecture (Domain, Data, Presentation, Core)<br>• Ланцюг старту та DI-реєстрації в `main.dart`<br>• Кросплатформна конфігурація (Windows безрамкові вікна, Android NDK/Permissions, Linux) |
+| **[02. Джерела даних та меченізми парсингу](02_DATA_SOURCES_AND_PARSING.md)** | 🕐 історичний | • Базові інтерфейси `ContentProvider`, `ProviderRegistry`<br>• Розбір провайдерів<br>• Алгоритми обходу блокувань, PlayerJS парсинг<br>• Мережевий клієнт `ApiClient` (Dio, `dio_smart_retry`, `CookieJar`, `UserAgentService`) |
+| **[03. Локальні дані, синхронізація та сервіси](03_DATABASE_SYNC_AND_CORE_SERVICES.md)** | 🕐 історичний | • Локальна база Drift (SQLite): ER-діаграма, таблиці, індекси<br>• Розбір DAO (`HistoryDao`, `FavoritesDao`, `DownloadsDao`, `SearchHistoryDao`, `SettingsDao`, `MediaItemsDao`)<br>• Синхронізація з бекендом<br>• Підсистема Watch Party<br>• TMDB API та OTA-оновлення (SHA-256) |
+| **[04. UI/UX, Навігація та Медіаплеєр](04_UI_UX_AND_MEDIA_PLAYER.md)** | 🕐 історичний | • Карта екранів та конфігурація `GoRouter` + `ShellRoute`<br>• Дизайн-система, токени відступів, теми<br>• UI-компоненти: `MediaCard`, `FilterSheet`, `CustomTitleBar`<br>• Відеоплеєр на базі `media_kit` (libmpv), Picture-in-Picture, MiniPlayerOverlay |
+| **[05. Управління станом та системні потоки](05_STATE_MANAGEMENT_AND_WORKFLOWS.md)** | 🕐 історичний | • Реєстр сервісів та контролерів стану<br>• Наскрізні зв'язки між шарами<br>• Mermaid-діаграми станів<br>• End-to-End User Journeys |
+| **[06. Roadmap джерел даних](06_ROADMAP_DATA_SOURCES.md)** | ✅ актуальний | Дорожня карта розширення провайдерів |
+| **[REMEDIATION_PLAN.md](REMEDIATION_PLAN.md)** | ✅ актуальний | План усунення знахідок аудиту: Wave 0-3, розподіл власності файлів між агентами, критерії приймання |
+| **[audit/](audit/)** | ✅ актуальний | 8 звітів аудиту (5 основних + 3 незалежних) зі статусами `fixed` / `superseded`. Див. покажчик [audit/README.md](audit/README.md) |
 
 ---
 

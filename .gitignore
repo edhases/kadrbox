@@ -1,7 +1,5 @@
 # Miscellaneous
 *.class
-*.log
-*.pyc
 *.swp
 .DS_Store
 .atom/
@@ -33,11 +31,9 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
-/coverage/
-
-# Web related
-lib/generated_plugin_registrant.dart
+build/
+coverage/
+**/generated_plugin_registrant.dart
 
 # Symbolication related
 app.*.symbols
@@ -45,33 +41,74 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
-# Android Studio
+# Android Studio & Signing
 /android/app/debug
 /android/app/profile
 /android/app/release
 /android/gradle/
 /android/local.properties
 /android/.gradle/
+/android/.kotlin/
 /android/captures/
+/android/key.properties
+/android/app/keystore/
+key.properties
+*.jks
+*.keystore
+
+# Desktop platform build & ephemeral
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+macos/Flutter/ephemeral/
+*.msix
+*.pfx
+*.cer
+*.suo
+*.user
+
+# Go / Server build & test artifacts
+server/bin/
+server/server
+server/main
+*.test
+coverage.out
+coverage.txt
+coverage.html
+profile.cov
+*.coverprofile
+docker-compose.override.yml
+
+# Database & dump files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.dump
 
 # Secrets (API keys, tokens)
 lib/core/config/secrets.dart
 lib/env/
 .env
+.env.*
+!.env.example
 
-# Large Assets / Media
-*.mp4
-*.mov
+# Logs (app runtime logs, e.g. app_run.log and lib/core/utils/logger.dart's
+# oxide_film.log — never commit runtime output, it can carry PII and upstream
+# Cloudflare interstitials).
+*.log
+logs/
 
 # Local Documentation / Audits
-Audite.md
 implementation_plan.md
 task.md
 walkthrough.md
 
 # Python/Scripting garbage
-*.pyc
 __pycache__/
+*.py[cod]
 
 # Root level temporary assets
 /appicon.png
@@ -84,7 +121,36 @@ __pycache__/
 
 # Graphify Knowledge Graph output & cache
 graphify-out/
+.graphify*
 
-# Temporary HTML debug/test files
+# Agent bridge workspace state & AI agent debris
+.agent_bridge/
+.antigravity/
+.claude/
+
+# Temporary HTML debug/test files & root scratch scripts.
+# The real, small, intentional parser fixtures live in test/fixtures/ and are
+# kept via the allow-list below. Everything else in test/ is scraping debris.
+test/*.html
+test/*.js
 test_*.html
-/.agent_bridge
+test_*.dart
+test_*.py
+test_*.js
+scratch/
+tmp/
+temp/
+!test/useragents_me.html
+!test/fixtures/
+!test/fixtures/**
+!test/specs/
+!test/specs/**
+
+# OS & Backup debris
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+*.bak
+*.tmp
+*.orig
+*~
