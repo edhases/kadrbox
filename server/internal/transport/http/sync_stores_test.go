@@ -207,8 +207,8 @@ func newSyncRig() *syncRig {
 }
 
 var (
-	_ transporthttp.FavoritesStore = (*memFavoritesStore)(nil)
-	_ transporthttp.HistoryStore   = (*memHistoryStore)(nil)
+	_ transporthttp.FavoritesMutator = (*memFavoritesStore)(nil)
+	_ transporthttp.HistoryStore     = (*memHistoryStore)(nil)
 )
 
 var _ = errors.New

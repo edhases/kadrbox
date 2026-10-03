@@ -23,7 +23,7 @@ func qwAuthRouter(t *testing.T, svc *email.Service) http.Handler {
 	contentH := transporthttp.NewContentHandler(reg, nil)
 	authH := transporthttp.NewAuthHandler(nil, nil, svc, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
-	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
+	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
 }
 
 func qwPost(t *testing.T, h http.Handler, path, body string) *httptest.ResponseRecorder {

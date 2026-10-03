@@ -118,13 +118,20 @@ func catRegistry(ps ...domain.Provider) (*transporthttp.ContentHandler, *provide
 	return transporthttp.NewContentHandler(reg, nil), reg
 }
 
+// decodeItems unwraps the list envelope. The endpoints answer
+// {"data":[…],"meta":{…}}; a bare JSON array was the pre-envelope contract.
 func decodeItems(t *testing.T, rr *httptest.ResponseRecorder) []domain.MediaItem {
 	t.Helper()
-	var items []domain.MediaItem
-	if err := json.Unmarshal(rr.Body.Bytes(), &items); err != nil {
-		t.Fatalf("відповідь не є JSON-масивом (%v): %s", err, rr.Body.String())
+	var env struct {
+		Data []domain.MediaItem `json:"data"`
 	}
-	return items
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("відповідь не є конвертом списку (%v): %s", err, rr.Body.String())
+	}
+	if env.Data == nil {
+		t.Fatalf("data декодувався як nil, має бути []: %s", rr.Body.String())
+	}
+	return env.Data
 }
 
 func TestPopularReturnsProviderItems(t *testing.T) {
@@ -229,7 +236,7 @@ func TestPopularDisabledProviderIs403(t *testing.T) {
 	}
 }
 
-func TestPopularUpstreamFailureIs500(t *testing.T) {
+func TestPopularUpstreamFailureIs503(t *testing.T) {
 	p := &catProvider{
 		id:         "lavakino",
 		popularErr: errors.New("lavakino get popular: upstream 502"),
@@ -239,8 +246,13 @@ func TestPopularUpstreamFailureIs500(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Popular(rr, httptest.NewRequest(http.MethodGet, "/api/v1/content/popular?provider=lavakino", nil))
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("очікувався 500, отримано %d", rr.Code)
+	// 503 + Retry-After, not 500: a scraper failure is not a malformed request,
+	// and a 5xx makes the Flutter client retry three times with no method check.
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("очікувався 503, отримано %d", rr.Code)
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("503 без Retry-After")
 	}
 	// The body must not leak the upstream error to the client.
 	if strings.Contains(rr.Body.String(), "502") {
@@ -351,7 +363,7 @@ func TestCategoryDisabledProviderIs403(t *testing.T) {
 	}
 }
 
-func TestCategoryUpstreamFailureIs500(t *testing.T) {
+func TestCategoryUpstreamFailureIs503(t *testing.T) {
 	p := &catProvider{id: "uakino", catErr: errors.New("category blew up")}
 	h, _ := catRegistry(p)
 
@@ -359,16 +371,20 @@ func TestCategoryUpstreamFailureIs500(t *testing.T) {
 	h.Category(rr, httptest.NewRequest(http.MethodGet,
 		"/api/v1/content/category?provider=uakino&category=x", nil))
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("очікувався 500, отримано %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 for a scraper failure, got %d", rr.Code)
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("503 without Retry-After")
 	}
 	if strings.Contains(rr.Body.String(), "blew up") {
 		t.Errorf("деталі помилки просочилися: %s", rr.Body.String())
 	}
 }
 
-// Both catalogue handlers install a recover(). A panicking provider must still
-// produce a well-formed 500 rather than tearing down the connection.
+// The registry recovers provider panics and reports them as ErrProviderPanic,
+// so a panicking scraper still produces a well-formed 500 with a JSON body
+// rather than tearing down the connection.
 func TestCatalogueHandlersRecoverFromProviderPanic(t *testing.T) {
 	t.Run("popular", func(t *testing.T) {
 		p := &panicProvider{id: "boom"}

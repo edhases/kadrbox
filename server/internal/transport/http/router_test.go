@@ -11,6 +11,10 @@ import (
 	"github.com/edhases/oxide-server/internal/transport/ws"
 )
 
+// testAppURL використовується всіма NewRouter-тестами: allow-list джерел
+// будується з нього, тому порожній рядок дав би відмінну поведінку CORS.
+const testAppURL = "https://film.oxideteam.pp.ua"
+
 func TestRouterHealthEndpoint(t *testing.T) {
 	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
@@ -18,7 +22,7 @@ func TestRouterHealthEndpoint(t *testing.T) {
 	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 
-	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
+	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
 	rr := httptest.NewRecorder()
@@ -46,7 +50,7 @@ func TestRouterCORSHeaders(t *testing.T) {
 	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 
-	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
+	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
 
 	req, _ := http.NewRequest("OPTIONS", "/api/v1/content/search", nil)
 	req.Header.Set("Origin", "http://localhost:3000")

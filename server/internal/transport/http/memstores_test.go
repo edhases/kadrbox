@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/oxide-server/internal/repository/postgres"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
 )
 
@@ -246,6 +247,25 @@ func (s *memUserStore) CreatePasswordResetToken(ctx context.Context, userID uuid
 	}
 	s.resetTokens[token] = userID
 	return nil
+}
+
+// ConsumePasswordResetTokenAndUpdatePassword mirrors the repository's single
+// transaction: the token is burned and the hash written together, so a replay
+// fails and a failure cannot leave a new password beside a live token.
+func (s *memUserStore) ConsumePasswordResetTokenAndUpdatePassword(ctx context.Context, token, newPasswordHash string) (uuid.UUID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	userID, ok := s.resetTokens[token]
+	if !ok {
+		return uuid.Nil, postgres.ErrResetTokenNotFound
+	}
+	delete(s.resetTokens, token)
+	user, ok := s.byID[userID]
+	if !ok {
+		return uuid.Nil, postgres.ErrUserNotFound
+	}
+	user.PasswordHash = newPasswordHash
+	return userID, nil
 }
 
 // GetUserByPasswordResetToken consumes the token, matching the SQL layer's

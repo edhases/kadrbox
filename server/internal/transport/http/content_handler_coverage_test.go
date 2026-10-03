@@ -207,7 +207,9 @@ func TestCovHttpDetailsSuccess(t *testing.T) {
 	}
 }
 
-// TestCovHttpDetailsProviderError — помилка провайдера дає 500.
+// TestCovHttpDetailsProviderError — помилка провайдера дає 503 + Retry-After.
+// 500 says "your request was wrong" and makes the Flutter client retry a POST
+// three times; a scraper failure is a 503 the client can back off from.
 func TestCovHttpDetailsProviderError(t *testing.T) {
 	h, _ := covContentHandler(&covStubProvider{id: "p1", err: errors.New("cov-boom")})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/details?provider=p1&url=https://x/1", nil)
@@ -215,8 +217,11 @@ func TestCovHttpDetailsProviderError(t *testing.T) {
 
 	h.GetDetails(rr, req)
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("очікувався 500, отримано %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("очікувався 503, отримано %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 }
 
@@ -271,7 +276,7 @@ func TestCovHttpStreamsUnknownProvider(t *testing.T) {
 	}
 }
 
-// TestCovHttpStreamsProviderError — помилка провайдера дає 500.
+// TestCovHttpStreamsProviderError — помилка провайдера дає 503.
 func TestCovHttpStreamsProviderError(t *testing.T) {
 	h, _ := covContentHandler(&covStubProvider{id: "p1", err: errors.New("cov-boom")})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/streams?provider=p1&url=https://x/1", nil)
@@ -279,8 +284,8 @@ func TestCovHttpStreamsProviderError(t *testing.T) {
 
 	h.GetStreams(rr, req)
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("очікувався 500, отримано %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("очікувався 503, отримано %d", rr.Code)
 	}
 }
 
@@ -311,17 +316,21 @@ func TestCovHttpProvidersCatalog(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("очікувався application/json, отримано %q", ct)
 	}
-	var cat struct {
-		Version   int64 `json:"version"`
-		Providers []struct {
-			ID      string `json:"id"`
-			Enabled bool   `json:"enabled"`
-			Healthy bool   `json:"healthy"`
-		} `json:"providers"`
+	// The single-object envelope: {"data": {…}}.
+	var env struct {
+		Data struct {
+			Version   int64 `json:"version"`
+			Providers []struct {
+				ID      string `json:"id"`
+				Enabled bool   `json:"enabled"`
+				Healthy bool   `json:"healthy"`
+			} `json:"providers"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
 		t.Fatalf("невалідний JSON каталогу: %v", err)
 	}
+	cat := env.Data
 	if len(cat.Providers) != 1 || cat.Providers[0].ID != "p1" {
 		t.Errorf("неочікуваний каталог: %+v", cat)
 	}

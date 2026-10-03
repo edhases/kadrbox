@@ -1,22 +1,29 @@
 package http
 
 import (
-	"encoding/json"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
 	"github.com/edhases/oxide-server/internal/provider"
-	"github.com/edhases/oxide-server/internal/search"
+	"golang.org/x/sync/singleflight"
 )
 
 type ContentHandler struct {
 	registry  *provider.Registry
 	cacheRepo ContentCache
+
+	// sf collapses concurrent identical cache-miss requests into a single
+	// upstream call. Without it, N clients opening the app at the same moment
+	// each fan out to every provider and each write the same cache row.
+	sf singleflight.Group
 }
 
 func NewContentHandler(registry *provider.Registry, cacheRepo ContentCache) *ContentHandler {
@@ -29,361 +36,283 @@ func NewContentHandler(registry *provider.Registry, cacheRepo ContentCache) *Con
 func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		http.Error(w, `{"error":"search query parameter 'q' is required"}`, http.StatusBadRequest)
+		writeAPIError(w, "search query parameter 'q' is required", http.StatusBadRequest)
 		return
 	}
 
 	providerID := r.URL.Query().Get("provider")
-	if providerID != "" {
-		results, err := h.registry.SearchProvider(r.Context(), providerID, query)
-		if err != nil {
-			switch {
-			case errors.Is(err, provider.ErrProviderDisabled):
-				http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
-			case errors.Is(err, provider.ErrProviderNotFound):
-				http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-			default:
-				http.Error(w, `{"error":"failed to execute search"}`, http.StatusInternalServerError)
-			}
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(results)
-		return
-	}
-
-	// 1. Інтелектуальний уніфікований пошук через Bandera Online (Хвиля 3B)
-	if p, exists := h.registry.Get("bandera"); exists {
-		if banderaProv, ok := p.(*provider.BanderaProvider); ok {
-			startTime := time.Now()
-		plan := search.BuildQueryPlan(query)
-
-		// Перевірка кешу в PostgreSQL
-		cacheKey := "search:" + plan.Hash
-		if h.cacheRepo != nil {
-			var cached search.SearchResponse
-			if hit, _ := h.cacheRepo.Get(r.Context(), cacheKey, &cached); hit {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Cache", "HIT")
-				_ = json.NewEncoder(w).Encode(cached)
-				return
-			}
-		}
-
-		serial := 0
-		if plan.TypeHint == "series" {
-			serial = 1
-		}
-
-		rawResp, err := banderaProv.SearchWithMeta(r.Context(), plan.Canonical, plan.Year, serial)
-		if err != nil {
-			http.Error(w, `{"error":"failed to execute search"}`, http.StatusInternalServerError)
-			return
-		}
-
-		var candidates []search.ScoredSearchItem
-		filteredOut := 0
-
-		for _, item := range rawResp.Items {
-			year := provider.ParseFlexibleYear(item.Year)
-			mediaType := item.Type.String()
-			if mediaType == "" {
-				mediaType = "movie"
-			}
-
-			scoreRes := search.CalculateRelevance(plan, item.Title, year, mediaType)
-			if scoreRes.Dropped {
-				filteredOut++
-				continue
-			}
-
-			stableID := provider.GenerateStableContentID(item.Source, item.Title, year, item.Ref)
-			payload := provider.BanderaItemPayload{
-				ID:        stableID,
-				Source:    item.Source,
-				Ref:       item.Ref,
-				Type:      mediaType,
-				Title:     item.Title,
-				Poster:    item.Poster.String(),
-				Year:      year,
-				IsItemRef: true,
-			}
-			payloadBytes, _ := json.Marshal(payload)
-
-			candidates = append(candidates, search.ScoredSearchItem{
-				MediaItem: domain.MediaItem{
-					ID:            stableID,
-					ProviderID:    banderaProv.ID(),
-					Title:         item.Title,
-					OriginalTitle: item.TitleEn.String(),
-					PosterURL:     item.Poster.String(),
-					Year:          year,
-					Type:          mediaType,
-					URL:           string(payloadBytes),
-				},
-				Score:      scoreRes.Score,
-				MatchedBy:  scoreRes.MatchedBy,
-				ClusterKey: search.GenerateClusterKey(item.Title, year, mediaType),
-				Sources: []search.SearchSourceRef{
-					{
-						ProviderID: banderaProv.ID(),
-						SourceKey:  item.Source,
-						ItemID:     stableID,
-					},
-				},
-			})
-		}
-
-		clustered := search.ClusterAndDeduplicate(candidates)
-
-		// Збираємо та нормалізуємо статистику підджерел
-		sourceStatuses := make(map[string]search.SourceStatusInfo)
-		hasSuccess := false
-		hasError := false
-
-		if rawResp.Meta != nil {
-			for srcKey, st := range rawResp.Meta.Statuses {
-				normStatus := normalizeSourceStatus(st.Status, st.Count, st.Error)
-				if normStatus == "ok" {
-					hasSuccess = true
-				} else if normStatus == "error" || normStatus == "timeout" {
-					hasError = true
-				}
-				sourceStatuses[srcKey] = search.SourceStatusInfo{
-					Status:    normStatus,
-					Count:     st.Count,
-					ElapsedMs: st.GetElapsedMs(),
-				}
-			}
-		}
-
-		segmentStatus := "ok"
-		if len(rawResp.Items) == 0 {
-			if hasError && !hasSuccess {
-				segmentStatus = "error"
-			} else {
-				segmentStatus = "empty"
-			}
-		} else if hasError {
-			segmentStatus = "partial"
-		}
-
-		segments := []search.SearchSegment{
-			{
-				ID:      "bandera",
-				Status:  segmentStatus,
-				Count:   len(rawResp.Items),
-				Sources: sourceStatuses,
-			},
-		}
-
-		searchResp := search.SearchResponse{
-			Query:       query,
-			Canonical:   plan.Canonical,
-			TookMs:      time.Since(startTime).Milliseconds(),
-			Segments:    segments,
-			Items:       clustered,
-			FilteredOut: filteredOut,
-			HasMore:     false,
-		}
-
-		// Зберігаємо результат у кеш
-		if h.cacheRepo != nil {
-			ttl := 15 * time.Minute
-			if len(clustered) == 0 {
-				ttl = 60 * time.Second
-			}
-			_ = h.cacheRepo.Set(r.Context(), cacheKey, "bandera", "search", searchResp, ttl)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(searchResp)
-		return
-		}
-	}
-
-	// 2. Фолбек для оточень без BanderaProvider (наприклад, окремі тестові мок-хендлери)
-	results, err := h.registry.SingleFlightSearch(r.Context(), query)
+	resp, fromCache, err := h.runSearch(r.Context(), query, providerID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to execute search"}`, http.StatusInternalServerError)
+		switch {
+		case providerID == "" && errors.Is(err, errMetaSearchUnsupported):
+			// The aggregator is registered but cannot answer a meta search.
+			// Falling back to the fan-out here would hand the client a
+			// different contract for the same endpoint, so this is reported as
+			// an explicit server-side gap rather than a silent shape change.
+			// (A missing aggregator does fall back: that path returns the same
+			// search.SearchResponse shape, so there is no contract change.)
+			log.Printf("[Content] unified search unavailable: %v", err)
+			writeAPIError(w, "unified search is not available on this server", http.StatusNotImplemented)
+		case errors.Is(err, errMetaSearchUnsupported):
+			writeAPIError(w, "provider does not support unified search", http.StatusNotImplemented)
+		case errors.Is(err, provider.ErrProviderDisabled):
+			writeAPIError(w, "provider disabled", http.StatusForbidden)
+		case errors.Is(err, provider.ErrProviderNotFound):
+			writeAPIError(w, "unknown provider", http.StatusNotFound)
+		default:
+			writeUpstreamError(w, err, "failed to execute search")
+		}
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(results)
+	if fromCache {
+		w.Header().Set("X-Cache", "HIT")
+	}
+	writeObject(w, resp)
 }
 
 func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("[PANIC RECOVER] in GetDetails: %v", rec)
-			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
-		}
-	}()
-
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
 
 	if providerID == "" || itemURL == "" {
-		http.Error(w, `{"error":"provider and url parameters are required"}`, http.StatusBadRequest)
+		writeAPIError(w, "provider and url parameters are required", http.StatusBadRequest)
 		return
 	}
 
 	if err := ValidateSafeURL(itemURL); err != nil {
-		http.Error(w, `{"error":"invalid or unsafe item url"}`, http.StatusBadRequest)
+		writeAPIError(w, "invalid or unsafe item url", http.StatusBadRequest)
 		return
 	}
 
-	details, err := h.registry.Details(r.Context(), providerID, itemURL)
+	details, fromCache, err := cached(r.Context(), h, detailsCacheKey(providerID, itemURL), providerID, "details", negativeDetailsTTL,
+		func(ctx context.Context) (*domain.MediaDetails, time.Duration, error) {
+			loaded, loadErr := h.registry.Details(ctx, providerID, itemURL)
+			return loaded, detailsCacheTTL, loadErr
+		})
 	if err != nil {
-		switch {
-		case errors.Is(err, provider.ErrProviderDisabled):
-			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
-		case errors.Is(err, provider.ErrProviderNotFound):
-			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-		default:
-			http.Error(w, `{"error":"failed to get media details"}`, http.StatusInternalServerError)
-		}
+		writeProviderError(w, err, "failed to get media details")
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(details)
+	if fromCache {
+		w.Header().Set("X-Cache", "HIT")
+	}
+	writeObject(w, details)
 }
 
 func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("[PANIC RECOVER] in GetStreams: %v", rec)
-			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
-		}
-	}()
-
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
-	seasonStr := r.URL.Query().Get("season")
-	episodeStr := r.URL.Query().Get("episode")
-	voiceID := r.URL.Query().Get("voice")
 
 	if providerID == "" || itemURL == "" {
-		http.Error(w, `{"error":"provider and url parameters are required"}`, http.StatusBadRequest)
+		writeAPIError(w, "provider and url parameters are required", http.StatusBadRequest)
 		return
 	}
 
 	if err := ValidateSafeURL(itemURL); err != nil {
-		http.Error(w, `{"error":"invalid or unsafe item url"}`, http.StatusBadRequest)
+		writeAPIError(w, "invalid or unsafe item url", http.StatusBadRequest)
 		return
 	}
 
-	season, _ := strconv.Atoi(seasonStr)
-	episode, _ := strconv.Atoi(episodeStr)
+	// Deliberately NOT cached. Upstream stream URLs are signed and short-lived:
+	// internal/provider/bandera_client.go:263-264 documents that a resolved
+	// /stream URL carries an expiry and a signature ("?expires=...&sig=...").
+	// Caching the response would hand the client a URL that has already
+	// expired, which surfaces as a playback failure, not as a cache error.
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+	episode, _ := strconv.Atoi(r.URL.Query().Get("episode"))
+	voiceID := r.URL.Query().Get("voice")
 
 	resp, err := h.registry.Streams(r.Context(), providerID, itemURL, season, episode, voiceID)
 	if err != nil {
-		switch {
-		case errors.Is(err, provider.ErrProviderDisabled):
-			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
-		case errors.Is(err, provider.ErrProviderNotFound):
-			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-		case errors.Is(err, provider.ErrUnresolvablePlayer):
-			http.Error(w, `{"error":"player page exposes no playable media"}`, http.StatusUnprocessableEntity)
-		default:
-			http.Error(w, `{"error":"failed to get streams"}`, http.StatusInternalServerError)
+		if errors.Is(err, provider.ErrUnresolvablePlayer) {
+			writeAPIError(w, "player page exposes no playable media", http.StatusUnprocessableEntity)
+			return
 		}
+		writeProviderError(w, err, "failed to get streams")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	writeObject(w, resp)
 }
 
 // Providers — GET /api/v1/content/providers
 // Публічний каталог провайдерів: джерело правди для застосунків.
 func (h *ContentHandler) Providers(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.registry.Catalog())
+	writeObject(w, h.registry.Catalog())
 }
 
 // Popular — GET /api/v1/content/popular
 func (h *ContentHandler) Popular(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("[PANIC RECOVER] in Popular: %v", rec)
-			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
-		}
-	}()
-
 	providerID := r.URL.Query().Get("provider")
 	contentType := r.URL.Query().Get("type")
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
-	}
+	page := pageParam(r, 1)
 
-	results, err := h.registry.Popular(r.Context(), providerID, contentType, page)
+	cacheKey := fmt.Sprintf("catalogue:%s:popular:%s:%d", providerLabel(providerID), contentType, page)
+	results, fromCache, err := cached(r.Context(), h, cacheKey, providerID, "popular", negativeCatalogueTTL,
+		func(ctx context.Context) ([]domain.MediaItem, time.Duration, error) {
+			items, loadErr := h.registry.Popular(ctx, providerID, contentType, page)
+			return nonNilItems(items), catalogueCacheTTL, loadErr
+		})
 	if err != nil {
-		switch {
-		case errors.Is(err, provider.ErrProviderDisabled):
-			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
-		case errors.Is(err, provider.ErrProviderNotFound):
-			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-		default:
-			http.Error(w, `{"error":"failed to load popular content"}`, http.StatusInternalServerError)
-		}
+		writeProviderError(w, err, "failed to load popular content")
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(results)
+	if fromCache {
+		w.Header().Set("X-Cache", "HIT")
+	}
+	writeList(w, r, results, &PageMeta{Page: intp(page), HasMore: len(results) > 0})
 }
 
 // Category — GET /api/v1/content/category
 func (h *ContentHandler) Category(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("[PANIC RECOVER] in Category: %v", rec)
-			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
-		}
-	}()
-
 	providerID := r.URL.Query().Get("provider")
 	category := r.URL.Query().Get("category")
 	contentType := r.URL.Query().Get("type")
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
-	}
+	page := pageParam(r, 1)
 
-	results, err := h.registry.Category(r.Context(), providerID, category, contentType, page)
+	cacheKey := fmt.Sprintf("catalogue:%s:category:%s:%s:%d", providerLabel(providerID), category, contentType, page)
+	results, fromCache, err := cached(r.Context(), h, cacheKey, providerID, "category", negativeCatalogueTTL,
+		func(ctx context.Context) ([]domain.MediaItem, time.Duration, error) {
+			items, loadErr := h.registry.Category(ctx, providerID, category, contentType, page)
+			return nonNilItems(items), catalogueCacheTTL, loadErr
+		})
 	if err != nil {
-		switch {
-		case errors.Is(err, provider.ErrProviderDisabled):
-			http.Error(w, `{"error":"provider disabled"}`, http.StatusForbidden)
-		case errors.Is(err, provider.ErrProviderNotFound):
-			http.Error(w, `{"error":"unknown provider"}`, http.StatusNotFound)
-		default:
-			http.Error(w, `{"error":"failed to load category content"}`, http.StatusInternalServerError)
-		}
+		writeProviderError(w, err, "failed to load category content")
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(results)
+	if fromCache {
+		w.Header().Set("X-Cache", "HIT")
+	}
+	writeList(w, r, results, &PageMeta{Page: intp(page), HasMore: len(results) > 0})
 }
 
-func normalizeSourceStatus(rawStatus string, count int, errStr string) string {
-	s := strings.ToLower(strings.TrimSpace(rawStatus))
-	if errStr != "" || s == "error" || s == "failed" {
-		return "error"
+// cached is the single read-through cache path for every cacheable endpoint.
+//
+// Three defects it fixes at once:
+//   - a cache read error is logged and treated as a miss, never silently
+//     swallowed, and never mistaken for a hit;
+//   - concurrent misses for the same key collapse into one upstream call and
+//     one Set, so N clients opening the app together cost one fan-out;
+//   - an upstream failure writes a short negative-cache record, so a refresh
+//     loop during an outage costs one row read per client instead of one
+//     full fan-out per client.
+//
+// load returns the value together with its TTL so a caller can shorten it for
+// an empty result.
+func cached[T any](
+	ctx context.Context,
+	h *ContentHandler,
+	key, providerID, contentType string,
+	negativeTTL time.Duration,
+	load func(context.Context) (T, time.Duration, error),
+) (T, bool, error) {
+	var zero T
+
+	if h.cacheRepo == nil {
+		val, _, err := load(ctx)
+		return val, false, err
 	}
-	if s == "timeout" {
-		return "timeout"
+
+	var rec cacheRecord[T]
+	hit, cacheErr := h.cacheRepo.Get(ctx, key, &rec)
+	switch {
+	case cacheErr != nil:
+		// A corrupt row, a dead pool or pool exhaustion must not be
+		// laundered into a miss: the miss path fans out to every provider, so
+		// reporting a cache-layer outage as a miss amplifies a database blip
+		// into a scraping-layer failure.
+		log.Printf("[Cache] read %q failed, treating as miss: %v", key, cacheErr)
+	case hit && rec.Failed:
+		return zero, false, fmt.Errorf("%w: %s", errUpstreamDegraded, rec.Reason)
+	case hit:
+		return rec.Value, true, nil
 	}
-	if s == "empty" || count == 0 {
-		return "empty"
+
+	val, err, _ := h.sf.Do(key, func() (interface{}, error) {
+		// The shared context is created inside the flight, so the goroutine
+		// that runs the work owns its cancellation. Creating it out here would
+		// mean the first caller's `defer cancel()` tore down the shared fetch
+		// for everyone else the moment that caller disconnected.
+		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchFanoutBudget)
+		defer cancel()
+
+		loaded, ttl, loadErr := load(shared)
+		if loadErr != nil {
+			if setErr := h.cacheRepo.Set(shared, key, providerID, contentType,
+				cacheRecord[T]{Failed: true, Reason: loadErr.Error()}, negativeTTL); setErr != nil {
+				log.Printf("[Cache] negative entry for %q failed: %v", key, setErr)
+			}
+			return nil, loadErr
+		}
+		if setErr := h.cacheRepo.Set(shared, key, providerID, contentType, cacheRecord[T]{Value: loaded}, ttl); setErr != nil {
+			// A failed write costs a repeat fetch, not correctness.
+			log.Printf("[Cache] write %q failed: %v", key, setErr)
+		}
+		return loaded, nil
+	})
+	if err != nil {
+		return zero, false, err
 	}
-	if s == "ok" || s == "success" || count > 0 {
-		return "ok"
+	loaded, ok := val.(T)
+	if !ok {
+		return zero, false, fmt.Errorf("cache key %q produced %T", key, val)
 	}
-	return "unknown"
+	return loaded, false, nil
+}
+
+// writeProviderError maps registry-level dispatch failures onto status codes.
+func writeProviderError(w http.ResponseWriter, err error, fallbackMsg string) {
+	switch {
+	case errors.Is(err, provider.ErrProviderDisabled):
+		writeAPIError(w, "provider disabled", http.StatusForbidden)
+	case errors.Is(err, provider.ErrProviderNotFound):
+		writeAPIError(w, "unknown provider", http.StatusNotFound)
+	case errors.Is(err, provider.ErrProviderPanic):
+		// A recovered provider panic is a server fault, not an upstream fault:
+		// 503 would tell the client to retry something that will fail the same
+		// way. The 500 still carries a JSON body, which the four deleted
+		// per-handler recover() blocks used to be there to guarantee.
+		log.Printf("[Content] provider panic: %v", err)
+		writeAPIError(w, "internal server error", http.StatusInternalServerError)
+	default:
+		writeUpstreamError(w, err, fallbackMsg)
+	}
+}
+
+// writeUpstreamError answers a scraper failure with 503 + Retry-After rather
+// than 500. A 500 tells the client the request was malformed, and the Flutter
+// client retries 5xx three times with no method check; 503 plus a positive
+// Retry-After gives it something to wait on. The underlying error is logged,
+// never returned: upstream error strings can contain internal hostnames.
+func writeUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
+	log.Printf("[Content] upstream failure (%s): %v", fallbackMsg, err)
+	w.Header().Set("Retry-After", "5")
+	writeAPIError(w, fallbackMsg, http.StatusServiceUnavailable)
+}
+
+func nonNilItems(items []domain.MediaItem) []domain.MediaItem {
+	if items == nil {
+		return []domain.MediaItem{}
+	}
+	return items
+}
+
+func providerLabel(providerID string) string {
+	if providerID == "" {
+		return "all"
+	}
+	return providerID
+}
+
+func pageParam(r *http.Request, def int) int {
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		return def
+	}
+	return page
+}
+
+func detailsCacheKey(providerID, itemURL string) string {
+	sum := sha256.Sum256([]byte(itemURL))
+	return "details:" + providerID + ":" + hex.EncodeToString(sum[:12])
 }

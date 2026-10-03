@@ -62,7 +62,7 @@ func covFlowRigSetup(t *testing.T) *covFlowRig {
 	hub := ws.NewHub(redisClient)
 
 	return &covFlowRig{
-		router: transporthttp.NewRouter("test-secret", authH, contentH, syncH, hub),
+		router: transporthttp.NewRouter("test-secret", authH, contentH, syncH, hub, testAppURL),
 	}
 }
 

@@ -18,6 +18,30 @@ var ErrProviderDisabled = errors.New("provider disabled")
 // ErrProviderNotFound повертається для невідомого ID провайдера.
 var ErrProviderNotFound = errors.New("unknown provider")
 
+// searchFanoutBudget bounds one coalesced multi-provider fan-out. The work runs
+// on a context detached from any single caller, so without its own deadline a
+// scraper that hangs would keep the singleflight key occupied indefinitely and
+// every subsequent identical search would pile up behind it.
+const searchFanoutBudget = 30 * time.Second
+
+// ErrProviderPanic marks an error that came from a recovered provider panic
+// rather than from a returned error. It is a distinct sentinel so the HTTP
+// layer can keep answering 500 with a JSON body for a panicking scraper
+// (the contract clients already see) while still isolating the panic to the
+// one provider that caused it.
+var ErrProviderPanic = errors.New("provider panicked")
+
+// recoverProvider turns a panicking provider into an error. Every scraper is
+// third-party HTML parsing, so a panic there is a real possibility and must
+// not be able to take down the request that happened to trigger it — nor, in
+// the fan-out case, every concurrent request coalesced behind it.
+func recoverProvider(op string, p domain.Provider, err *error) {
+	if rec := recover(); rec != nil {
+		log.Printf("[PANIC RECOVER] Provider %s crashed in %s: %v", p.ID(), op, rec)
+		*err = fmt.Errorf("%w: %s during %s: %v", ErrProviderPanic, p.ID(), op, rec)
+	}
+}
+
 type providerHealth struct {
 	consecutiveErrors int
 	lastError         string
@@ -153,9 +177,10 @@ func (r *Registry) recordError(id string, err error) {
 // SearchAll виконує паралельний пошук по всіх УВІМКНЕНИХ провайдерах
 func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaItem {
 	providers := r.List()
+	// Non-nil so an exhausted search serialises as [] rather than null.
+	aggregated := make([]domain.MediaItem, 0)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	var aggregated []domain.MediaItem
 
 	for _, p := range providers {
 		if !r.IsEnabled(p.ID()) {
@@ -164,12 +189,7 @@ func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaIt
 		wg.Add(1)
 		go func(prov domain.Provider) {
 			defer wg.Done()
-			defer func() {
-				if rec := recover(); rec != nil {
-					log.Printf("[PANIC RECOVER] Provider %s crashed on query %q: %v", prov.Name(), query, rec)
-				}
-			}()
-			items, err := prov.Search(ctx, query)
+			items, err := safeSearch(prov, ctx, query)
 			if err != nil {
 				r.recordError(prov.ID(), err)
 				return
@@ -187,6 +207,14 @@ func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaIt
 	return aggregated
 }
 
+// safeSearch isolates a panicking scraper. Without it a provider that panics
+// takes down every concurrent search with it, since a panic in a goroutine
+// cannot be recovered by the request that started it.
+func safeSearch(p domain.Provider, ctx context.Context, query string) (items []domain.MediaItem, err error) {
+	defer recoverProvider("Search", p, &err)
+	return p.Search(ctx, query)
+}
+
 // SearchProvider виконує пошук по конкретному провайдеру
 func (r *Registry) SearchProvider(ctx context.Context, id, query string) ([]domain.MediaItem, error) {
 	p, ok := r.Get(id)
@@ -202,19 +230,51 @@ func (r *Registry) SearchProvider(ctx context.Context, id, query string) ([]doma
 		return nil, err
 	}
 	r.recordSuccess(id)
-	return items, nil
+	return nonNilItems(items), nil
 }
 
 // SingleFlightSearch запобігає дублюванню однакових одночасних пошукових запитів від багатьох клієнтів
+// SingleFlightSearch запобігає дублюванню однакових одночасних пошукових запитів від багатьох клієнтів
 func (r *Registry) SingleFlightSearch(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	key := fmt.Sprintf("search:%s", query)
-	val, err, _ := r.sf.Do(key, func() (interface{}, error) {
-		return r.SearchAll(ctx, query), nil
+
+	ch := r.sf.DoChan(key, func() (interface{}, error) {
+		// The shared context is created INSIDE the flight, so it is owned by
+		// the goroutine that actually runs the work rather than by whichever
+		// caller happened to arrive first.
+		//
+		// Two things were wrong before. Sharing the first caller's context
+		// meant one client disconnecting failed every coalesced caller. And
+		// creating the detached context outside the flight meant the first
+		// caller's `defer cancel()` tore the work down when that caller gave
+		// up on its own wait — the same failure by a different route.
+		//
+		// WithoutCancel drops the first caller's deadline and values are kept;
+		// the budget bounds the work so a hanging scraper cannot hold the key
+		// forever.
+		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchFanoutBudget)
+		defer cancel()
+		return r.SearchAll(shared, query), nil
 	})
-	if err != nil {
-		return nil, err
+
+	// DoChan, not Do: each waiter applies its own cancellation to its own wait
+	// and gives up without tearing down the shared work for the others.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		items, ok := res.Val.([]domain.MediaItem)
+		if !ok {
+			return nil, fmt.Errorf("singleflight search %q: unexpected result type %T", key, res.Val)
+		}
+		if items == nil {
+			items = []domain.MediaItem{}
+		}
+		return items, nil
 	}
-	return val.([]domain.MediaItem), nil
 }
 
 // Details повертає деталі через провайдер з трекінгом здоров'я та kill-switch.
@@ -263,17 +323,19 @@ func (r *Registry) Popular(ctx context.Context, id, contentType string, page int
 		if !r.IsEnabled(id) {
 			return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
 		}
-		items, err := p.GetPopular(ctx, contentType, page)
+		items, err := safeGetPopular(p, ctx, contentType, page)
 		if err != nil {
 			r.recordError(id, err)
 			return nil, err
 		}
 		r.recordSuccess(id)
-		return items, nil
+		return nonNilItems(items), nil
 	}
 
 	// Якщо провайдер не вказано — об'єднуємо з домашніх увімкнених провайдерів
-	var aggregated []domain.MediaItem
+	// A nil slice serialises as `null`, which the client has to special-case;
+	// an empty result must be `[]`.
+	aggregated := make([]domain.MediaItem, 0)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -284,19 +346,29 @@ func (r *Registry) Popular(ctx context.Context, id, contentType string, page int
 		wg.Add(1)
 		go func(prov domain.Provider) {
 			defer wg.Done()
-			items, err := prov.GetPopular(ctx, contentType, page)
-			if err == nil && len(items) > 0 {
-				r.recordSuccess(prov.ID())
-				mu.Lock()
-				aggregated = append(aggregated, items...)
-				mu.Unlock()
-			} else if err != nil {
+			// A panicking scraper must not kill the home screen: the other
+			// providers' results are still worth returning.
+			items, err := safeGetPopular(prov, ctx, contentType, page)
+			if err != nil {
 				r.recordError(prov.ID(), err)
+				return
 			}
+			r.recordSuccess(prov.ID())
+			if len(items) == 0 {
+				return
+			}
+			mu.Lock()
+			aggregated = append(aggregated, items...)
+			mu.Unlock()
 		}(p)
 	}
 	wg.Wait()
 	return aggregated, nil
+}
+
+func safeGetPopular(p domain.Provider, ctx context.Context, contentType string, page int) (items []domain.MediaItem, err error) {
+	defer recoverProvider("GetPopular", p, &err)
+	return p.GetPopular(ctx, contentType, page)
 }
 
 // Category повертає список контенту за категорією/жанром
@@ -309,16 +381,16 @@ func (r *Registry) Category(ctx context.Context, id, category, contentType strin
 		if !r.IsEnabled(id) {
 			return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
 		}
-		items, err := p.GetByCategory(ctx, category, contentType, page)
+		items, err := safeGetByCategory(p, ctx, category, contentType, page)
 		if err != nil {
 			r.recordError(id, err)
 			return nil, err
 		}
 		r.recordSuccess(id)
-		return items, nil
+		return nonNilItems(items), nil
 	}
 
-	var aggregated []domain.MediaItem
+	aggregated := make([]domain.MediaItem, 0)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -329,17 +401,32 @@ func (r *Registry) Category(ctx context.Context, id, category, contentType strin
 		wg.Add(1)
 		go func(prov domain.Provider) {
 			defer wg.Done()
-			items, err := prov.GetByCategory(ctx, category, contentType, page)
-			if err == nil && len(items) > 0 {
-				r.recordSuccess(prov.ID())
-				mu.Lock()
-				aggregated = append(aggregated, items...)
-				mu.Unlock()
-			} else if err != nil {
+			items, err := safeGetByCategory(prov, ctx, category, contentType, page)
+			if err != nil {
 				r.recordError(prov.ID(), err)
+				return
 			}
+			r.recordSuccess(prov.ID())
+			if len(items) == 0 {
+				return
+			}
+			mu.Lock()
+			aggregated = append(aggregated, items...)
+			mu.Unlock()
 		}(p)
 	}
 	wg.Wait()
 	return aggregated, nil
+}
+
+func safeGetByCategory(p domain.Provider, ctx context.Context, category, contentType string, page int) (items []domain.MediaItem, err error) {
+	defer recoverProvider("GetByCategory", p, &err)
+	return p.GetByCategory(ctx, category, contentType, page)
+}
+
+func nonNilItems(items []domain.MediaItem) []domain.MediaItem {
+	if items == nil {
+		return []domain.MediaItem{}
+	}
+	return items
 }

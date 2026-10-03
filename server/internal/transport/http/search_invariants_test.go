@@ -158,7 +158,9 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	type searchResponseDTO struct {
+	// The search response is wrapped in the single-object envelope:
+	// {"data": {query, canonical, filtered_out, segments, items}}.
+	type searchPayload struct {
 		Query       string `json:"query"`
 		Canonical   string `json:"canonical"`
 		FilteredOut int    `json:"filtered_out"`
@@ -175,11 +177,13 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 			} `json:"sources"`
 		} `json:"items"`
 	}
-
-	var resp searchResponseDTO
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+	var envelope struct {
+		Data searchPayload `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("failed to decode search response: %v", err)
 	}
+	resp := envelope.Data
 
 	// Інваріант 1: Cutoff працює (відсіяно шумні та нерелевантні елементи)
 	if resp.FilteredOut <= 0 {
@@ -272,23 +276,26 @@ func TestSearchSourceStatuses_NormalizationAndNonEmptyKeys(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
-	var resp struct {
-		Segments []struct {
-			ID      string `json:"id"`
-			Status  string `json:"status"`
-			Sources map[string]struct {
-				Status string `json:"status"`
-			} `json:"sources"`
-		} `json:"segments"`
-		Items []struct {
-			Sources []struct {
-				SourceKey string `json:"source_key"`
-			} `json:"sources"`
-		} `json:"items"`
+	var envelope struct {
+		Data struct {
+			Segments []struct {
+				ID      string `json:"id"`
+				Status  string `json:"status"`
+				Sources map[string]struct {
+					Status string `json:"status"`
+				} `json:"sources"`
+			} `json:"segments"`
+			Items []struct {
+				Sources []struct {
+					SourceKey string `json:"source_key"`
+				} `json:"sources"`
+			} `json:"items"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
+	resp := envelope.Data
 
 	if len(resp.Segments) == 0 {
 		t.Fatalf("missing segments")

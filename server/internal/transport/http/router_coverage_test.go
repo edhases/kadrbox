@@ -17,7 +17,7 @@ func covTestRouter() http.Handler {
 	contentH := transporthttp.NewContentHandler(reg, nil)
 	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
-	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub)
+	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
 }
 
 // TestCovHttpRouterProtectedRequireAuth — 6 захищених маршрутів без заголовка дають 401.
