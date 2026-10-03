@@ -1598,10 +1598,6 @@ class $WatchHistoryTable extends WatchHistory
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
-  List<Set<GeneratedColumn>> get uniqueKeys => [
-    {mediaId, providerId, season, episode},
-  ];
-  @override
   WatchHistoryData map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return WatchHistoryData(
@@ -2705,10 +2701,6 @@ class $DownloadsTable extends Downloads
 
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
-  @override
-  List<Set<GeneratedColumn>> get uniqueKeys => [
-    {mediaId, providerId, season, episode},
-  ];
   @override
   Download map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';

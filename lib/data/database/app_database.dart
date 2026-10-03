@@ -106,11 +106,6 @@ class WatchHistory extends Table {
   TextColumn get voiceover => text().nullable()();
 
   DateTimeColumn get watchedAt => dateTime().withDefault(currentDateAndTime)();
-
-  @override
-  List<Set<Column>> get uniqueKeys => [
-    {mediaId, providerId, season, episode},
-  ];
 }
 
 /// Downloads table for offline viewing
@@ -154,11 +149,6 @@ class Downloads extends Table {
 
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get completedAt => dateTime().nullable()();
-
-  @override
-  List<Set<Column>> get uniqueKeys => [
-    {mediaId, providerId, season, episode},
-  ];
 }
 
 /// Search history table for autocomplete and typo learning
@@ -229,7 +219,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   static QueryExecutor _openConnection() {
     return driftDatabase(
@@ -245,6 +235,7 @@ class AppDatabase extends _$AppDatabase {
     return MigrationStrategy(
       onCreate: (Migrator m) async {
         await m.createAll();
+        await _ensureLogicalKeyIndexes();
         // Insert default settings
         await _insertDefaultSettings();
       },
@@ -293,8 +284,54 @@ class AppDatabase extends _$AppDatabase {
             storedMediaItems,
           )..where((t) => t.providerId.equals('hdrezka'))).go();
         }
+
+        // Migration: real uniqueness for (media, provider, season, episode).
+        //
+        // The former `uniqueKeys` declaration emitted a table-level UNIQUE
+        // constraint, which SQLite only enforces when *every* column is
+        // non-NULL. Movie rows carry NULL season/episode, so each NULL counted
+        // as distinct and the same logical movie could be stored many times.
+        // A UNIQUE index over the COALESCE'd expression collapses NULL to one
+        // sentinel and therefore dedupes both shapes. The redundant
+        // `uniqueKeys` entries were removed from the table definitions.
+        if (from < 11) {
+          await _dedupeLogicalKeys();
+          await _ensureLogicalKeyIndexes();
+        }
       },
     );
+  }
+
+  /// Tables whose logical identity is (mediaId, providerId, season, episode).
+  List<String> get _logicalKeyTables => [
+    watchHistory.actualTableName,
+    downloads.actualTableName,
+  ];
+
+  /// Keeps only the newest row per logical key.
+  ///
+  /// `id` is autoincrement, so the highest id is the most recent write — the
+  /// one that carries the furthest playback position.
+  Future<void> _dedupeLogicalKeys() async {
+    for (final table in _logicalKeyTables) {
+      await customStatement('''
+        DELETE FROM $table
+        WHERE id NOT IN (
+          SELECT MAX(id) FROM $table
+          GROUP BY media_id, provider_id, COALESCE(season, -1), COALESCE(episode, -1)
+        )
+      ''');
+    }
+  }
+
+  /// Creates the expression-based UNIQUE indexes. Idempotent.
+  Future<void> _ensureLogicalKeyIndexes() async {
+    for (final table in _logicalKeyTables) {
+      await customStatement('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_logical_key
+        ON $table (media_id, provider_id, COALESCE(season, -1), COALESCE(episode, -1))
+      ''');
+    }
   }
 
   Future<void> _insertDefaultSettings() async {

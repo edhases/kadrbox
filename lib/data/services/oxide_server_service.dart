@@ -10,6 +10,65 @@ import '../../core/error/exceptions.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
 
+/// Typed, immutable view of the authenticated user.
+class SessionUser {
+  final String? id;
+  final String? email;
+  final String? username;
+  final String? avatarUrl;
+  final String? bio;
+  final bool isVerified;
+
+  /// The original JSON map, kept for callers that read provider-specific keys
+  /// (`telegram_id`, `discord_id`, `created_at`, ...) without a typed accessor.
+  final Map<String, dynamic> raw;
+
+  const SessionUser({
+    required this.raw,
+    this.id,
+    this.email,
+    this.username,
+    this.avatarUrl,
+    this.bio,
+    this.isVerified = false,
+  });
+
+  /// Coerces defensively: the server may send `id` as a number (SQLite
+  /// serialisation) or a string, and a JSON body is untrusted input. Nothing
+  /// here throws — a malformed field simply becomes `null`.
+  factory SessionUser.fromJson(Object? json) {
+    final map = json is Map
+        ? Map<String, dynamic>.from(json)
+        : <String, dynamic>{};
+    return SessionUser(
+      raw: map,
+      id: _asString(map['id']),
+      email: _asString(map['email']),
+      username: _asString(map['username']) ?? _asString(map['name']),
+      avatarUrl: _asString(map['avatar_url']) ?? _asString(map['avatar']),
+      bio: _asString(map['bio']),
+      isVerified: _asBool(map['is_verified']),
+    );
+  }
+
+  /// `num` (int or double) and String both coerce; anything else yields `null`.
+  static String? _asString(Object? value) {
+    if (value is String) return value.isEmpty ? null : value;
+    if (value is num) return value.toString();
+    return null;
+  }
+
+  static bool _asBool(Object? value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) return value.toLowerCase() == 'true';
+    return false;
+  }
+
+  @override
+  String toString() => 'SessionUser(id: $id, email: $email)';
+}
+
 /// Service for communication with Oxide Go Backend
 /// (Go Chi + PostgreSQL 16 + Redis Pub/Sub WebSocket)
 class OxideServerService {
@@ -23,7 +82,11 @@ class OxideServerService {
 
   String? _accessToken;
   String? _refreshToken;
-  Map<String, dynamic>? _user;
+  SessionUser? _user;
+
+  /// Bumped by [signOut]. A refresh that started under an older generation must
+  /// not re-install a token after the user has signed out.
+  int _sessionGeneration = 0;
 
   /// Callback when session expires (401 on refresh or sync).
   VoidCallback? onAuthExpired;
@@ -31,6 +94,9 @@ class OxideServerService {
 
   OxideServerService(this._prefs, this._apiClient) {
     _loadState();
+    // The DI container creates ApiClient first, so the 401 refresh/replay
+    // interceptor and the proactive refresh timer are attached here.
+    _apiClient.attachAuthCallbacks(refresh: refreshAuth, signOut: signOut);
   }
 
   void _loadState() {
@@ -39,7 +105,7 @@ class OxideServerService {
     final userJson = _prefs.getString(_userKey);
     if (userJson != null) {
       try {
-        _user = jsonDecode(userJson) as Map<String, dynamic>;
+        _user = SessionUser.fromJson(jsonDecode(userJson));
       } catch (e) {
         Logger.w('Failed to parse cached user JSON: $e', tag: _tag);
       }
@@ -53,26 +119,68 @@ class OxideServerService {
 
   // Quick access properties
   bool get isAuthenticated => _accessToken != null && _accessToken!.isNotEmpty;
-  String? get userId => _user?['id'];
-  String? get userEmail => _user?['email'];
-  String? get userName => _user?['username'];
-  String? get avatar => _user?['avatar_url'];
-  String? get bio => _user?['bio'];
-  bool get isVerified => (_user?['is_verified'] as bool?) ?? false;
-  Map<String, dynamic>? get user => _user;
+  String? get userId => _user?.id;
+  String? get userEmail => _user?.email;
+  String? get userName => _user?.username;
+  String? get avatar => _user?.avatarUrl;
+  String? get bio => _user?.bio;
+  bool get isVerified => _user?.isVerified ?? false;
+
+  /// Raw user JSON, for callers reading keys without a typed accessor.
+  Map<String, dynamic>? get user => _user?.raw;
   String? get accessToken => _accessToken;
 
-  bool _isUnauthorized(dynamic e) {
-    if (e is ServerException && e.statusCode == 401) return true;
-    final str = e.toString().toLowerCase();
-    return str.contains('http_401') ||
-        str.contains('401') ||
-        str.contains('invalid or expired');
+  /// A 401 is the *only* thing that counts as an auth failure.
+  ///
+  /// The previous implementation also substring-matched `toString()`, so a
+  /// socket error mentioning "401 bytes" or a URL containing 401 destroyed a
+  /// perfectly valid session. `ApiClient` already guarantees a `ServerException`
+  /// with a status code for every `badResponse`, and a 503 is a server-side
+  /// outage, not an auth problem.
+  bool isUnauthorizedError(Object? e) =>
+      e is ServerException && e.statusCode == 401;
+
+  /// Defensive `Object? -> String?` coercion for untyped JSON payloads.
+  static String? _stringOrNull(Object? value) {
+    if (value is String) return value.isEmpty ? null : value;
+    if (value is num) return value.toString();
+    return null;
   }
 
   Future<void> _handleAuthExpired() async {
-    Logger.w('Auth expired or invalid, clearing session and notifying listeners', tag: _tag);
+    Logger.w(
+      'Auth expired or invalid, clearing session and notifying listeners',
+      tag: _tag,
+    );
     await signOut();
+  }
+
+  /// Refresh-once-then-replay wrapper.
+  ///
+  /// A 401 used to call [signOut] directly, which meant the first 401 after the
+  /// 15-minute access-token TTL silently signed the user out. Now the single
+  /// already covers this; the service-level retry is a defence in depth for
+  /// call sites running with the interceptor disabled.
+  ///
+  /// The original error is always rethrown when recovery is impossible, so
+  /// callers keep their existing error contract.
+  Future<T> _withAuthRecovery<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } catch (e) {
+      if (isUnauthorizedError(e) && isAuthenticated) {
+        Logger.i(
+          '401 from server, attempting token refresh then retry',
+          tag: _tag,
+        );
+        final refreshed = await refreshAuth();
+        if (refreshed) {
+          return call();
+        }
+        if (isAuthenticated) await _handleAuthExpired();
+      }
+      rethrow;
+    }
   }
 
   // ===========================================================================
@@ -83,17 +191,16 @@ class OxideServerService {
   Future<void> signIn(String email, String password) async {
     final url = '${AppConfig.serverApiUrl}/auth/login';
     try {
-      final res = await _apiClient.post(
+      final res = await _apiClient.postJson(
         url,
         data: {'email': email.trim(), 'password': password},
       );
 
-      if (res is Map) {
-        await _saveAuthData(res);
-        Logger.i('User signed in successfully: $email', tag: _tag);
-      } else {
+      if (res.isEmpty) {
         throw Exception('Неочікувана відповідь від сервера');
       }
+      await _saveAuthData(res);
+      Logger.i('User signed in successfully: $email', tag: _tag);
     } catch (e) {
       Logger.e('Sign in failed for $email', tag: _tag, error: e);
       rethrow;
@@ -108,7 +215,7 @@ class OxideServerService {
   }) async {
     final url = '${AppConfig.serverApiUrl}/auth/register';
     try {
-      final res = await _apiClient.post(
+      final res = await _apiClient.postJson(
         url,
         data: {
           'email': email.trim(),
@@ -117,12 +224,11 @@ class OxideServerService {
         },
       );
 
-      if (res is Map) {
-        await _saveAuthData(res);
-        Logger.i('User registered successfully: $email', tag: _tag);
-      } else {
+      if (res.isEmpty) {
         throw Exception('Неочікувана відповідь від сервера');
       }
+      await _saveAuthData(res);
+      Logger.i('User registered successfully: $email', tag: _tag);
     } catch (e) {
       Logger.e('Sign up failed for $email', tag: _tag, error: e);
       rethrow;
@@ -133,17 +239,16 @@ class OxideServerService {
   Future<void> signInWithGoogle(String idToken) async {
     final url = '${AppConfig.serverApiUrl}/auth/google';
     try {
-      final res = await _apiClient.post(
+      final res = await _apiClient.postJson(
         url,
         data: {'id_token': idToken.trim()},
       );
 
-      if (res is Map) {
-        await _saveAuthData(res);
-        Logger.i('User logged in with Google: $userEmail', tag: _tag);
-      } else {
+      if (res.isEmpty) {
         throw Exception('Неочікувана відповідь від сервера');
       }
+      await _saveAuthData(res);
+      Logger.i('User logged in with Google: $userEmail', tag: _tag);
     } catch (e) {
       Logger.e('Google sign in failed', tag: _tag, error: e);
       rethrow;
@@ -359,13 +464,12 @@ class OxideServerService {
     try {
       final body = <String, dynamic>{'code': code.trim()};
       if (redirectUri != null) body['redirect_uri'] = redirectUri;
-      final res = await _apiClient.post(url, data: body);
-      if (res is Map) {
-        await _saveAuthData(res);
-        Logger.i('User logged in with Discord: $userEmail', tag: _tag);
-      } else {
+      final res = await _apiClient.postJson(url, data: body);
+      if (res.isEmpty) {
         throw Exception('Неочікувана відповідь від сервера');
       }
+      await _saveAuthData(res);
+      Logger.i('User logged in with Discord: $userEmail', tag: _tag);
     } catch (e) {
       Logger.e('Discord sign in failed', tag: _tag, error: e);
       rethrow;
@@ -376,13 +480,12 @@ class OxideServerService {
   Future<void> signInWithTelegramData(Map<String, dynamic> telegramData) async {
     final url = '${AppConfig.serverApiUrl}/auth/telegram';
     try {
-      final res = await _apiClient.post(url, data: telegramData);
-      if (res is Map) {
-        await _saveAuthData(res);
-        Logger.i('User logged in with Telegram: $userEmail', tag: _tag);
-      } else {
+      final res = await _apiClient.postJson(url, data: telegramData);
+      if (res.isEmpty) {
         throw Exception('Неочікувана відповідь від сервера');
       }
+      await _saveAuthData(res);
+      Logger.i('User logged in with Telegram: $userEmail', tag: _tag);
     } catch (e) {
       Logger.e('Telegram sign in failed', tag: _tag, error: e);
       rethrow;
@@ -396,7 +499,8 @@ class OxideServerService {
       await _apiClient.post(url, data: {'token': token});
       // Оновлюємо локальний стан
       if (_user != null) {
-        _user = Map<String, dynamic>.from(_user!)..['is_verified'] = true;
+        _user = SessionUser.fromJson({..._user!.raw, 'is_verified': true});
+        await _prefs.setString(_userKey, jsonEncode(_user!.raw));
       }
       Logger.i('Email verified successfully', tag: _tag);
     } catch (e) {
@@ -419,6 +523,10 @@ class OxideServerService {
 
   /// Sign out and clear stored tokens
   Future<void> signOut() async {
+    // Invalidate any refresh already in flight: otherwise the startup refresh in
+    // `main.dart` completes after this method and re-installs the token, so the
+    // user looks signed out until the next launch restores the session.
+    _sessionGeneration++;
     _accessToken = null;
     _refreshToken = null;
     _user = null;
@@ -443,6 +551,7 @@ class OxideServerService {
   }
 
   Future<bool> _doRefreshAuth() async {
+    final generation = _sessionGeneration;
     if (_refreshToken == null || _refreshToken!.isEmpty) {
       await _handleAuthExpired();
       return false;
@@ -450,19 +559,39 @@ class OxideServerService {
 
     final url = '${AppConfig.serverApiUrl}/auth/refresh';
     try {
+      // Deliberately the untyped `post`: `postJson` is a thin wrapper over it,
+      // and this endpoint's response shape is validated defensively below
+      // anyway. It is also the seam `auth_401_retry_storm_test.dart` mocks.
       final res = await _apiClient.post(
         url,
         data: {'refresh_token': _refreshToken},
       );
 
-      if (res is Map && res['access_token'] != null) {
-        _accessToken = res['access_token'] as String;
-        await _prefs.setString(_tokenKey, _accessToken!);
-        if (res['refresh_token'] != null) {
-          _refreshToken = res['refresh_token'] as String;
-          await _prefs.setString(_refreshKey, _refreshToken!);
+      final accessToken = _stringOrNull(
+        res is Map ? res['access_token'] : null,
+      );
+      if (accessToken != null) {
+        final refreshToken = _stringOrNull(
+          res is Map ? res['refresh_token'] : null,
+        );
+
+        // A sign-out happened while this request was on the wire: discard the
+        // result instead of resurrecting the session.
+        if (generation != _sessionGeneration) {
+          Logger.d(
+            'Refresh result discarded: session was signed out',
+            tag: _tag,
+          );
+          return false;
         }
-        _apiClient.setAuthToken(_accessToken);
+
+        _accessToken = accessToken;
+        await _prefs.setString(_tokenKey, accessToken);
+        if (refreshToken != null && refreshToken.isNotEmpty) {
+          _refreshToken = refreshToken;
+          await _prefs.setString(_refreshKey, refreshToken);
+        }
+        _apiClient.setAuthToken(accessToken);
         Logger.d('Auth token refreshed successfully', tag: _tag);
         return true;
       }
@@ -470,7 +599,7 @@ class OxideServerService {
       return false;
     } catch (e) {
       Logger.w('Failed to refresh token: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
+      if (isUnauthorizedError(e)) {
         Logger.i(
           'Refresh token is invalid or expired, clearing session',
           tag: _tag,
@@ -486,16 +615,20 @@ class OxideServerService {
     if (!isAuthenticated) return null;
     final url = '${AppConfig.serverApiUrl}/auth/me';
     try {
-      final res = await _apiClient.getJson(url);
+      final res = await _withAuthRecovery(() => _apiClient.getJson(url));
       if (res.isNotEmpty) {
-        _user = res;
-        await _prefs.setString(_userKey, jsonEncode(_user));
-        return _user;
+        await _setUserFromServer(res);
+        return _user?.raw;
       }
     } catch (e) {
       Logger.w('Failed to fetch user profile: $e', tag: _tag);
     }
-    return _user;
+    return _user?.raw;
+  }
+
+  Future<void> _setUserFromServer(Map<String, dynamic> json) async {
+    _user = SessionUser.fromJson(json);
+    await _prefs.setString(_userKey, jsonEncode(_user!.raw));
   }
 
   /// Update user profile
@@ -512,10 +645,11 @@ class OxideServerService {
     if (bio != null) body['bio'] = bio;
     if (avatar != null) body['avatar'] = avatar;
 
-    final res = await _apiClient.put(url, data: body);
-    if (res is Map) {
-      _user = Map<String, dynamic>.from(res);
-      await _prefs.setString(_userKey, jsonEncode(_user));
+    final res = await _withAuthRecovery(
+      () => _apiClient.putJson(url, data: body),
+    );
+    if (res.isNotEmpty) {
+      await _setUserFromServer(res);
       Logger.i('Profile updated', tag: _tag);
     }
   }
@@ -536,10 +670,11 @@ class OxideServerService {
     });
 
     try {
-      final res = await _apiClient.post(url, data: formData);
-      if (res is Map) {
-        _user = Map<String, dynamic>.from(res);
-        await _prefs.setString(_userKey, jsonEncode(_user));
+      final res = await _withAuthRecovery(
+        () => _apiClient.postJson(url, data: formData),
+      );
+      if (res.isNotEmpty) {
+        await _setUserFromServer(res);
         Logger.i('Avatar uploaded successfully', tag: _tag);
         return avatar;
       }
@@ -613,10 +748,11 @@ class OxideServerService {
     if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
     final url = '${AppConfig.serverApiUrl}/auth/unlink';
     try {
-      final res = await _apiClient.post(url, data: {'provider': provider});
-      if (res is Map) {
-        _user = Map<String, dynamic>.from(res);
-        await _prefs.setString(_userKey, jsonEncode(_user));
+      final res = await _withAuthRecovery(
+        () => _apiClient.postJson(url, data: {'provider': provider}),
+      );
+      if (res.isNotEmpty) {
+        await _setUserFromServer(res);
         Logger.i('Provider $provider unlinked', tag: _tag);
       }
     } catch (e) {
@@ -625,13 +761,14 @@ class OxideServerService {
     }
   }
 
-  Future<void> _saveAuthData(Map<dynamic, dynamic> res) async {
-    _accessToken = res['access_token'] as String?;
-    _refreshToken = res['refresh_token'] as String?;
+  Future<void> _saveAuthData(Map<String, dynamic> res) async {
+    _accessToken = res['access_token']?.toString();
+    _refreshToken = res['refresh_token']?.toString();
 
-    if (res['user'] != null && res['user'] is Map) {
-      _user = Map<String, dynamic>.from(res['user'] as Map);
-      await _prefs.setString(_userKey, jsonEncode(_user));
+    final rawUser = res['user'];
+    if (rawUser is Map) {
+      _user = SessionUser.fromJson(rawUser);
+      await _prefs.setString(_userKey, jsonEncode(_user!.raw));
     }
 
     if (_accessToken != null) {
@@ -655,17 +792,15 @@ class OxideServerService {
     if (!isAuthenticated) return [];
     final url = '${AppConfig.serverApiUrl}/sync/history';
     try {
-      final list = await _apiClient.getJsonList(
-        url,
-        queryParameters: {'limit': limit, 'offset': offset},
+      return await _withAuthRecovery(
+        () => _apiClient.getJsonMapList(
+          url,
+          queryParameters: {'limit': limit, 'offset': offset},
+        ),
       );
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       Logger.w('Failed to get history from server: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
-        await _handleAuthExpired();
-        rethrow;
-      }
+      if (isUnauthorizedError(e)) rethrow;
       return [];
     }
   }
@@ -707,13 +842,10 @@ class OxideServerService {
     };
 
     try {
-      await _apiClient.post(url, data: payload);
+      await _withAuthRecovery(() => _apiClient.postJson(url, data: payload));
     } catch (e) {
       Logger.w('Failed to sync history item to server: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
-        await _handleAuthExpired();
-        rethrow;
-      }
+      if (isUnauthorizedError(e)) rethrow;
     }
   }
 
@@ -724,17 +856,12 @@ class OxideServerService {
     if (!isAuthenticated) return [];
     final url = '${AppConfig.serverApiUrl}/sync/continue-watching';
     try {
-      final list = await _apiClient.getJsonList(
-        url,
-        queryParameters: {'limit': limit},
+      return await _withAuthRecovery(
+        () => _apiClient.getJsonMapList(url, queryParameters: {'limit': limit}),
       );
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       Logger.w('Failed to get continue-watching from server: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
-        await _handleAuthExpired();
-        rethrow;
-      }
+      if (isUnauthorizedError(e)) rethrow;
       return [];
     }
   }
@@ -751,17 +878,15 @@ class OxideServerService {
     if (!isAuthenticated) return [];
     final url = '${AppConfig.serverApiUrl}/sync/favorites';
     try {
-      final list = await _apiClient.getJsonList(
-        url,
-        queryParameters: {'limit': limit, 'offset': offset},
+      return await _withAuthRecovery(
+        () => _apiClient.getJsonMapList(
+          url,
+          queryParameters: {'limit': limit, 'offset': offset},
+        ),
       );
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       Logger.w('Failed to get favorites from server: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
-        await _handleAuthExpired();
-        rethrow;
-      }
+      if (isUnauthorizedError(e)) rethrow;
       return [];
     }
   }
@@ -780,28 +905,26 @@ class OxideServerService {
     if (!isAuthenticated) return false;
     final url = '${AppConfig.serverApiUrl}/sync/favorites/toggle';
     try {
-      final res = await _apiClient.post(
-        url,
-        data: {
-          'media_id': mediaId,
-          'provider_id': providerId,
-          'title': title,
-          'poster_url': posterUrl,
-          'year': year,
-          'media_type': mediaType,
-          'rating': rating,
-          'rating_source': ratingSource,
-        },
+      final res = await _withAuthRecovery(
+        () => _apiClient.postJson(
+          url,
+          data: {
+            'media_id': mediaId,
+            'provider_id': providerId,
+            'title': title,
+            'poster_url': posterUrl,
+            'year': year,
+            'media_type': mediaType,
+            'rating': rating,
+            'rating_source': ratingSource,
+          },
+        ),
       );
-      if (res is Map && res['is_favorite'] != null) {
-        return res['is_favorite'] as bool;
-      }
+      final isFavorite = res['is_favorite'];
+      if (isFavorite != null) return isFavorite == true || isFavorite == 1;
     } catch (e) {
       Logger.w('Failed to toggle favorite on server: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
-        await _handleAuthExpired();
-        rethrow;
-      }
+      if (isUnauthorizedError(e)) rethrow;
     }
     return false;
   }
@@ -814,16 +937,15 @@ class OxideServerService {
     if (!isAuthenticated) return;
     final url = '${AppConfig.serverApiUrl}/sync/favorites';
     try {
-      await _apiClient.delete(
-        url,
-        queryParameters: {'media_id': mediaId, 'provider_id': providerId},
+      await _withAuthRecovery(
+        () => _apiClient.deleteJson(
+          url,
+          queryParameters: {'media_id': mediaId, 'provider_id': providerId},
+        ),
       );
     } catch (e) {
       Logger.w('Failed to remove favorite from server: $e', tag: _tag);
-      if (_isUnauthorized(e)) {
-        await _handleAuthExpired();
-        rethrow;
-      }
+      if (isUnauthorizedError(e)) rethrow;
     }
   }
 

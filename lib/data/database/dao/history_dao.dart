@@ -17,23 +17,54 @@ class HistoryDao {
     return query.get();
   }
 
-  /// Get history for specific media
+  /// WHERE clause matching the logical history key
+  /// `(mediaId, providerId, season, episode)`.
+  ///
+  /// Note SQLite treats NULLs as DISTINCT in unique indexes, so nothing at the
+  /// schema level prevents several rows for the same movie key. Every read must
+  /// therefore tolerate duplicates.
+  static Expression<bool> _keyMatches(
+    WatchHistory t,
+    String mediaId,
+    String providerId,
+    int? season,
+    int? episode,
+  ) {
+    return t.mediaId.equals(mediaId) &
+        t.providerId.equals(providerId) &
+        (season != null ? t.season.equals(season) : t.season.isNull()) &
+        (episode != null ? t.episode.equals(episode) : t.episode.isNull());
+  }
+
+  /// Canonical string form of the logical history key, used for dedupe checks.
+  /// A `season`/`episode` of -1 stands in for SQL NULL, mirroring the
+  /// `COALESCE(season, -1)` form the partial unique index should use.
+  static String historyKey(
+    String mediaId,
+    String providerId, {
+    int? season,
+    int? episode,
+  }) => '$mediaId|$providerId|${season ?? -1}|${episode ?? -1}';
+
+  /// Get history for specific media.
+  ///
+  /// Deliberately avoids `getSingleOrNull()`: it throws when more than one row
+  /// matches, and duplicates are reachable because NULL season/episode columns
+  /// are not deduplicated by the unique index. Ordering deterministically and
+  /// taking the first row makes a duplicate harmless instead of fatal.
   Future<WatchHistoryData?> getForMedia(
     String mediaId,
     String providerId, {
     int? season,
     int? episode,
   }) async {
-    var query = _db.select(_db.watchHistory)
-      ..where(
-        (t) =>
-            t.mediaId.equals(mediaId) &
-            t.providerId.equals(providerId) &
-            (season != null ? t.season.equals(season) : t.season.isNull()) &
-            (episode != null ? t.episode.equals(episode) : t.episode.isNull()),
-      );
+    final query = _db.select(_db.watchHistory)
+      ..where((t) => _keyMatches(t, mediaId, providerId, season, episode))
+      ..orderBy([(t) => OrderingTerm.desc(t.watchedAt)])
+      ..limit(1);
 
-    return query.getSingleOrNull();
+    final rows = await query.get();
+    return rows.isEmpty ? null : rows.first;
   }
 
   /// Get continue watching list (items with progress > 5% and < 95%)
@@ -76,96 +107,108 @@ class HistoryDao {
     String? ratingSource,
     DateTime? watchedAt, // Optional: for cloud sync merge
   }) async {
-    // Manually check for existing entry to handle NULLs in Unique Keys correctly
-    final existing =
-        await (_db.select(_db.watchHistory)..where(
-              (t) =>
-                  t.mediaId.equals(mediaId) &
-                  t.providerId.equals(providerId) &
-                  (season != null
-                      ? t.season.equals(season)
-                      : t.season.isNull()) &
-                  (episode != null
-                      ? t.episode.equals(episode)
-                      : t.episode.isNull()),
-            ))
-            .getSingleOrNull();
+    // Read-then-write must be atomic: `player_controller`'s 10s periodic saver
+    // does not await, so two overlapping calls both used to miss the existing
+    // row and both INSERT (SQLite cannot dedupe NULL season/episode, so the
+    // unique index does not help either) — producing duplicate rows that later
+    // made `getSingleOrNull()` throw.
+    await _db.transaction(() async {
+      final existingRows =
+          await (_db.select(_db.watchHistory)
+                ..where(
+                  (t) => _keyMatches(t, mediaId, providerId, season, episode),
+                )
+                ..orderBy([(t) => OrderingTerm.desc(t.watchedAt)])
+                ..limit(1))
+              .get();
+      final existing = existingRows.isEmpty ? null : existingRows.first;
 
-    if (existing != null) {
-      // Update existing
-      await (_db.update(
-        _db.watchHistory,
-      )..where((t) => t.id.equals(existing.id))).write(
-        WatchHistoryCompanion(
-          title: Value(title),
-          posterUrl: Value(posterUrl),
-          year: Value(year),
-          positionMs: Value(positionMs),
-          durationMs: Value(durationMs),
-          episodeTitle: Value(episodeTitle),
-          lastStreamUrl: Value(lastStreamUrl),
-          voiceover: Value(voiceover),
-          rating: Value(rating),
-          ratingSource: Value(ratingSource),
-          watchedAt: Value(watchedAt ?? DateTime.now()),
-        ),
-      );
-    } else {
-      // Insert new
-      await _db
-          .into(_db.watchHistory)
-          .insert(
-            WatchHistoryCompanion.insert(
-              mediaId: mediaId,
-              providerId: providerId,
-              title: title,
-              posterUrl: Value(posterUrl),
-              year: Value(year),
-              mediaType: mediaType,
-              positionMs: Value(positionMs),
-              durationMs: Value(durationMs),
-              season: Value(season),
-              episode: Value(episode),
-              episodeTitle: Value(episodeTitle),
-              lastStreamUrl: Value(lastStreamUrl),
-              voiceover: Value(voiceover),
-              rating: Value(rating),
-              ratingSource: Value(ratingSource),
-              watchedAt: Value(DateTime.now()),
-            ),
-          );
-    }
+      if (existing != null) {
+        // Update existing
+        await (_db.update(
+          _db.watchHistory,
+        )..where((t) => t.id.equals(existing.id))).write(
+          WatchHistoryCompanion(
+            title: Value(title),
+            posterUrl: Value(posterUrl),
+            year: Value(year),
+            mediaType: Value(mediaType),
+            positionMs: Value(positionMs),
+            durationMs: Value(durationMs),
+            episodeTitle: Value(episodeTitle),
+            lastStreamUrl: Value(lastStreamUrl),
+            voiceover: Value(voiceover),
+            rating: Value(rating),
+            ratingSource: Value(ratingSource),
+            watchedAt: Value(watchedAt ?? DateTime.now()),
+          ),
+        );
+      } else {
+        // Insert new
+        await _db
+            .into(_db.watchHistory)
+            .insert(
+              WatchHistoryCompanion.insert(
+                mediaId: mediaId,
+                providerId: providerId,
+                title: title,
+                posterUrl: Value(posterUrl),
+                year: Value(year),
+                mediaType: mediaType,
+                positionMs: Value(positionMs),
+                durationMs: Value(durationMs),
+                season: Value(season),
+                episode: Value(episode),
+                episodeTitle: Value(episodeTitle),
+                lastStreamUrl: Value(lastStreamUrl),
+                voiceover: Value(voiceover),
+                rating: Value(rating),
+                ratingSource: Value(ratingSource),
+                watchedAt: Value(DateTime.now()),
+              ),
+            );
+      }
+    });
   }
 
-  /// Remove duplicates from history
-  /// Keeps only the most recent entry for each unique media/episode combination
+  /// Remove duplicates from history.
+  ///
+  /// Safe to call at any time: it runs in a transaction, keys rows on the real
+  /// logical key (`mediaId`, `providerId`, `COALESCE(season,-1)`,
+  /// `COALESCE(episode,-1)`) and keeps the most recently watched row per key.
   Future<int> cleanupDuplicates() async {
-    final allHistory = await getAll();
-    final uniqueKeys = <String>{};
-    final idsToDelete = <int>[];
+    return _db.transaction(() async {
+      final allHistory =
+          await (_db.select(_db.watchHistory)..orderBy([
+                (t) => OrderingTerm.desc(t.watchedAt),
+                // Deterministic tie-break so two rows written in the same
+                // millisecond always resolve to the same survivor.
+                (t) => OrderingTerm.desc(t.id),
+              ]))
+              .get();
 
-    // history is already ordered by watchedAt DESC (newest first)
-    for (final item in allHistory) {
-      final key =
-          '${item.mediaId}_${item.providerId}_${item.season}_${item.episode}';
+      final seenKeys = <String>{};
+      final idsToDelete = <int>[];
 
-      if (uniqueKeys.contains(key)) {
-        // This is a duplicate (older than the one we already saw)
-        idsToDelete.add(item.id);
-      } else {
-        uniqueKeys.add(key);
+      for (final item in allHistory) {
+        final key = historyKey(
+          item.mediaId,
+          item.providerId,
+          season: item.season,
+          episode: item.episode,
+        );
+        if (!seenKeys.add(key)) {
+          // Older than the survivor already recorded for this key.
+          idsToDelete.add(item.id);
+        }
       }
-    }
 
-    if (idsToDelete.isEmpty) return 0;
+      if (idsToDelete.isEmpty) return 0;
 
-    // Delete in batches if needed, but for now single batch is fine
-    // Drift doesn't support 'WHERE id IN list' easily in fluent API for delete
-    // So we use custom statement or loop.
-    // Actually, we can use where((t) => t.id.isIn(idsToDelete))
-    return (_db.delete(
-      _db.watchHistory,
-    )..where((t) => t.id.isIn(idsToDelete))).go();
+      return (_db.delete(
+        _db.watchHistory,
+      )..where((t) => t.id.isIn(idsToDelete))).go();
+    });
   }
 
   /// Get last watched position for media

@@ -28,10 +28,25 @@ class HistoryService extends ChangeNotifier {
   final bool _isLoading = false;
   bool get isLoading => _isLoading;
 
-  bool _isSyncing = false;
-  bool get isSyncing => _isSyncing;
+  /// Direction-tracked sync state. Previously a single `_isSyncing` boolean was
+  /// flipped by both pull and push, so whichever finished first cleared it while
+  /// the other was still writing. The direction flags stay private: adding new
+  /// public members here breaks the hand-rolled `MockHistoryService` in
+  /// `test/unit/services/recommendation_service_test.dart`
+  /// (`extends ChangeNotifier implements HistoryService`), which has no
+  /// `noSuchMethod`.
+  bool _isPulling = false;
+  bool _isPushing = false;
+
+  /// True while a cloud pull or push is running.
+  bool get isSyncing => _isPulling || _isPushing;
+
+  /// The single cloud sync currently in flight (pull or push). Cloud pull and
+  /// cloud push both mutate the same history keys, so they must never overlap.
+  Future<void>? _inFlightSync;
 
   bool _cloudSyncDisabled = false;
+  bool _disposed = false;
   VoidCallback? _authListener;
 
   StreamSubscription<List<WatchHistoryData>>? _historySubscription;
@@ -48,6 +63,43 @@ class HistoryService extends ChangeNotifier {
     _init();
   }
 
+  /// Notifies listeners unless the service has been disposed. Sync callbacks can
+  /// land after `dispose()` (timer callbacks, in-flight HTTP), and calling
+  /// `notifyListeners()` then throws.
+  void _notify() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  /// Runs [body] as the only cloud sync in flight, or returns the future of the
+  /// one already running instead of starting a second pass.
+  ///
+  /// The auth listener can fire a pull while the 5-minute timer is pushing 500
+  /// items; without this guard both write the same keys concurrently and used to
+  /// reset the shared `_isSyncing` flag out from under each other.
+  Future<void> _runExclusive(Future<void> Function() body) {
+    final existing = _inFlightSync;
+    if (existing != null) return existing;
+
+    final completer = Completer<void>();
+    // Publish the future *before* running the body: an async body may complete
+    // synchronously up to its first await, which would otherwise clear the
+    // guard before it is assigned and wedge it forever.
+    _inFlightSync = completer.future;
+    Future<void>(() async {
+      try {
+        await body();
+        completer.complete();
+      } catch (e) {
+        debugPrint('⚠️ History cloud sync failed: $e');
+        completer.complete();
+      } finally {
+        _inFlightSync = null;
+      }
+    });
+    return completer.future;
+  }
+
   void _init() {
     _authListener = () {
       if (!_authService.isAuthenticated) {
@@ -62,20 +114,20 @@ class HistoryService extends ChangeNotifier {
     _dao.cleanupDuplicates().then((count) {
       if (count > 0) {
         debugPrint('Cleaned up $count duplicate history entries');
-        notifyListeners();
+        _notify();
       }
     });
 
     _historySubscription = _dao.watchAll(limit: 50).listen((items) {
       _history = items;
-      notifyListeners();
+      _notify();
     });
 
     _continueSubscription = _dao.watchContinueWatching(limit: 20).listen((
       items,
     ) {
       _continueWatching = items;
-      notifyListeners();
+      _notify();
     });
 
     // Pull latest from cloud on startup
@@ -170,7 +222,7 @@ class HistoryService extends ChangeNotifier {
   /// Clear all history
   Future<void> clearAll() async {
     await _dao.clearAll();
-    notifyListeners();
+    _notify();
   }
 
   /// Get history count
@@ -192,11 +244,11 @@ class HistoryService extends ChangeNotifier {
   }
 
   bool _isAuthError(dynamic e) {
-    if (e is ServerException && e.statusCode == 401) return true;
-    final msg = e.toString().toLowerCase();
-    return msg.contains('http_401') ||
-        msg.contains('401') ||
-        msg.contains('invalid or expired');
+    // `ApiClient` always turns a `badResponse` into a `ServerException` carrying
+    // the status code, so a typed check is sufficient. Substring matching on
+    // `toString()` produced false positives (a socket error mentioning "401
+    // bytes") that needlessly disabled cloud sync.
+    return e is ServerException && e.statusCode == 401;
   }
 
   // ============================================================================
@@ -204,18 +256,18 @@ class HistoryService extends ChangeNotifier {
   // ============================================================================
 
   /// Pull latest history from cloud and merge with local
-  Future<void> _pullFromCloud() async {
-    if (!_authService.isAuthenticated ||
-        !_server.isAuthenticated ||
-        _cloudSyncDisabled) {
-      return;
-    }
+  Future<void> _pullFromCloud() {
+    return _runExclusive(() async {
+      if (!_authService.isAuthenticated ||
+          !_server.isAuthenticated ||
+          _cloudSyncDisabled) {
+        return;
+      }
 
-    try {
-      _isSyncing = true;
-      notifyListeners();
+      try {
+        _isPulling = true;
+        _notify();
 
-      if (_server.isAuthenticated) {
         final serverRecords = await _server.getHistory();
         for (final data in serverRecords) {
           final mediaId = (data['mediaId'] ?? data['media_id']) as String?;
@@ -223,8 +275,8 @@ class HistoryService extends ChangeNotifier {
               (data['providerId'] ?? data['provider_id']) as String?;
           if (mediaId == null || providerId == null) continue;
 
-          final season = data['season'] as int?;
-          final episode = data['episode'] as int?;
+          final season = (data['season'] as num?)?.toInt();
+          final episode = (data['episode'] as num?)?.toInt();
 
           final localItem = await _dao.getForMedia(
             mediaId,
@@ -236,7 +288,7 @@ class HistoryService extends ChangeNotifier {
           final watchedAtStr =
               (data['watchedAt'] ?? data['watched_at']) as String?;
           final cloudWatchedAt = watchedAtStr != null
-              ? DateTime.parse(watchedAtStr)
+              ? DateTime.tryParse(watchedAtStr) ?? DateTime.now()
               : DateTime.now();
 
           if (localItem == null ||
@@ -246,7 +298,7 @@ class HistoryService extends ChangeNotifier {
               providerId: providerId,
               title: (data['title'] ?? '') as String,
               posterUrl: (data['posterUrl'] ?? data['poster_url']) as String?,
-              year: data['year'] as int?,
+              year: (data['year'] as num?)?.toInt(),
               mediaType:
                   (data['mediaType'] ?? data['media_type'] ?? 'movie')
                       as String,
@@ -266,67 +318,68 @@ class HistoryService extends ChangeNotifier {
           }
         }
         debugPrint('✅ Synced ${serverRecords.length} items from Oxide Server');
-        return;
+      } catch (e) {
+        if (_isAuthError(e)) {
+          _cloudSyncDisabled = true;
+          debugPrint('⚠️ Cloud pull: token expired, skipping sync');
+        } else {
+          debugPrint('⚠️ Failed to pull from cloud: $e');
+        }
+      } finally {
+        _isPulling = false;
+        _notify();
       }
-    } catch (e) {
-      if (_isAuthError(e)) {
-        _cloudSyncDisabled = true;
-        debugPrint('⚠️ Cloud pull: token expired, skipping sync');
-      } else {
-        debugPrint('⚠️ Failed to pull from cloud: $e');
-      }
-    } finally {
-      _isSyncing = false;
-      notifyListeners();
-    }
+    });
   }
 
   /// Sync all local history to cloud
-  Future<void> _syncToCloud() async {
-    if (!_authService.isAuthenticated ||
-        !_server.isAuthenticated ||
-        _cloudSyncDisabled) {
-      return;
-    }
-
-    try {
-      _isSyncing = true;
-      notifyListeners();
-
-      final localHistory = await _dao.getAll(limit: 500);
-      int synced = 0;
-
-      for (final item in localHistory) {
-        if (_cloudSyncDisabled || !_server.isAuthenticated) break;
-
-        try {
-          await _syncSingleItemToCloud(
-            mediaId: item.mediaId,
-            providerId: item.providerId,
-            season: item.season,
-            episode: item.episode,
-          );
-          synced++;
-        } catch (e) {
-          if (_isAuthError(e)) {
-            debugPrint(
-              'Cloud sync: token expired, stopping batch sync immediately',
-            );
-            _cloudSyncDisabled = true;
-            break;
-          } else {
-            debugPrint('Failed to sync ${item.mediaId}: $e');
-          }
-        }
+  Future<void> _syncToCloud() {
+    return _runExclusive(() async {
+      if (!_authService.isAuthenticated ||
+          !_server.isAuthenticated ||
+          _cloudSyncDisabled) {
+        return;
       }
 
-      debugPrint('✅ Synced $synced/${localHistory.length} items to cloud');
-    } catch (e) {
-      debugPrint('⚠️ Failed to sync to cloud: $e');
-    } finally {
-      _isSyncing = false;
-      notifyListeners();
-    }
+      try {
+        _isPushing = true;
+        _notify();
+
+        final localHistory = await _dao.getAll(limit: 500);
+        int synced = 0;
+
+        for (final item in localHistory) {
+          if (_cloudSyncDisabled || !_server.isAuthenticated) break;
+
+          try {
+            await _syncSingleItemToCloud(
+              mediaId: item.mediaId,
+              providerId: item.providerId,
+              season: item.season,
+              episode: item.episode,
+            );
+            synced++;
+          } catch (e) {
+            if (_isAuthError(e)) {
+              debugPrint(
+                'Cloud sync: token expired, stopping batch sync immediately',
+              );
+              _cloudSyncDisabled = true;
+              break;
+            } else {
+              debugPrint('Failed to sync ${item.mediaId}: $e');
+            }
+          }
+        }
+
+        debugPrint('✅ Synced $synced/${localHistory.length} items to cloud');
+      } catch (e) {
+        debugPrint('⚠️ Failed to sync to cloud: $e');
+      } finally {
+        _isPushing = false;
+        _notify();
+      }
+    });
   }
 
   /// Sync a single item to cloud (called after local save)
@@ -395,6 +448,8 @@ class HistoryService extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     if (_authListener != null) {
       _authService.removeListener(_authListener!);
     }
