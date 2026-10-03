@@ -40,6 +40,11 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 
 			ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
 			ctx = context.WithValue(ctx, RoleKey, claims.Role)
+			// Publish also through the shared request state: the logging
+			// middleware wraps this one, so it cannot see the derived context
+			// values above and would otherwise log authenticated requests
+			// without a user_id.
+			ctx = WithUserID(ctx, claims.UserID.String())
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

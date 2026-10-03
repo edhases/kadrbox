@@ -2,7 +2,6 @@ package http
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/edhases/oxide-server/internal/transport/http/middleware"
@@ -18,31 +17,32 @@ func NewRouter(
 	contentH *ContentHandler,
 	syncH *SyncHandler,
 	hub *ws.Hub,
+	appURL string,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
 	// 1. Базові middleware
+	// Порядок важливий: RequestID -> RequestContext (trace id) -> RequestLogger
+	// (пише trace_id у лог) -> CORS -> Recoverer (логер бачить 500 після паніки)
+	// -> BodyLimit -> RateLimit.
+	//
+	// chimiddleware.RealIP НЕ підключено свідомо: він переписує r.RemoteAddr
+	// значенням із X-Real-IP/X-Forwarded-For, знищуючи справжню адресу піра.
+	// Через це атакувач міг підробляти заголовок і отримувати новий rate-limit
+	// бакет на кожен запит. middleware.RateLimitMiddleware сам коректно
+	// проходить ланцюг X-Forwarded-For справа наліво, враховуючи
+	// TRUSTED_PROXY_CIDRS, і використовує RemoteAddr за замовчуванням.
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
-	r.Use(chimiddleware.Logger)
-	r.Use(chimiddleware.Recoverer)
-	r.Use(middleware.RateLimitMiddleware(middleware.NewIPRateLimiter(30, 60)))
+	r.Use(middleware.RequestContext)
+	r.Use(middleware.RequestLogger)
 
 	// 2. Безпечний CORS (дозволяємо нативні додатки без Origin, свій домен та локальні сервери)
+	// Той самий allow-list передається в ws.Options, інакше браузер проходить
+	// REST, але отримує 403 origin_not_allowed на WebSocket handshake.
+	allowedOrigins := AllowedOrigins(appURL)
 	r.Use(cors.Handler(cors.Options{
 		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			if origin == "" {
-				return true
-			}
-			u, err := url.Parse(origin)
-			if err != nil {
-				return false
-			}
-			hostname := u.Hostname()
-			return hostname == "localhost" ||
-				hostname == "127.0.0.1" ||
-				hostname == "oxideteam.pp.ua" ||
-				strings.HasSuffix(hostname, ".oxideteam.pp.ua")
+			return originAllowed(origin, allowedOrigins)
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Refresh-Token"},
@@ -50,13 +50,21 @@ func NewRouter(
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	r.Use(chimiddleware.Recoverer)
 
-	// Healthcheck
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok","service":"oxide-server"}`))
-	})
+	// Глобальна стеля розміру тіла запиту (1 MiB) — до будь-якого хендлера.
+	r.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
+	r.Use(middleware.RateLimitMiddleware(middleware.NewIPRateLimiter(30, 60)))
+
+	// Healthcheck: liveness не торкається залежностей, readiness — так.
+	// Пінги передаються з main.go через middleware.SetPostgresPing/SetRedisPing;
+	// без них /readyz навмисно відповідає 503 (fail-closed).
+	healthH := middleware.New(middleware.RedisPing(), "oxide-server")
+
+	// /health — історичний шлях, збережений як alias до /healthz
+	r.Get("/health", healthH.Livez)
+	r.Get("/healthz", healthH.Livez)
+	r.Get("/readyz", healthH.Readyz)
 
 	// Веб-сторінки підтвердження email та скидання пароля при кліку з листа
 	r.Get("/verify-email", authH.VerifyEmailWeb)
@@ -112,7 +120,12 @@ func NewRouter(
 			r.Post("/auth/avatar", authH.UploadAvatar)
 			r.Post("/auth/change-password", authH.ChangePassword)
 			r.Post("/auth/unlink", authH.UnlinkProvider)
+			r.Post("/auth/logout", authH.Logout)
 			r.Delete("/auth/account", authH.DeleteAccount)
+
+			// Квитки до Watch Party: identity більше не приймається з query,
+			// клієнт спочатку отримує короткочасний тікет через цей ендпоінт.
+			r.Post("/watch-party/tickets", NewWatchPartyHandler(hub).Issue)
 
 			r.Group(func(r chi.Router) {
 				// Синхронізація — цінність акаунту: тільки для підтверджених пошт
