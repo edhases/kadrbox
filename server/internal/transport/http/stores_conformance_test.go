@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	_ transporthttp.UserStore      = (*postgres.UserRepository)(nil)
-	_ transporthttp.RefreshStore   = (*redisRepo.RedisClient)(nil)
-	_ transporthttp.FavoritesStore = (*postgres.FavoritesRepository)(nil)
-	_ transporthttp.HistoryStore   = (*postgres.HistoryRepository)(nil)
-	_ transporthttp.ContentCache   = (*postgres.CacheRepository)(nil)
+	_ transporthttp.UserStore          = (*postgres.UserRepository)(nil)
+	_ transporthttp.RefreshStore       = (*redisRepo.RedisClient)(nil)
+	_ transporthttp.FavoritesMutator   = (*postgres.FavoritesRepository)(nil)
+	_ transporthttp.PaginatedFavorites = (*postgres.FavoritesRepository)(nil)
+	_ transporthttp.HistoryStore       = (*postgres.HistoryRepository)(nil)
+	_ transporthttp.ContentCache       = (*postgres.CacheRepository)(nil)
 )

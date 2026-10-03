@@ -23,8 +23,8 @@ import (
 	"github.com/edhases/oxide-server/internal/auth"
 	"github.com/edhases/oxide-server/internal/domain"
 	"github.com/edhases/oxide-server/internal/email"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	"github.com/edhases/oxide-server/internal/transport/http/middleware"
 )
 
 const testJWTSecret = "test-secret-value"
@@ -468,7 +468,7 @@ func TestRequireVerifiedEmail(t *testing.T) {
 		}
 	})
 
-	t.Run("passes through when there is no user in context", func(t *testing.T) {
+	t.Run("refuses a request with no user in context", func(t *testing.T) {
 		t.Setenv("RESEND_API", "re_test_key")
 		users := newMemUserStore()
 		h := transporthttp.NewAuthHandler(users, newMemRefreshStore(), email.NewService(), testJWTSecret, "")
@@ -477,10 +477,38 @@ func TestRequireVerifiedEmail(t *testing.T) {
 		mw := h.RequireVerifiedEmail()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			reached = true
 		}))
-		mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+		rr := httptest.NewRecorder()
+		mw.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/x", nil))
 
-		if !reached {
-			t.Error("an unauthenticated request should be left to the auth middleware")
+		// Failing open here would let a request with no authenticated user reach
+		// a value-gated endpoint, so this gate answers 401 itself.
+		if reached {
+			t.Error("a request with no authenticated user must not reach the sync handler")
 		}
+		wantStatus(t, rr, http.StatusUnauthorized)
+	})
+
+	// A lookup that fails must not be treated as "verified". The previous
+	// version called next on ANY GetUserByID error, so a database outage handed
+	// unverified accounts the sync endpoints.
+	t.Run("fails closed when the lookup errors", func(t *testing.T) {
+		t.Setenv("RESEND_API", "re_test_key")
+		users := newMemUserStore()
+		h := transporthttp.NewAuthHandler(users, newMemRefreshStore(), email.NewService(), testJWTSecret, "")
+
+		reached := false
+		mw := h.RequireVerifiedEmail()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			reached = true
+		}))
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/history", nil)
+		req = req.WithContext(ctxWithUser(uuid.New())) // no such row: the store errors
+		mw.ServeHTTP(rr, req)
+
+		if reached {
+			t.Error("a failed verification lookup must not reach the sync handler")
+		}
+		wantStatus(t, rr, http.StatusServiceUnavailable)
 	})
 }

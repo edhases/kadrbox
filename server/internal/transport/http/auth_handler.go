@@ -31,6 +31,8 @@ import (
 type AuthHandler struct {
 	userRepo            UserStore
 	redisClient         RefreshStore
+	stateStore          oauthStateStore
+	loginLimiter        *authRateLimiter
 	emailSvc            *email.Service
 	jwtSecret           string
 	googleClientID      string
@@ -51,9 +53,39 @@ func NewAuthHandler(
 	jwtSecret string,
 	googleClientID string,
 ) *AuthHandler {
+	// The production Redis client is also the OAuth state store; the assertion
+	// keeps NewAuthHandler's signature unchanged for cmd/api.
+	stateStore, _ := redisClient.(oauthStateStore)
+	return newAuthHandler(userRepo, redisClient, stateStore, emailSvc, jwtSecret, googleClientID)
+}
+
+// newAuthHandler takes the OAuth state store separately from the session store.
+//
+// Splitting them keeps OAuthStateStore an explicit, testable dependency instead
+// of a hidden type assertion on the Redis client, and lets a caller supply a
+// different store for one without replacing both. Passing the same client twice
+// is the production wiring (see cmd/api/main.go).
+func newAuthHandler(
+	userRepo UserStore,
+	redisClient RefreshStore,
+	stateStore oauthStateStore,
+	emailSvc *email.Service,
+	jwtSecret string,
+	googleClientID string,
+) *AuthHandler {
+	if stateStore == nil {
+		// No state store means no single-use CSRF protection, so login attempts
+		// cannot be started safely. Falling back to an in-process store keeps a
+		// single-instance deployment working; the log line is there so a
+		// multi-instance deployment without shared state is noticed.
+		log.Println("[Auth] WARNING: no OAuth state store configured; using in-process store (states will not survive a restart or be shared across instances)")
+		stateStore = newMemoryOAuthStateStore()
+	}
 	return &AuthHandler{
 		userRepo:       userRepo,
 		redisClient:    redisClient,
+		stateStore:     stateStore,
+		loginLimiter:   newAuthRateLimiter(),
 		emailSvc:       emailSvc,
 		jwtSecret:      jwtSecret,
 		googleClientID: googleClientID,
@@ -110,6 +142,11 @@ type AuthResponse struct {
 
 // Register — POST /api/v1/auth/register
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := h.loginLimiter.allowRegister(r); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request payload", http.StatusBadRequest)
@@ -122,13 +159,20 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
+		// The KDF gate is full: the process is protecting its memory budget.
+		// 503 (not 500) tells the client this is worth retrying.
+		if errors.Is(err, auth.ErrKDFBusy) {
+			w.Header().Set("Retry-After", "1")
+			jsonError(w, "server is busy hashing, retry shortly", http.StatusServiceUnavailable)
+			return
+		}
 		jsonError(w, "failed to hash password", http.StatusInternalServerError)
 		return
 	}
 
 	user, err := h.userRepo.CreateUser(r.Context(), req.Email, hash, req.Username)
 	if err != nil {
-		jsonError(w, "email already registered", http.StatusConflict)
+		h.respondRegisterConflict(w, r, req.Email, err)
 		return
 	}
 
@@ -147,32 +191,96 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// RESEND_API не задано — автоматично підтверджуємо email
 		log.Printf("[Email] RESEND_API not configured — auto-verifying %s", user.Email)
-		_ = h.userRepo.MarkEmailVerified(r.Context(), user.ID)
+		// Checked: answering 200 with a token claiming IsVerified=true while the
+		// row says false produces exactly the contradiction
+		// RequireVerifiedEmail then rejects the new user on.
+		if err := h.userRepo.MarkEmailVerified(r.Context(), user.ID); err != nil {
+			jsonError(w, "failed to record email verification", http.StatusInternalServerError)
+			return
+		}
 		user.IsVerified = true
 	}
 
 	h.respondWithTokens(w, r, user)
 }
 
+// respondRegisterConflict answers a failed CreateUser without lying about the
+// cause and without confirming more than we know.
+//
+// The repository returns one undifferentiated error for a unique-violation and
+// for every other failure (connection lost, constraint violation, timeout), and
+// the handler used to map all of them to 409 "email already registered". That
+// turned any database hiccup into a false "this address is taken", and made the
+// 409 a reliable account-existence oracle.
+//
+// So: confirm by lookup. Only when the address is positively confirmed to
+// exist do we answer 409. Any other failure answers a uniform 202 with a
+// generic body, which is indistinguishable from the "mail sent" case.
+func (h *AuthHandler) respondRegisterConflict(w http.ResponseWriter, r *http.Request, emailAddr string, cause error) {
+	if existing, lookupErr := h.userRepo.GetUserByEmail(r.Context(), emailAddr); lookupErr == nil && existing != nil {
+		jsonError(w, "email already registered", http.StatusConflict)
+		return
+	}
+
+	// Not confirmed as a duplicate: log the real cause server-side and answer
+	// something the client cannot use as a probe.
+	log.Printf("[Auth] registration failed for a non-confirmable reason: %v", cause)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = w.Write([]byte(`{"message":"if the address can be registered, a confirmation link has been sent"}`))
+}
+
 // Login — POST /api/v1/auth/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := h.loginLimiter.allowLogin(r); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request payload", http.StatusBadRequest)
 		return
 	}
 
+	accountKey := normalizeEmail(req.Email)
+
 	user, err := h.userRepo.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
+		// Burn an equivalent KDF so an unknown address costs the same wall-clock
+		// time as a known one. Without this, response time is a reliable
+		// account-existence oracle.
+		auth.BurnKDFForDummyUser(req.Password)
+		h.loginLimiter.recordLoginFailure(accountKey)
 		jsonError(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
 
+	if allowed, retryAfter := h.loginLimiter.allowAccount(accountKey); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	match, err := auth.ComparePasswordAndHash(req.Password, user.PasswordHash)
-	if err != nil || !match {
+	if err != nil {
+		if errors.Is(err, auth.ErrKDFBusy) {
+			w.Header().Set("Retry-After", "1")
+			jsonError(w, "server is busy verifying, retry shortly", http.StatusServiceUnavailable)
+			return
+		}
+		// A hash we cannot parse is a stored-credential problem, not a wrong
+		// password, but the client gets the same 401 either way.
+		h.loginLimiter.recordLoginFailure(accountKey)
 		jsonError(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
+	if !match {
+		h.loginLimiter.recordLoginFailure(accountKey)
+		jsonError(w, "invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	h.loginLimiter.recordLoginSuccess(accountKey)
 
 	// Якщо email не підтверджено і RESEND налаштовано — повертаємо 403
 	if !user.IsVerified && h.emailSvc.IsConfigured() {
@@ -184,15 +292,31 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // Refresh — POST /api/v1/auth/refresh
+//
+// Rotation is a single atomic consume. The previous GET-then-DEL left a window
+// in which the same token could be redeemed twice and discarded the delete
+// error, so a failed delete silently kept the old token valid.
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req RefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request payload", http.StatusBadRequest)
 		return
 	}
+	if req.RefreshToken == "" {
+		jsonError(w, "refresh_token is required", http.StatusBadRequest)
+		return
+	}
 
-	userID, err := h.redisClient.GetUserIDByRefreshToken(r.Context(), req.RefreshToken)
+	userID, reused, err := h.redisClient.ConsumeRefreshToken(r.Context(), req.RefreshToken)
 	if err != nil {
+		jsonError(w, "invalid or expired refresh token", http.StatusUnauthorized)
+		return
+	}
+	if reused {
+		// The token was already redeemed, so a second copy exists somewhere. We
+		// cannot tell the legitimate client from the thief, so both are cut off.
+		log.Printf("[Auth] SECURITY: refresh token reuse detected for user %s — revoking all sessions", userID)
+		h.revokeAllSessions(r.Context(), userID, "refresh token reuse")
 		jsonError(w, "invalid or expired refresh token", http.StatusUnauthorized)
 		return
 	}
@@ -203,9 +327,9 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ротація refresh токена
-	_ = h.redisClient.RevokeRefreshToken(r.Context(), req.RefreshToken)
-
+	// Issue the replacement before answering. If storing it fails the old token
+	// is already gone, so there is no way back — but the client gets a clear 500
+	// and can sign in again, rather than silently holding a dead session.
 	h.respondWithTokens(w, r, user)
 }
 
@@ -380,6 +504,11 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	newHash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
+		if errors.Is(err, auth.ErrKDFBusy) {
+			w.Header().Set("Retry-After", "1")
+			jsonError(w, "server is busy hashing, retry shortly", http.StatusServiceUnavailable)
+			return
+		}
 		jsonError(w, "failed to hash new password", http.StatusInternalServerError)
 		return
 	}
@@ -388,6 +517,11 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "failed to update password", http.StatusInternalServerError)
 		return
 	}
+
+	// A password change must end every other session. Without this, an attacker
+	// holding a refresh token keeps access for the full 30-day TTL even after
+	// the user changes the password in response to the compromise.
+	h.revokeAllSessions(r.Context(), userID, "password change")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -406,6 +540,11 @@ func (h *AuthHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "failed to delete user", http.StatusInternalServerError)
 		return
 	}
+
+	// Deleting the row does not touch Redis. Revoking first would revoke even
+	// when the delete failed; revoking after means a delete that succeeded
+	// always leaves no live session behind.
+	h.revokeAllSessions(r.Context(), userID, "account deleted")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -449,24 +588,34 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := h.userRepo.GetUserByPasswordResetToken(r.Context(), req.Token)
-	if err != nil {
-		jsonError(w, "invalid or expired reset token", http.StatusBadRequest)
-		return
-	}
-
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
+		if errors.Is(err, auth.ErrKDFBusy) {
+			w.Header().Set("Retry-After", "1")
+			jsonError(w, "server is busy hashing, retry shortly", http.StatusServiceUnavailable)
+			return
+		}
 		jsonError(w, "failed to hash password", http.StatusInternalServerError)
 		return
 	}
 
-	if err := h.userRepo.UpdatePassword(r.Context(), userID, hash); err != nil {
-		jsonError(w, "failed to update password", http.StatusInternalServerError)
+	// Burn and hash write are one transaction in the repository. The previous
+	// three-step sequence (lookup -> burn -> write) let a crash or a dropped
+	// error leave a freshly written password next to a still-live reset token,
+	// replayable for its full 1-hour TTL.
+	resetUserID, err := h.userRepo.ConsumePasswordResetTokenAndUpdatePassword(r.Context(), req.Token, hash)
+	if err != nil {
+		if errors.Is(err, postgres.ErrResetTokenNotFound) || errors.Is(err, postgres.ErrUserNotFound) {
+			jsonError(w, "invalid or expired reset token", http.StatusBadRequest)
+			return
+		}
+		jsonError(w, "failed to reset password", http.StatusInternalServerError)
 		return
 	}
 
-	_ = h.userRepo.MarkPasswordResetUsed(r.Context(), userID)
+	// Same reasoning as ChangePassword: a reset is the recovery path from a
+	// compromise, so every pre-existing session has to die with it.
+	h.revokeAllSessions(r.Context(), resetUserID, "password reset")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -638,8 +787,14 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Google email вже перевірений
-			_ = h.userRepo.MarkEmailVerified(r.Context(), newUser.ID)
+			// Google email is already verified. The write is checked: claiming
+			// verification in the response while the DB row says otherwise puts
+			// the API and the database in contradictory states, and the
+			// RequireVerifiedEmail gate then 403s a user the API just signed in.
+			if err := h.userRepo.MarkEmailVerified(r.Context(), newUser.ID); err != nil {
+				jsonError(w, "failed to record email verification", http.StatusInternalServerError)
+				return
+			}
 			newUser.IsVerified = true
 
 			if info.Picture != "" {
@@ -654,14 +809,17 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// Користувач існує: верифікуємо email через Google якщо ще не був
+		// The account exists: Google has just asserted the address is verified.
+		// Checked, for the same reason as the create path above.
 		if !user.IsVerified {
-			_ = h.userRepo.MarkEmailVerified(r.Context(), user.ID)
+			if err := h.userRepo.MarkEmailVerified(r.Context(), user.ID); err != nil {
+				jsonError(w, "failed to record email verification", http.StatusInternalServerError)
+				return
+			}
 			user.IsVerified = true
 		}
 		if user.AvatarURL == "" && info.Picture != "" {
-			updatedUser, _ := h.userRepo.UpdateProfile(r.Context(), user.ID, "", "", info.Picture)
-			if updatedUser != nil {
+			if updatedUser, updateErr := h.userRepo.UpdateProfile(r.Context(), user.ID, "", "", info.Picture); updateErr == nil && updatedUser != nil {
 				user = updatedUser
 			}
 		}
@@ -684,6 +842,17 @@ func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		redirectURI = fmt.Sprintf("%s/api/v1/auth/google/callback", h.appURL)
 	}
 
+	// The state is minted here, never taken from the request. The previous code
+	// echoed the caller's `state`/`redirect_to` straight into the provider URL,
+	// so the "state" the provider echoed back proved nothing.
+	state, rec, err := h.beginOAuthAttempt(r.Context(), w, r, "google", true)
+	if err != nil {
+		log.Printf("[Auth] failed to start Google OAuth attempt: %v", err)
+		writeHTMLStatus(w, http.StatusServiceUnavailable,
+			renderOAuthStatusHTML(false, "Google недоступний", "Не вдалося почати авторизацію. Спробуйте пізніше.", "", "", ""))
+		return
+	}
+
 	params := url.Values{}
 	params.Set("client_id", h.googleClientID)
 	params.Set("redirect_uri", redirectURI)
@@ -691,12 +860,11 @@ func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	params.Set("scope", "openid email profile")
 	params.Set("access_type", "offline")
 	params.Set("prompt", "select_account")
-
-	if state := r.URL.Query().Get("state"); state != "" {
-		params.Set("state", state)
-	} else if redirect := r.URL.Query().Get("redirect_to"); redirect != "" {
-		params.Set("state", redirect)
-	}
+	params.Set("state", state)
+	// PKCE S256: an intercepted authorization code is useless without the
+	// verifier, which never leaves the server.
+	params.Set("code_challenge", pkceChallengeS256(rec.CodeVerifier))
+	params.Set("code_challenge_method", "S256")
 
 	authURL := "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode()
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
@@ -720,9 +888,17 @@ type googleUserInfoResponse struct {
 	Picture       string `json:"picture"`
 }
 
-func (h *AuthHandler) processGoogleCode(ctx context.Context, code, redirectURI string) (*domain.User, error) {
+// processGoogleCode exchanges an authorization code for tokens and resolves the
+// local user. codeVerifier is the PKCE verifier from the state record.
+func (h *AuthHandler) processGoogleCode(ctx context.Context, code, redirectURI, codeVerifier string) (*domain.User, error) {
 	if h.googleClientID == "" {
 		return nil, errors.New("GOOGLE_CLIENT_ID not configured")
+	}
+	if codeVerifier == "" {
+		// Every authorization code this server accepts came from a flow it
+		// started with a challenge, so a missing verifier means the callback
+		// did not come from such a flow.
+		return nil, ErrInvalidOAuthState
 	}
 
 	form := url.Values{}
@@ -733,6 +909,7 @@ func (h *AuthHandler) processGoogleCode(ctx context.Context, code, redirectURI s
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
+	form.Set("code_verifier", codeVerifier)
 
 	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://oauth2.googleapis.com/token", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -785,7 +962,11 @@ func (h *AuthHandler) processGoogleCode(ctx context.Context, code, redirectURI s
 	user, err := h.userRepo.GetUserByEmail(ctx, gUser.Email)
 	if err == nil {
 		if !user.IsVerified {
-			_ = h.userRepo.MarkEmailVerified(ctx, user.ID)
+			// Checked: reporting IsVerified=true while the row disagrees leaves
+			// the API and the database in contradictory states.
+			if err := h.userRepo.MarkEmailVerified(ctx, user.ID); err != nil {
+				return nil, fmt.Errorf("mark email verified: %w", err)
+			}
 			user.IsVerified = true
 		}
 		if user.AvatarURL == "" && gUser.Picture != "" {
@@ -818,29 +999,27 @@ func (h *AuthHandler) processGoogleCode(ctx context.Context, code, redirectURI s
 }
 
 // GoogleCallback — GET /api/v1/auth/google/callback
+//
+// The state is consumed before anything else: an absent, unknown, expired,
+// replayed or session-mismatched state is a flat 400 with no detail about which
+// check failed.
 func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rec, err := h.verifyCallbackState(r.Context(), r, "google")
+	if err != nil {
+		h.rejectOAuthCallback(w, "Помилка Google", "Недійсний або прострочений запит авторизації. Почніть вхід знову.")
+		return
+	}
 
+	code := r.URL.Query().Get("code")
 	if code == "" {
-		errDesc := r.URL.Query().Get("error_description")
+		errDesc := sanitizeProviderMessage(r.URL.Query().Get("error_description"))
 		if errDesc == "" {
-			errDesc = r.URL.Query().Get("error")
+			errDesc = sanitizeProviderMessage(r.URL.Query().Get("error"))
 		}
 		if errDesc == "" {
 			errDesc = "Авторизацію через Google було скасовано."
 		}
-		if isSafeRedirectURL(state) {
-			sep := "?"
-			if strings.Contains(state, "?") {
-				sep = "&"
-			}
-			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(errDesc)), http.StatusTemporaryRedirect)
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка Google", errDesc, "", "", "")))
+		h.failOAuthAttempt(w, r, rec, errDesc)
 		return
 	}
 
@@ -849,49 +1028,27 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		redirectURI = fmt.Sprintf("%s/api/v1/auth/google/callback", h.appURL)
 	}
 
-	user, err := h.processGoogleCode(r.Context(), code, redirectURI)
+	user, err := h.processGoogleCode(r.Context(), code, redirectURI, rec.CodeVerifier)
 	if err != nil {
-		if isSafeRedirectURL(state) {
-			sep := "?"
-			if strings.Contains(state, "?") {
-				sep = "&"
-			}
-			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(err.Error())), http.StatusTemporaryRedirect)
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка авторизації", err.Error(), "", "", "")))
+		h.failOAuthAttempt(w, r, rec, err.Error())
 		return
 	}
 
-	// Google ідентифікує користувача за email: прив'язка можлива лише
-	// до акаунту з тією ж поштою, інакше це чужий акаунт.
-	if linkUserID, linking := h.linkTargetFromState(state); linking && user.ID != linkUserID {
-		redirectOAuthError(w, r, state, "Цей Google-акаунт належить іншому користувачу")
+	// Google identifies the user by email: linking is only possible to an
+	// account with that same address, otherwise it would be someone else's.
+	if rec.LinkUserID != "" && user.ID.String() != rec.LinkUserID {
+		h.failOAuthAttempt(w, r, rec, "Цей Google-акаунт належить іншому користувачу")
 		return
 	}
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
+	accessToken, refreshToken, err := h.issueOAuthTokens(r.Context(), user)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка токена", "Не вдалося згенерувати токен сесії", "", "", "")))
+		writeHTMLStatus(w, http.StatusInternalServerError,
+			renderOAuthStatusHTML(false, "Помилка сервера", "Не вдалося зберегти сесію. Спробуйте пізніше.", "", "", ""))
 		return
 	}
 
-	refreshToken := auth.GenerateRefreshToken()
-	_ = h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour)
-
-	if isSafeRedirectURL(state) {
-		sep := "?"
-		if strings.Contains(state, "?") {
-			sep = "&"
-		}
-		http.Redirect(w, r, fmt.Sprintf("%s%saccess_token=%s&refresh_token=%s", state, sep, accessToken, refreshToken), http.StatusTemporaryRedirect)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderOAuthStatusHTML(true, "Вхід через Google успішний!", "Повертаємося у додаток Oxide Film...", "google", accessToken, refreshToken)))
+	h.completeOAuthAttempt(w, r, rec, "google", "Вхід через Google успішний!", accessToken, refreshToken)
 }
 
 // ---- Telegram Auth ----------------------------------------------------------
@@ -1002,9 +1159,8 @@ func (h *AuthHandler) TelegramAuth(w http.ResponseWriter, r *http.Request) {
 // TelegramLoginWeb — GET /api/v1/auth/telegram/login та GET /auth/telegram
 func (h *AuthHandler) TelegramLoginWeb(w http.ResponseWriter, r *http.Request) {
 	if h.telegramBotToken == "" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Telegram недоступний", "TELEGRAM_BOT_TOKEN не налаштований на сервері", "", "", "")))
+		writeHTMLStatus(w, http.StatusServiceUnavailable,
+			renderOAuthStatusHTML(false, "Telegram недоступний", "TELEGRAM_BOT_TOKEN не налаштований на сервері", "", "", ""))
 		return
 	}
 
@@ -1013,61 +1169,24 @@ func (h *AuthHandler) TelegramLoginWeb(w http.ResponseWriter, r *http.Request) {
 		botUser = "oxidefilmbot"
 	}
 
-	redirectTarget := r.URL.Query().Get("redirect_to")
-	if redirectTarget == "" {
-		redirectTarget = r.URL.Query().Get("state")
+	// The state the widget will carry back is a server nonce, not the caller's
+	// redirect target. Telegram has no authorization-code exchange, so there is
+	// no PKCE here; the signed id/hash Telegram returns is the credential, and
+	// single-use server-side state still provides CSRF protection.
+	state, _, err := h.beginOAuthAttempt(r.Context(), w, r, "telegram", false)
+	if err != nil {
+		log.Printf("[Auth] failed to start Telegram OAuth attempt: %v", err)
+		writeHTMLStatus(w, http.StatusServiceUnavailable,
+			renderOAuthStatusHTML(false, "Telegram недоступний", "Не вдалося почати авторизацію. Спробуйте пізніше.", "", "", ""))
+		return
 	}
 
-	authURL := "/api/v1/auth/telegram/callback"
-	if redirectTarget != "" {
-		authURL = fmt.Sprintf("/api/v1/auth/telegram/callback?state=%s", url.QueryEscape(redirectTarget))
-	}
+	authURL := "/api/v1/auth/telegram/callback?state=" + url.QueryEscape(state)
 
+	setNoTokenCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Вхід через Telegram — Oxide Film</title>
-  <style>
-    body {
-      margin: 0; padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a; color: #f8fafc;
-      display: flex; align-items: center; justify-content: center; min-height: 100vh;
-    }
-    .card {
-      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
-      padding: 40px; max-width: 440px; margin: 20px; text-align: center;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-    }
-    .icon { font-size: 50px; margin-bottom: 16px; }
-    h1 { font-size: 22px; margin: 0 0 12px; color: #fff; }
-    p { color: #94a3b8; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
-    .logo { font-size: 14px; color: #229ED9; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
-    .widget-container { display: flex; justify-content: center; margin: 16px 0; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">Oxide Film</div>
-    <div class="icon">✈️</div>
-    <h1>Вхід через Telegram</h1>
-    <p>Натисніть кнопку нижче для авторизації за допомогою вашого облікового запису Telegram:</p>
-    <div class="widget-container">
-      <script async src="https://telegram.org/js/telegram-widget.js?22" 
-              data-telegram-login="%s" 
-              data-size="large" 
-              data-radius="12" 
-              data-auth-url="%s" 
-              data-request-access="write"></script>
-    </div>
-  </div>
-</body>
-</html>`, botUser, authURL)
-	_, _ = w.Write([]byte(html))
+	_, _ = w.Write([]byte(renderTelegramWidgetHTML(botUser, authURL)))
 }
 
 // TelegramCallbackWeb — GET /api/v1/auth/telegram/callback
@@ -1086,63 +1205,36 @@ func (h *AuthHandler) TelegramCallbackWeb(w http.ResponseWriter, r *http.Request
 		Hash:      q.Get("hash"),
 	}
 
-	state := q.Get("state")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rec, err := h.verifyCallbackState(r.Context(), r, "telegram")
+	if err != nil {
+		h.rejectOAuthCallback(w, "Помилка Telegram", "Недійсний або прострочений запит авторизації. Почніть вхід знову.")
+		return
+	}
+
 	if !h.verifyTelegramAuth(req) {
-		if isSafeRedirectURL(state) {
-			sep := "?"
-			if strings.Contains(state, "?") {
-				sep = "&"
-			}
-			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape("Недійсний підпис авторизації Telegram")), http.StatusTemporaryRedirect)
-			return
-		}
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка Telegram", "Недійсний підпис авторизації Telegram.", "", "", "")))
+		h.failOAuthAttempt(w, r, rec, "Недійсний підпис авторизації Telegram")
 		return
 	}
 
 	user, err := func() (*domain.User, error) {
-		if linkUserID, linking := h.linkTargetFromState(state); linking {
-			return h.linkTelegramToUser(r.Context(), linkUserID, req.ID)
+		if rec.LinkUserID != "" {
+			return h.linkTelegramToUser(r.Context(), uuid.MustParse(rec.LinkUserID), req.ID)
 		}
 		return h.getOrCreateTelegramUser(r.Context(), req)
 	}()
 	if err != nil {
-		if isSafeRedirectURL(state) {
-			sep := "?"
-			if strings.Contains(state, "?") {
-				sep = "&"
-			}
-			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape("Не вдалося зберегти користувача: "+err.Error())), http.StatusTemporaryRedirect)
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка сервера", "Не вдалося зберегти користувача: "+err.Error(), "", "", "")))
+		h.failOAuthAttempt(w, r, rec, "Не вдалося зберегти користувача: "+err.Error())
 		return
 	}
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
+	accessToken, refreshToken, err := h.issueOAuthTokens(r.Context(), user)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка токена", "Не вдалося згенерувати токен", "", "", "")))
+		writeHTMLStatus(w, http.StatusInternalServerError,
+			renderOAuthStatusHTML(false, "Помилка сервера", "Не вдалося зберегти сесію. Спробуйте пізніше.", "", "", ""))
 		return
 	}
 
-	refreshToken := auth.GenerateRefreshToken()
-	_ = h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour)
-
-	if isSafeRedirectURL(state) {
-		sep := "?"
-		if strings.Contains(state, "?") {
-			sep = "&"
-		}
-		http.Redirect(w, r, fmt.Sprintf("%s%saccess_token=%s&refresh_token=%s", state, sep, accessToken, refreshToken), http.StatusTemporaryRedirect)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderOAuthStatusHTML(true, "Вхід успішний!", "Повертаємося у додаток Oxide Film...", "telegram", accessToken, refreshToken)))
+	h.completeOAuthAttempt(w, r, rec, "telegram", "Вхід успішний!", accessToken, refreshToken)
 }
 
 // ---- Discord OAuth2 ---------------------------------------------------------
@@ -1167,8 +1259,10 @@ type discordUserResponse struct {
 	Verified      bool   `json:"verified"`
 }
 
-func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI string) (*domain.User, error) {
-	discordUser, err := h.fetchDiscordProfile(ctx, code, redirectURI)
+// processDiscordCode exchanges a code and resolves the local user. codeVerifier
+// is the PKCE verifier from the state record.
+func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI, codeVerifier string) (*domain.User, error) {
+	discordUser, err := h.fetchDiscordProfile(ctx, code, redirectURI, codeVerifier)
 	if err != nil {
 		return nil, err
 	}
@@ -1190,9 +1284,16 @@ func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI 
 
 	if discordUser.Email != "" {
 		if existing, err := h.userRepo.GetUserByEmail(ctx, discordUser.Email); err == nil {
-			_ = h.userRepo.LinkDiscord(ctx, existing.ID, discordUser.ID)
+			// Checked: a discarded LinkDiscord error means the caller is told the
+			// account is linked when no discord_id was ever written, and the link
+			// silently fails for good.
+			if err := h.userRepo.LinkDiscord(ctx, existing.ID, discordUser.ID); err != nil {
+				return nil, fmt.Errorf("link discord account: %w", err)
+			}
 			if !existing.IsVerified && discordUser.Verified {
-				_ = h.userRepo.MarkEmailVerified(ctx, existing.ID)
+				if err := h.userRepo.MarkEmailVerified(ctx, existing.ID); err != nil {
+					return nil, fmt.Errorf("mark email verified: %w", err)
+				}
 				existing.IsVerified = true
 			}
 			if existing.AvatarURL == "" && avatarURL != "" {
@@ -1235,9 +1336,14 @@ func (h *AuthHandler) processDiscordCode(ctx context.Context, code, redirectURI 
 
 // fetchDiscordProfile обмінює OAuth-код на профіль Discord
 // (без створення користувача — для флоу прив'язки до існуючого акаунту).
-func (h *AuthHandler) fetchDiscordProfile(ctx context.Context, code, redirectURI string) (*discordUserResponse, error) {
+func (h *AuthHandler) fetchDiscordProfile(ctx context.Context, code, redirectURI, codeVerifier string) (*discordUserResponse, error) {
 	if h.discordClientID == "" || h.discordClientSecret == "" {
 		return nil, errors.New("discord credentials not configured")
+	}
+	if codeVerifier == "" {
+		// A code this server issued always came from a flow it started with a
+		// PKCE challenge; a missing verifier means it did not.
+		return nil, ErrInvalidOAuthState
 	}
 
 	form := url.Values{}
@@ -1246,6 +1352,7 @@ func (h *AuthHandler) fetchDiscordProfile(ctx context.Context, code, redirectURI
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
+	form.Set("code_verifier", codeVerifier)
 
 	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -1300,9 +1407,17 @@ func (h *AuthHandler) fetchDiscordProfile(ctx context.Context, code, redirectURI
 // DiscordLogin — GET /api/v1/auth/discord/login та GET /auth/discord
 func (h *AuthHandler) DiscordLogin(w http.ResponseWriter, r *http.Request) {
 	if h.discordClientID == "" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Discord недоступний", "DISCORD_CLIENT_ID не налаштований на сервері", "", "", "")))
+		writeHTMLStatus(w, http.StatusServiceUnavailable,
+			renderOAuthStatusHTML(false, "Discord недоступний", "DISCORD_CLIENT_ID не налаштований на сервері", "", "", ""))
+		return
+	}
+
+	// Server-minted state plus PKCE; see GoogleLogin for the reasoning.
+	state, rec, err := h.beginOAuthAttempt(r.Context(), w, r, "discord", true)
+	if err != nil {
+		log.Printf("[Auth] failed to start Discord OAuth attempt: %v", err)
+		writeHTMLStatus(w, http.StatusServiceUnavailable,
+			renderOAuthStatusHTML(false, "Discord недоступний", "Не вдалося почати авторизацію. Спробуйте пізніше.", "", "", ""))
 		return
 	}
 
@@ -1312,12 +1427,9 @@ func (h *AuthHandler) DiscordLogin(w http.ResponseWriter, r *http.Request) {
 	params.Set("response_type", "code")
 	params.Set("scope", "identify email")
 	params.Set("prompt", "consent")
-
-	if state := r.URL.Query().Get("state"); state != "" {
-		params.Set("state", state)
-	} else if redirect := r.URL.Query().Get("redirect_to"); redirect != "" {
-		params.Set("state", redirect)
-	}
+	params.Set("state", state)
+	params.Set("code_challenge", pkceChallengeS256(rec.CodeVerifier))
+	params.Set("code_challenge_method", "S256")
 
 	authURL := "https://discord.com/api/oauth2/authorize?" + params.Encode()
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
@@ -1325,81 +1437,61 @@ func (h *AuthHandler) DiscordLogin(w http.ResponseWriter, r *http.Request) {
 
 // DiscordCallback — GET /api/v1/auth/discord/callback
 func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rec, err := h.verifyCallbackState(r.Context(), r, "discord")
+	if err != nil {
+		h.rejectOAuthCallback(w, "Помилка Discord", "Недійсний або прострочений запит авторизації. Почніть вхід знову.")
+		return
+	}
 
+	code := r.URL.Query().Get("code")
 	if code == "" {
-		errDesc := r.URL.Query().Get("error_description")
+		errDesc := sanitizeProviderMessage(r.URL.Query().Get("error_description"))
 		if errDesc == "" {
 			errDesc = "Авторизацію через Discord було скасовано."
 		}
-		if isSafeRedirectURL(state) {
-			sep := "?"
-			if strings.Contains(state, "?") {
-				sep = "&"
-			}
-			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(errDesc)), http.StatusTemporaryRedirect)
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка Discord", errDesc, "", "", "")))
+		h.failOAuthAttempt(w, r, rec, errDesc)
 		return
 	}
 
 	user, err := func() (*domain.User, error) {
-		if linkUserID, linking := h.linkTargetFromState(state); linking {
-			profile, fetchErr := h.fetchDiscordProfile(r.Context(), code, h.discordRedirectURI)
+		if rec.LinkUserID != "" {
+			profile, fetchErr := h.fetchDiscordProfile(r.Context(), code, h.discordRedirectURI, rec.CodeVerifier)
 			if fetchErr != nil {
 				return nil, fetchErr
 			}
-			return h.linkDiscordToUser(r.Context(), linkUserID, profile.ID)
+			return h.linkDiscordToUser(r.Context(), uuid.MustParse(rec.LinkUserID), profile.ID)
 		}
-		return h.processDiscordCode(r.Context(), code, h.discordRedirectURI)
+		return h.processDiscordCode(r.Context(), code, h.discordRedirectURI, rec.CodeVerifier)
 	}()
 	if err != nil {
-		if isSafeRedirectURL(state) {
-			sep := "?"
-			if strings.Contains(state, "?") {
-				sep = "&"
-			}
-			http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(err.Error())), http.StatusTemporaryRedirect)
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка авторизації", err.Error(), "", "", "")))
+		h.failOAuthAttempt(w, r, rec, err.Error())
 		return
 	}
 
-	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
+	accessToken, refreshToken, err := h.issueOAuthTokens(r.Context(), user)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка токена", "Не вдалося згенерувати токен сесії", "", "", "")))
+		writeHTMLStatus(w, http.StatusInternalServerError,
+			renderOAuthStatusHTML(false, "Помилка сервера", "Не вдалося зберегти сесію. Спробуйте пізніше.", "", "", ""))
 		return
 	}
 
-	refreshToken := auth.GenerateRefreshToken()
-	_ = h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour)
-
-	if isSafeRedirectURL(state) {
-		sep := "?"
-		if strings.Contains(state, "?") {
-			sep = "&"
-		}
-		http.Redirect(w, r, fmt.Sprintf("%s%saccess_token=%s&refresh_token=%s", state, sep, accessToken, refreshToken), http.StatusTemporaryRedirect)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderOAuthStatusHTML(true, "Вхід через Discord успішний!", "Повертаємося у додаток Oxide Film...", "discord", accessToken, refreshToken)))
+	h.completeOAuthAttempt(w, r, rec, "discord", "Вхід через Discord успішний!", accessToken, refreshToken)
 }
 
 type DiscordAuthRequest struct {
 	Code        string `json:"code"`
 	RedirectURI string `json:"redirect_uri,omitempty"`
+	// CodeVerifier is the PKCE verifier the client generated. Optional for
+	// backwards compatibility, but without it this endpoint can no longer
+	// exchange a code, because the exchange now requires a verifier.
+	CodeVerifier string `json:"code_verifier,omitempty"`
 }
 
 // DiscordAuthAPI — POST /api/v1/auth/discord (прямий обмін коду на JWT з клієнта)
+//
+// The browser redirect flow uses the state-bound verifier; a native client that
+// drives the authorize URL itself must send its own verifier, since the server
+// never saw the challenge.
 func (h *AuthHandler) DiscordAuthAPI(w http.ResponseWriter, r *http.Request) {
 	var req DiscordAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
@@ -1411,8 +1503,12 @@ func (h *AuthHandler) DiscordAuthAPI(w http.ResponseWriter, r *http.Request) {
 		redirectURI = h.discordRedirectURI
 	}
 
-	user, err := h.processDiscordCode(r.Context(), req.Code, redirectURI)
+	user, err := h.processDiscordCode(r.Context(), req.Code, redirectURI, req.CodeVerifier)
 	if err != nil {
+		if errors.Is(err, ErrInvalidOAuthState) {
+			jsonError(w, "code_verifier is required", http.StatusBadRequest)
+			return
+		}
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -1420,42 +1516,17 @@ func (h *AuthHandler) DiscordAuthAPI(w http.ResponseWriter, r *http.Request) {
 	h.respondWithTokens(w, r, user)
 }
 
+// validateLinkToken resolves a link_token JWT to its claims.
+func (h *AuthHandler) validateLinkToken(token string) (*auth.Claims, error) {
+	return auth.ValidateAccessToken(token, h.jwtSecret)
+}
+
 // ---- OAuth link/unlink --------------------------------------------------------
 
-// linkTargetFromState витягує link_token з OAuth state (URL loopback-редиректу
-// вигляду http://127.0.0.1:PORT/callback?link_token=JWT) і повертає ID
-// залогіненого користувача, до якого треба прив'язати провайдер.
-// Повертає false, якщо це звичайний вхід (без прив'язки).
-func (h *AuthHandler) linkTargetFromState(state string) (uuid.UUID, bool) {
-	u, err := url.Parse(state)
-	if err != nil {
-		return uuid.Nil, false
-	}
-	token := u.Query().Get("link_token")
-	if token == "" {
-		return uuid.Nil, false
-	}
-	claims, err := auth.ValidateAccessToken(token, h.jwtSecret)
-	if err != nil {
-		return uuid.Nil, false
-	}
-	return claims.UserID, true
-}
-
-// redirectOAuthError повертає помилку в loopback-редирект або HTML-сторінкою.
-func redirectOAuthError(w http.ResponseWriter, r *http.Request, state, msg string) {
-	if isSafeRedirectURL(state) {
-		sep := "?"
-		if strings.Contains(state, "?") {
-			sep = "&"
-		}
-		http.Redirect(w, r, fmt.Sprintf("%s%serror=%s", state, sep, url.QueryEscape(msg)), http.StatusTemporaryRedirect)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusBadRequest)
-	_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Помилка авторизації", msg, "", "", "")))
-}
+// The link target now lives in the server-side state record (rec.LinkUserID)
+// rather than being parsed out of a `state` query parameter at callback time.
+// Parsing it there meant trusting a caller-supplied URL, and the token in it was
+// validated only for signature, not against the flow that is completing.
 
 // linkTelegramToUser прив'язує Telegram ID до вказаного користувача.
 // Повертає помилку, якщо ID вже належить іншому користувачу.
@@ -1565,6 +1636,12 @@ func isPlaceholderEmail(email string) bool {
 // RequireVerifiedEmail — middleware для ендпоінтів цінності акаунту (синхронізація).
 // Без підтвердженої пошти акаунт вважається неактивним: повертає 403.
 // Якщо поштовий сервіс не налаштовано, всі акаунти авто-верифіковані — пропускає.
+//
+// Fail-closed on everything else. The previous version called next.ServeHTTP
+// when GetUserByID returned *any* error, including a database outage, so a
+// caller who could make the lookup fail reached the sync endpoints with an
+// unverified account. Only the documented "email service not configured" case
+// may pass.
 func (h *AuthHandler) RequireVerifiedEmail() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1574,12 +1651,16 @@ func (h *AuthHandler) RequireVerifiedEmail() func(http.Handler) http.Handler {
 			}
 			userID, ok := middleware.GetUserIDFromContext(r.Context())
 			if !ok {
-				next.ServeHTTP(w, r)
+				// Reaching a value-gated endpoint with no user must not pass.
+				jsonError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 			user, err := h.userRepo.GetUserByID(r.Context(), userID)
 			if err != nil {
-				next.ServeHTTP(w, r)
+				// We cannot tell whether this account is verified, so we must
+				// not let it through. 503 says "retry", not "forbidden".
+				log.Printf("[Auth] verification lookup failed for %s: %v", userID, err)
+				jsonError(w, "unable to verify account state", http.StatusServiceUnavailable)
 				return
 			}
 			if !user.IsVerified {
@@ -1593,25 +1674,15 @@ func (h *AuthHandler) RequireVerifiedEmail() func(http.Handler) http.Handler {
 
 // ---- helpers ----------------------------------------------------------------
 
-func (h *AuthHandler) respondWithTokens(w http.ResponseWriter, r *http.Request, user *domain.User) {
-	accessToken, err := auth.GenerateAccessToken(user.ID, user.Email, user.Role, h.jwtSecret, 15*time.Minute)
-	if err != nil {
-		jsonError(w, "failed to generate access token", http.StatusInternalServerError)
-		return
-	}
+// respondWithTokens lives in auth_session.go, next to the other session
+// operations.
 
-	refreshToken := auth.GenerateRefreshToken()
-	if err := h.redisClient.StoreRefreshToken(r.Context(), refreshToken, user.ID, 30*24*time.Hour); err != nil {
-		jsonError(w, "failed to store session", http.StatusInternalServerError)
-		return
-	}
+// normalizeEmail lowercases and trims an address for use as a limiter key.
+func normalizeEmail(emailAddr string) string {
+	return strings.ToLower(strings.TrimSpace(emailAddr))
+}
 
-	resp := AuthResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		User:         user,
-	}
-
+func writeAuthEnvelope(w http.ResponseWriter, resp AuthResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
@@ -1631,266 +1702,53 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// VerifyEmailWeb — GET /verify-email?token=...
+// VerifyEmailWeb - GET /verify-email?token=...
 func (h *AuthHandler) VerifyEmailWeb(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if token == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Токен відсутній", "Посилання не містить токена підтвердження.")))
+		writeHTMLStatus(w, http.StatusBadRequest,
+			renderEmailStatusHTML(false, "Токен відсутній", "Посилання не містить токена підтвердження."))
 		return
 	}
 
 	userID, err := h.userRepo.GetUserByVerificationToken(r.Context(), token)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Посилання недійсне або застаріло", "Термін дії посилання закінчився (24 години) або воно вже було використане.")))
+		writeHTMLStatus(w, http.StatusBadRequest,
+			renderEmailStatusHTML(false, "Посилання недійсне або застаріло", "Термін дії посилання закінчився (24 години) або воно вже було використане."))
 		return
 	}
 
 	if err := h.userRepo.MarkEmailVerified(r.Context(), userID); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Помилка сервера", "Не вдалося зберегти підтвердження email. Спробуйте пізніше.")))
+		writeHTMLStatus(w, http.StatusInternalServerError,
+			renderEmailStatusHTML(false, "Помилка сервера", "Не вдалося зберегти підтвердження email. Спробуйте пізніше."))
 		return
 	}
 
 	log.Printf("[Email] Web verification successful for user %s", userID)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderEmailStatusHTML(true, "Пошту успішно підтверджено!", "Ваш акаунт активовано. Тепер ви можете увійти у застосунок Oxide Film.")))
+	writeHTMLStatus(w, http.StatusOK,
+		renderEmailStatusHTML(true, "Пошту успішно підтверджено!", "Ваш акаунт активовано. Тепер ви можете увійти у застосунок Oxide Film."))
 }
 
-// ResetPasswordWeb — GET /reset-password?token=...
+// ResetPasswordWeb - GET /reset-password?token=...
+//
+// The form is rendered from html/template (html_render.go): the reset token is
+// request data and the previous fmt.Sprintf with %q interpolated it straight
+// into a <script> body, where a token containing </script> breaks out.
 func (h *AuthHandler) ResetPasswordWeb(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if token == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Токен відсутній", "Посилання не містить токена скидання пароля.")))
+		writeHTMLStatus(w, http.StatusBadRequest,
+			renderEmailStatusHTML(false, "Токен відсутній", "Посилання не містить токена скидання пароля."))
 		return
 	}
 
-	_, err := h.userRepo.GetUserByPasswordResetToken(r.Context(), token)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(renderEmailStatusHTML(false, "Посилання недійсне або застаріло", "Термін дії посилання для скидання пароля минув (1 година) або воно вже використане.")))
+	if _, err := h.userRepo.GetUserByPasswordResetToken(r.Context(), token); err != nil {
+		writeHTMLStatus(w, http.StatusBadRequest,
+			renderEmailStatusHTML(false, "Посилання недійсне або застаріло", "Термін дії посилання для скидання пароля минув (1 година) або воно вже використане."))
 		return
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Скидання пароля — Oxide Film</title>
-  <style>
-    body {
-      margin: 0; padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a; color: #f8fafc;
-      display: flex; align-items: center; justify-content: center; min-height: 100vh;
-    }
-    .card {
-      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
-      padding: 36px; max-width: 400px; width: 90%%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-    }
-    .logo { color: #6366f1; font-weight: 700; text-transform: uppercase; font-size: 14px; margin-bottom: 8px; }
-    h1 { font-size: 20px; margin: 0 0 16px; color: #fff; }
-    p { color: #94a3b8; font-size: 14px; margin: 0 0 20px; line-height: 1.5; }
-    input {
-      width: 100%%; padding: 12px; border-radius: 8px; border: 1px solid #475569;
-      background: #0f172a; color: #fff; font-size: 15px; margin-bottom: 16px; box-sizing: border-box;
-    }
-    input:focus { outline: none; border-color: #6366f1; }
-    button {
-      width: 100%%; padding: 12px; background: #6366f1; color: #fff; border: none;
-      border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer;
-    }
-    button:hover { background: #4f46e5; }
-    .msg { margin-top: 16px; font-size: 14px; display: none; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">Oxide Film</div>
-    <h1>Новий пароль</h1>
-    <p>Введіть новий пароль для вашого акаунту (мінімум 6 символів):</p>
-    <input type="password" id="pwd" placeholder="Новий пароль" minlength="6" required />
-    <button onclick="submitReset()">Зберегти пароль</button>
-    <div id="res" class="msg"></div>
-  </div>
-  <script>
-    async function submitReset() {
-      const p = document.getElementById('pwd').value;
-      const res = document.getElementById('res');
-      if (!p || p.length < 6) {
-        res.style.display = 'block'; res.style.color = '#ef4444';
-        res.innerText = 'Пароль має містити щонайменше 6 символів';
-        return;
-      }
-      try {
-        const resp = await fetch('/api/v1/auth/reset-password', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({token: %q, password: p})
-        });
-        const data = await resp.json();
-        res.style.display = 'block';
-        if (resp.ok) {
-          res.style.color = '#10b981';
-          res.innerText = 'Пароль успішно змінено! Тепер ви можете увійти в застосунок.';
-          document.getElementById('pwd').style.display = 'none';
-          document.querySelector('button').style.display = 'none';
-        } else {
-          res.style.color = '#ef4444';
-          res.innerText = data.error || 'Помилка при збереженні пароля';
-        }
-      } catch (e) {
-        res.style.display = 'block'; res.style.color = '#ef4444';
-        res.innerText = 'Мережева помилка';
-      }
-    }
-  </script>
-</body>
-</html>`, token)
-
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(html))
-}
-
-func renderEmailStatusHTML(success bool, title, message string) string {
-	icon := "✅"
-	accentColor := "#6366f1"
-	if !success {
-		icon = "❌"
-		accentColor = "#ef4444"
-	}
-
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>%s — Oxide Film</title>
-  <style>
-    body {
-      margin: 0; padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a; color: #f8fafc;
-      display: flex; align-items: center; justify-content: center; min-height: 100vh;
-    }
-    .card {
-      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
-      padding: 40px; max-width: 440px; margin: 20px; text-align: center;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-    }
-    .icon { font-size: 54px; margin-bottom: 20px; }
-    h1 { font-size: 22px; margin: 0 0 12px; color: #fff; }
-    p { color: #94a3b8; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
-    .logo { font-size: 14px; color: %s; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">Oxide Film</div>
-    <div class="icon">%s</div>
-    <h1>%s</h1>
-    <p>%s</p>
-  </div>
-</body>
-</html>`, title, accentColor, icon, title, message)
-}
-
-func renderOAuthStatusHTML(success bool, title, message, provider, accessToken, refreshToken string) string {
-	icon := "✅"
-	accentColor := "#10b981"
-	if !success {
-		icon = "❌"
-		accentColor = "#ef4444"
-	} else if provider == "discord" {
-		accentColor = "#5865F2"
-	} else if provider == "telegram" {
-		accentColor = "#229ED9"
-	} else if provider == "google" {
-		accentColor = "#EA4335"
-	}
-
-	deepLink := fmt.Sprintf("oxide://auth/%s?access_token=%s&refresh_token=%s", provider, accessToken, refreshToken)
-	if provider == "" {
-		deepLink = fmt.Sprintf("oxide://auth?access_token=%s&refresh_token=%s", accessToken, refreshToken)
-	}
-
-	actionBtn := ""
-	autoScript := ""
-	if success {
-		actionBtn = fmt.Sprintf(`<a href="%s" class="btn" style="background: %s;">Відкрити Oxide Film</a>`, deepLink, accentColor)
-		autoScript = fmt.Sprintf(`
-  <script>
-    try {
-      window.location.href = %q;
-    } catch(e) {}
-  </script>`, deepLink)
-	}
-
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>%s — Oxide Film</title>
-  <style>
-    body {
-      margin: 0; padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a; color: #f8fafc;
-      display: flex; align-items: center; justify-content: center; min-height: 100vh;
-    }
-    .card {
-      background: #1e293b; border: 1px solid #334155; border-radius: 16px;
-      padding: 40px; max-width: 440px; margin: 20px; text-align: center;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-    }
-    .icon { font-size: 54px; margin-bottom: 20px; }
-    h1 { font-size: 22px; margin: 0 0 12px; color: #fff; }
-    p { color: #94a3b8; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
-    .logo { font-size: 14px; color: %s; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
-    .btn {
-      display: inline-block; padding: 12px 24px; color: #fff; text-decoration: none;
-      border-radius: 8px; font-weight: bold; font-size: 15px; transition: opacity 0.2s;
-    }
-    .btn:hover { opacity: 0.9; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">Oxide Film</div>
-    <div class="icon">%s</div>
-    <h1>%s</h1>
-    <p>%s</p>
-    %s
-  </div>
-  %s
-</body>
-</html>`, title, accentColor, icon, title, message, actionBtn, autoScript)
-}
-
-func isSafeRedirectURL(rawURL string) bool {
-	if rawURL == "" {
-		return false
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	if u.Scheme == "oxide" {
-		return true
-	}
-	if u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" {
-		return true
-	}
-	if u.Hostname() == "film.oxideteam.pp.ua" || u.Hostname() == "oxideteam.pp.ua" || strings.HasSuffix(u.Hostname(), ".oxideteam.pp.ua") {
-		return true
-	}
-	return false
+	writeHTMLStatus(w, http.StatusOK, renderResetPasswordForm(token))
 }

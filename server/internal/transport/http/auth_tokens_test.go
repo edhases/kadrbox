@@ -185,7 +185,8 @@ func TestRemoveFavorite(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
 		}
-		if !strings.Contains(rr.Body.String(), `"success":true`) {
+		// The single-object envelope replaced {"success":true}.
+		if !strings.Contains(rr.Body.String(), `{"data":{"removed":true}}`) {
 			t.Errorf("unexpected body: %s", rr.Body.String())
 		}
 		if s.favs.removed != 1 {

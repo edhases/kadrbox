@@ -26,31 +26,32 @@ func TestCovJwtAlgNoneRejected(t *testing.T) {
 	}
 }
 
-// TestCovJwtHS512Accepted — ХАРАКТЕРИЗАЦІЯ: ValidateAccessToken перевіряє лише
-// *jwt.SigningMethodHMAC (jwt.go:42), тому токен, підписаний HS512, приймається.
-// Якщо політику посилять до строго HS256 — цей тест має впасти і це бажано.
-func TestCovJwtHS512Accepted(t *testing.T) {
+// TestCovJwtHS512Rejected — the algorithm is pinned to HS256. Accepting "any
+// HMAC" would let a caller choose HS512 and, more importantly, means the
+// verified algorithm is not a property this service controls. The token below
+// carries valid issuer/audience/expiry, so only the alg can be what rejects it.
+func TestCovJwtHS512Rejected(t *testing.T) {
 	uid := uuid.New()
+	now := time.Now()
 	claims := auth.Claims{
 		UserID: uid,
 		Email:  "hs512@oxide.film",
 		Role:   "user",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    auth.Issuer,
 			Subject:   uid.String(),
+			Audience:  jwt.ClaimStrings{auth.Audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
 		},
 	}
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS512, claims).SignedString([]byte(covJwtSecret))
 	if err != nil {
 		t.Fatalf("failed to sign HS512 token: %v", err)
 	}
-	got, err := auth.ValidateAccessToken(signed, covJwtSecret)
-	if err != nil {
-		t.Fatalf("HS512 token rejected: %v", err)
-	}
-	if got.UserID != uid {
-		t.Errorf("expected userID %s, got %s", uid, got.UserID)
+	if _, err := auth.ValidateAccessToken(signed, covJwtSecret); err == nil {
+		t.Fatal("expected HS512 token to be rejected")
 	}
 }
 

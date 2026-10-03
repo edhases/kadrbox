@@ -41,6 +41,12 @@ type UserStore interface {
 	CreatePasswordResetToken(ctx context.Context, userID uuid.UUID, token string) error
 	GetUserByPasswordResetToken(ctx context.Context, token string) (uuid.UUID, error)
 	MarkPasswordResetUsed(ctx context.Context, userID uuid.UUID) error
+	// ConsumePasswordResetTokenAndUpdatePassword burns the reset token and writes
+	// the new hash in one transaction, returning the affected user id. ResetPassword
+	// must prefer this over the GetUserByPasswordResetToken + MarkPasswordResetUsed
+	// + UpdatePassword sequence, which left a live reset token next to a freshly
+	// written password whenever an error was dropped.
+	ConsumePasswordResetTokenAndUpdatePassword(ctx context.Context, token, newPasswordHash string) (uuid.UUID, error)
 
 	LinkTelegram(ctx context.Context, userID uuid.UUID, telegramID int64) error
 	LinkDiscord(ctx context.Context, userID uuid.UUID, discordID string) error
@@ -52,24 +58,49 @@ type UserStore interface {
 // separate from UserStore: refresh-token revocation is the one piece of auth
 // state that is allowed to be ephemeral, and mixing the two would let a test
 // fake accidentally make revocation durable.
+//
+// ConsumeRefreshToken must read and delete the token in a single step and
+// return (userID, reused=true, nil) when the token is absent but was previously
+// consumed: a replay means an attacker holds a copy, so the caller responds by
+// revoking every session of that user.
+//
+// RevokeAllForUser is what makes a password change, a password reset and an
+// account deletion actually end the old sessions instead of leaving them usable
+// for the full 30-day refresh TTL.
 type RefreshStore interface {
 	StoreRefreshToken(ctx context.Context, token string, userID uuid.UUID, ttl time.Duration) error
 	GetUserIDByRefreshToken(ctx context.Context, token string) (uuid.UUID, error)
 	RevokeRefreshToken(ctx context.Context, token string) error
+	ConsumeRefreshToken(ctx context.Context, token string) (uuid.UUID, bool, error)
+	RevokeAllForUser(ctx context.Context, userID uuid.UUID) (int, error)
 }
+
+// OAuthStateStore persists OAuth `state` records. Set has a short TTL;
+// Consume must be atomic so a callback can be redeemed only once.
+//
+// It is a separate interface because the state record is not a session: it
+// lives for minutes, is single-use, and is written on an unauthenticated
+// request. Keeping it separate stops a session-oriented fake from being used as
+// if it also stored login attempts.
+type OAuthStateStore interface {
+	SetOAuthState(ctx context.Context, state string, payload []byte, ttl time.Duration) error
+	ConsumeOAuthState(ctx context.Context, state string) ([]byte, error)
+}
+
+// The concrete Redis client satisfies both; that is asserted in
+// stores_conformance_test.go rather than here, so this package depends only on
+// its own abstractions and never imports a concrete repository.
 
 // EventPublisher is the single Redis call made by the watch-party hub.
 type EventPublisher interface {
 	PublishWatchPartyEvent(ctx context.Context, roomCode string, event *domain.WatchPartyEvent) error
 }
 
-// FavoritesStore covers every `favoritesRepo` call made by SyncHandler.
-type FavoritesStore interface {
-	AddFavorite(ctx context.Context, f *domain.Favorite) error
-	GetUserFavorites(ctx context.Context, userID uuid.UUID) ([]domain.Favorite, error)
-	IsFavorite(ctx context.Context, userID uuid.UUID, mediaID, providerID string) (bool, error)
-	RemoveFavorite(ctx context.Context, userID uuid.UUID, mediaID, providerID string) error
-}
+// FavoritesStore is retired: SyncHandler now depends on the narrower
+// FavoritesMutator, plus the optional capabilities PaginatedFavorites
+// (SQL LIMIT/OFFSET + COUNT) and AtomicFavoritesStore (single-statement
+// toggle). Keeping a second, unpaginated duplicate here only forced the
+// postgres repository to satisfy a contract the handler no longer uses.
 
 // HistoryStore covers every `historyRepo` call made by SyncHandler.
 type HistoryStore interface {
@@ -87,4 +118,3 @@ type ContentCache interface {
 // The concrete repositories satisfy every interface above. That is asserted in
 // stores_conformance_test.go rather than here, so this package depends only on
 // its own abstractions and never imports a concrete repository.
-
