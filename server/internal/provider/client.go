@@ -3,9 +3,13 @@ package provider
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"strings"
+	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
@@ -21,6 +25,33 @@ import (
 // відпечатком і заголовком.
 const Chrome120UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+// MaxUpstreamBodyBytes — стеля розміру тіла відповіді провайдера.
+//
+// Таймаут у 15с обмежує тривалість, але НІ байти: ворожій або скомпрометований
+// CDN може за секунду віддати сотні мегабайт, і в контейнері з 256 MiB RAM це
+// мгновений OOM. 8 MiB — із великим запасом понад реальні HTML-сторінки
+// uakino/lavakino/eneyida (зазвичай 100–800 KiB) та m3u8-плейлисти.
+//
+// Прецедент: bandera_client.go робить те саме для сниппетів помилок —
+// io.ReadAll(io.LimitReader(resp.Body, 512)) (bandera_client.go:108).
+const MaxUpstreamBodyBytes = 8 << 20
+
+// maxRedirects — скільки редиректів ми готові пройти. Стандарт net/http — 10;
+// 5 вистачає для нормальних CDN-ланцюжків (http→https, www→bare) і обмежує
+// ланцюги, зловмисно нарощені в бік внутрішніх адрес.
+const maxRedirects = 5
+
+// resolveRedirectTimeout — резолв хоста редиректа. Відбувається рідко (лише на
+// ланцюжку 3xx), тому окремий таймаут; спільний ліміт запиту вже контролює
+// tls_client.WithTimeoutSeconds(15).
+const resolveRedirectTimeout = 2 * time.Second
+
+// ErrUnsafeUpstreamTarget — редирект (або початкова ціль) веде на
+// внутрішню/приватну адресу. Раніше редиректи йшли за замовчуванням (10
+// переходів), тому "https://attacker/r" → 302 → "http://169.254.169.254/
+// latest/meta-data/" повертав тіло метаданих клієнту: це SSRF на читання.
+var ErrUnsafeUpstreamTarget = errors.New("refusing to follow redirect to unsafe upstream target")
+
 type TLSClient struct {
 	client tls_client.HttpClient
 }
@@ -32,6 +63,12 @@ func NewTLSClient() (*TLSClient, error) {
 		tls_client.WithTimeoutSeconds(15),
 		tls_client.WithClientProfile(profiles.Chrome_120),
 		tls_client.WithCookieJar(jar),
+		// Кожен хоп редиректа проходить через validateUpstreamURL. Обрано саме
+		// re-validation, а не повну забору редиректів (http.ErrUseLastResponse):
+		// uakino/lavakino/eneyida реально редиректять (http→https, www→bare,
+		// канонічні шляхи), і повна забора зламала б скрапінг. Перевірка
+		// кожного хопу прибирає SSRF, зберігаючи функціональність.
+		tls_client.WithCustomRedirectFunc(validateRedirectHop),
 	}
 
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
@@ -40,6 +77,106 @@ func NewTLSClient() (*TLSClient, error) {
 	}
 
 	return &TLSClient{client: client}, nil
+}
+
+// validateRedirectHop перевіряє кожен наступний хоп редиректа.
+//
+// Саме тут потрібен повторний виклик валідатора: початковий URL прийшов із
+// transport/http (ValidateSafeURL), але Location у 302 віддає атакуючий, і без
+// перевірки хопа SSRF лишається читабельним.
+func validateRedirectHop(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	if req == nil || req.URL == nil {
+		return fmt.Errorf("redirect without target url")
+	}
+	if err := validateUpstreamURL(req.URL); err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrUnsafeUpstreamTarget, req.URL.Redacted(), err)
+	}
+	return nil
+}
+
+// validateUpstreamURL дзеркалить SSRF-політику transport/http ValidateSafeURL
+// для редиректів. Дублювання свідоме: internal/provider не може імпортувати
+// internal/transport/http — той імпортує provider (content_handler.go), тож
+// виник би цикл. Коли з'явиться спільний пакет (напр. internal/netguard),
+// обидві копії мають бути злиті.
+func validateUpstreamURL(u *url.URL) error {
+	if u == nil {
+		return errors.New("nil url")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("unsafe scheme %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return errors.New("missing host")
+	}
+
+	lower := strings.ToLower(host)
+	if lower == "localhost" ||
+		lower == "metadata.google.internal" ||
+		lower == "instance-data" ||
+		strings.HasSuffix(lower, ".localhost") ||
+		strings.HasSuffix(lower, ".internal") ||
+		strings.HasSuffix(lower, ".local") {
+		return errors.New("blocked internal hostname")
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if upstreamBlockedIP(ip) {
+			return fmt.Errorf("blocked address %s", ip)
+		}
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), resolveRedirectTimeout)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		// Fail-closed: нерезолвлений хост не може бути «підозрілим, але
+		// пропущеним» — інакше DNS rebinding повертає SSRF.
+		return fmt.Errorf("resolve %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("%s resolved to no addresses", host)
+	}
+	for _, addr := range addrs {
+		if upstreamBlockedIP(addr.IP) {
+			return fmt.Errorf("%s resolves to blocked address %s", host, addr.IP)
+		}
+	}
+	return nil
+}
+
+func upstreamBlockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 169 && ip4[1] == 254 {
+			return true
+		}
+		if ip4[0] == 0 {
+			return true
+		}
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return true
+		}
+		if ip4[0] == 255 && ip4[1] == 255 && ip4[2] == 255 && ip4[3] == 255 {
+			return true // limited broadcast 255.255.255.255
+		}
+	}
+	return false
 }
 
 // Get виконує GET-запит з підміною реферера та заголовків
@@ -62,9 +199,9 @@ func (c *TLSClient) Get(ctx context.Context, targetURL, referer string) (string,
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readLimitedBody(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read response body: %w", err)
+		return "", err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -76,6 +213,19 @@ func (c *TLSClient) Get(ctx context.Context, targetURL, referer string) (string,
 	}
 
 	return decodeBody(resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// readLimitedBody читає тіло відповіді з жорсткою стелею. Читаємо на 1 байт
+// більше ліміту, щоб відрізнити «рівно ліміт» від «перевищено».
+func readLimitedBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, MaxUpstreamBodyBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if len(body) > MaxUpstreamBodyBytes {
+		return nil, fmt.Errorf("upstream response exceeds %d byte limit", MaxUpstreamBodyBytes)
+	}
+	return body, nil
 }
 
 // decodeBody транскодує тіло відповіді у UTF-8.
@@ -119,12 +269,17 @@ func decodeBody(contentType string, body []byte) (string, error) {
 	}
 	r, err := charset.NewReaderLabel(label, bytes.NewReader(body))
 	if err != nil {
-		// Невідома метка не повинна ламати запит: повертаємо байти як є.
+		// Невідома мітка не повинна ламати запит: повертаємо байти як є.
 		return string(body), nil
 	}
-	decoded, err := io.ReadAll(r)
+	// Другий прохід з тією самою стелею: конвертація може розширити тіло
+	// (напр. UTF-16 → UTF-8 дає до 2x), тож ліміт треба застосувати і тут.
+	decoded, err := io.ReadAll(io.LimitReader(r, MaxUpstreamBodyBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("transcode response body from %s: %w", label, err)
+	}
+	if len(decoded) > MaxUpstreamBodyBytes {
+		return "", fmt.Errorf("transcoded response body from %s exceeds %d byte limit", label, MaxUpstreamBodyBytes)
 	}
 	return string(decoded), nil
 }
@@ -148,9 +303,9 @@ func (c *TLSClient) PostForm(ctx context.Context, targetURL, formData, referer s
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readLimitedBody(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read response body: %w", err)
+		return "", err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
