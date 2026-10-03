@@ -58,7 +58,14 @@ void main() {
     server.listen((io.HttpRequest req) async {
       if (req.uri.path == '/poster.jpg') {
         req.response.headers.contentType = io.ContentType('image', 'jpeg');
-        req.response.add([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]); // JPEG magic bytes
+        req.response.add([
+          0xFF,
+          0xD8,
+          0xFF,
+          0xE0,
+          0x00,
+          0x10,
+        ]); // JPEG magic bytes
         await req.response.close();
       } else if (req.uri.path == '/video.mp4') {
         req.response.headers.contentType = io.ContentType('video', 'mp4');
@@ -72,10 +79,12 @@ void main() {
       }
     });
 
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 5),
-    ));
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 5),
+        receiveTimeout: const Duration(seconds: 5),
+      ),
+    );
     apiClient = ApiClient(dio: dio);
 
     downloadService = DownloadService(db, apiClient, settingsService);
@@ -93,14 +102,17 @@ void main() {
   });
 
   group('DownloadService State & Validation', () {
-    test('initial state is empty and canDownload is true on desktop/mobile', () {
-      expect(downloadService.downloads, isEmpty);
-      expect(downloadService.completed, isEmpty);
-      expect(downloadService.active, isEmpty);
-      expect(downloadService.canDownload, isTrue);
-      expect(downloadService.isLoading, isFalse);
-      expect(downloadService.lastError, isNull);
-    });
+    test(
+      'initial state is empty and canDownload is true on desktop/mobile',
+      () {
+        expect(downloadService.downloads, isEmpty);
+        expect(downloadService.completed, isEmpty);
+        expect(downloadService.active, isEmpty);
+        expect(downloadService.canDownload, isTrue);
+        expect(downloadService.isLoading, isFalse);
+        expect(downloadService.lastError, isNull);
+      },
+    );
 
     test('downloadContent rejects HLS streams with Ukrainian error', () async {
       final item = MediaItem(
@@ -115,7 +127,10 @@ void main() {
         type: StreamType.hls,
       );
 
-      final success = await downloadService.downloadContent(item: item, source: source);
+      final success = await downloadService.downloadContent(
+        item: item,
+        source: source,
+      );
       expect(success, isFalse);
       expect(downloadService.lastError, contains('m3u8'));
       expect(downloadService.downloads, isEmpty);
@@ -133,7 +148,10 @@ void main() {
         quality: StreamQuality.q720p,
       );
 
-      final success = await downloadService.downloadContent(item: item, source: source);
+      final success = await downloadService.downloadContent(
+        item: item,
+        source: source,
+      );
       expect(success, isFalse);
       expect(downloadService.lastError, contains('Некоректне посилання'));
     });
@@ -146,76 +164,103 @@ void main() {
   });
 
   group('DownloadService Full Download Lifecycle', () {
-    test('downloads content, saves file, caches poster and marks completed', () async {
-      final item = MediaItem(
-        id: 'movie_42',
-        providerId: 'uakino',
-        title: 'Тестовий Фільм',
-        posterUrl: 'http://127.0.0.1:${server.port}/poster.jpg',
-        year: 2024,
-        type: ContentType.movie,
-      );
-      final source = StreamSource(
-        url: 'http://127.0.0.1:${server.port}/video.mp4',
-        quality: StreamQuality.q1080p,
-        voiceover: 'Оригінал',
-      );
+    test(
+      'downloads content, saves file, caches poster and marks completed',
+      () async {
+        final item = MediaItem(
+          id: 'movie_42',
+          providerId: 'uakino',
+          title: 'Тестовий Фільм',
+          posterUrl: 'http://127.0.0.1:${server.port}/poster.jpg',
+          year: 2024,
+          type: ContentType.movie,
+        );
+        final source = StreamSource(
+          url: 'http://127.0.0.1:${server.port}/video.mp4',
+          quality: StreamQuality.q1080p,
+          voiceover: 'Оригінал',
+        );
 
-      final started = await downloadService.downloadContent(
-        item: item,
-        source: source,
-        duration: 3600,
-      );
-      expect(started, isTrue);
+        final started = await downloadService.downloadContent(
+          item: item,
+          source: source,
+          duration: 3600,
+        );
+        expect(started, isTrue);
 
-      // Wait for download stream and DB updates to finish
-      await Future.delayed(const Duration(milliseconds: 300));
+        // Wait for download stream and DB updates to finish
+        await Future.delayed(const Duration(milliseconds: 300));
 
-      final downloads = downloadService.downloads;
-      expect(downloads.length, 1);
-      final download = downloads.first;
-      expect(download.title, 'Тестовий Фільм');
-      expect(download.status, DownloadStatus.completed);
-      expect(download.progress, 1.0);
-      expect(download.quality, StreamQuality.q1080p.displayName);
-      expect(download.voiceover, 'Оригінал');
+        final downloads = downloadService.downloads;
+        expect(downloads.length, 1);
+        final download = downloads.first;
+        expect(download.title, 'Тестовий Фільм');
+        expect(download.status, DownloadStatus.completed);
+        expect(download.progress, 1.0);
+        expect(download.quality, StreamQuality.q1080p.displayName);
+        expect(download.voiceover, 'Оригінал');
 
-      // Verify file exists on disk
-      final videoFile = io.File(download.localPath);
-      expect(videoFile.existsSync(), isTrue);
-      expect(videoFile.readAsStringSync(), 'DUMMY_MP4_VIDEO_STREAMING_CONTENT_BYTES');
+        // Verify file exists on disk
+        final videoFile = io.File(download.localPath);
+        expect(videoFile.existsSync(), isTrue);
+        expect(
+          videoFile.readAsStringSync(),
+          'DUMMY_MP4_VIDEO_STREAMING_CONTENT_BYTES',
+        );
 
-      // Verify query getters
-      expect(downloadService.isAvailableOffline('movie_42', 'uakino'), isTrue);
-      expect(downloadService.getLocalPath('movie_42', 'uakino'), download.localPath);
-      expect(downloadService.getStatus('movie_42', 'uakino'), DownloadStatus.completed);
-      expect(downloadService.completed.length, 1);
+        // Verify query getters
+        expect(
+          downloadService.isAvailableOffline('movie_42', 'uakino'),
+          isTrue,
+        );
+        expect(
+          downloadService.getLocalPath('movie_42', 'uakino'),
+          download.localPath,
+        );
+        expect(
+          downloadService.getStatus('movie_42', 'uakino'),
+          DownloadStatus.completed,
+        );
+        expect(downloadService.completed.length, 1);
 
-      final totalSize = await downloadService.getTotalSize();
-      expect(totalSize, greaterThan(0));
-    });
+        final totalSize = await downloadService.getTotalSize();
+        expect(totalSize, greaterThan(0));
+      },
+    );
 
-    test('prevents duplicate downloads for already downloading or completed media', () async {
-      final item = MediaItem(
-        id: 'movie_dup',
-        providerId: 'uakino',
-        title: 'Dup Movie',
-        type: ContentType.movie,
-      );
-      final source = StreamSource(
-        url: 'http://127.0.0.1:${server.port}/video.mp4',
-        quality: StreamQuality.q720p,
-      );
+    test(
+      'prevents duplicate downloads for already downloading or completed media',
+      () async {
+        final item = MediaItem(
+          id: 'movie_dup',
+          providerId: 'uakino',
+          title: 'Dup Movie',
+          type: ContentType.movie,
+        );
+        final source = StreamSource(
+          url: 'http://127.0.0.1:${server.port}/video.mp4',
+          quality: StreamQuality.q720p,
+        );
 
-      final first = await downloadService.downloadContent(item: item, source: source);
-      expect(first, isTrue);
-      await Future.delayed(const Duration(milliseconds: 200));
+        final first = await downloadService.downloadContent(
+          item: item,
+          source: source,
+        );
+        expect(first, isTrue);
+        await Future.delayed(const Duration(milliseconds: 200));
 
-      // Attempt downloading same media again
-      final second = await downloadService.downloadContent(item: item, source: source);
-      expect(second, isFalse);
-      expect(downloadService.lastError, contains('Вже завантажується або завантажено'));
-    });
+        // Attempt downloading same media again
+        final second = await downloadService.downloadContent(
+          item: item,
+          source: source,
+        );
+        expect(second, isFalse);
+        expect(
+          downloadService.lastError,
+          contains('Вже завантажується або завантажено'),
+        );
+      },
+    );
 
     test('deleteDownload removes file from disk and record from DB', () async {
       final item = MediaItem(

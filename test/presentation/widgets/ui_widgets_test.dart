@@ -20,14 +20,16 @@ void main() {
       mockSettings = MockSettingsService();
       const uiSettings = UISettings(showRatings: true, showYears: true);
       when(() => mockSettings.uiSettings).thenReturn(uiSettings);
-      when(() => mockSettings.state).thenReturn(
-        const SettingsState(uiSettings: uiSettings),
-      );
+      when(
+        () => mockSettings.state,
+      ).thenReturn(const SettingsState(uiSettings: uiSettings));
 
       GetIt.I.registerSingleton<SettingsService>(mockSettings);
 
       final mockDownloadService = MockDownloadService();
-      when(() => mockDownloadService.getLocalPosterPath(any(), any())).thenReturn(null);
+      when(
+        () => mockDownloadService.getLocalPosterPath(any(), any()),
+      ).thenReturn(null);
       GetIt.I.registerSingleton<DownloadService>(mockDownloadService);
     });
 

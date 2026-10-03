@@ -104,8 +104,7 @@ class SmartSearchService {
       );
 
       final key = _cacheKeyFor(query);
-      _memoryCache[key] = envelope;
-      _cacheTimestamps[key] = DateTime.now();
+      _putCache(key, envelope);
       await _saveToHistory(
         query,
         envelope.canonical.isEmpty ? query : envelope.canonical,
@@ -259,6 +258,35 @@ class SmartSearchService {
     _cacheTimestamps.clear();
     Logger.d('Memory cache cleared', tag: _tag);
   }
+
+  /// Store an entry, enforcing both the TTL and a hard cardinality bound.
+  ///
+  /// Without this the cache only ever grew for the life of the process: every
+  /// distinct query added an entry that nothing removed, and each entry holds a
+  /// whole [SearchEnvelope]. [_cacheTtl] was declared to expire entries but was
+  /// never consulted, so the intent was documented without being implemented.
+  void _putCache(String key, SearchEnvelope envelope) {
+    final now = DateTime.now();
+
+    _cacheTimestamps.removeWhere(
+      (_, storedAt) => now.difference(storedAt) > _cacheTtl,
+    );
+    _memoryCache.removeWhere((key, _) => !_cacheTimestamps.containsKey(key));
+
+    // Evict oldest-first once the cache exceeds the bound.
+    while (_memoryCache.length >= maxCacheEntries) {
+      final oldest = _cacheTimestamps.keys.first;
+      _memoryCache.remove(oldest);
+      _cacheTimestamps.remove(oldest);
+    }
+
+    _memoryCache[key] = envelope;
+    _cacheTimestamps[key] = now;
+  }
+
+  /// Hard cap on distinct cached queries. A 500-item envelope is a few hundred
+  /// KB, so an unbounded map is tens of MB of unreachable data per session.
+  static const int maxCacheEntries = 100;
 
   // =========================================================================
   // Private methods

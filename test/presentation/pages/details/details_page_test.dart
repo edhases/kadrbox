@@ -31,7 +31,10 @@ class _TestContentProvider extends ContentProvider {
   @override
   String? get iconUrl => null;
   @override
-  final List<ContentType> supportedTypes = [ContentType.movie, ContentType.series];
+  final List<ContentType> supportedTypes = [
+    ContentType.movie,
+    ContentType.series,
+  ];
 
   bool shouldThrow = false;
   MediaDetails? customDetails;
@@ -54,7 +57,8 @@ class _TestContentProvider extends ContentProvider {
             genres: ['Фантастика', 'Драма'],
           ),
           genres: const ['Фантастика', 'Драма'],
-          fullDescription: 'Команда дослідників вирушає крізь червоточину в космосі.',
+          fullDescription:
+              'Команда дослідників вирушає крізь червоточину в космосі.',
           countries: ['США', 'Велика Британія'],
           director: 'Крістофер Нолан',
           actors: ['Меттью МакКонахі', 'Енн Гетевей'],
@@ -63,7 +67,11 @@ class _TestContentProvider extends ContentProvider {
   }
 
   @override
-  Future<List<StreamSource>> getStreams(String id, {int? season, int? episode}) async {
+  Future<List<StreamSource>> getStreams(
+    String id, {
+    int? season,
+    int? episode,
+  }) async {
     if (shouldThrow) throw Exception('Помилка завантаження стрімів');
     return customStreams ??
         [
@@ -81,13 +89,22 @@ class _TestContentProvider extends ContentProvider {
   }
 
   @override
-  Future<List<MediaItem>> getByCategory(String category, {ContentType? type, int page = 1}) async => [];
+  Future<List<MediaItem>> getByCategory(
+    String category, {
+    ContentType? type,
+    int page = 1,
+  }) async => [];
   @override
   Future<List<MediaItem>> getNew({ContentType? type, int page = 1}) async => [];
   @override
-  Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async => [];
+  Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async =>
+      [];
   @override
-  Future<List<MediaItem>> search(String query, {ContentType? type, int page = 1}) async => [];
+  Future<List<MediaItem>> search(
+    String query, {
+    ContentType? type,
+    int page = 1,
+  }) async => [];
 }
 
 void main() {
@@ -150,10 +167,7 @@ void main() {
         GoRoute(
           path: '/',
           builder: (context, state) => Scaffold(
-            body: DetailsPage(
-              mediaId: mediaId,
-              providerId: providerId,
-            ),
+            body: DetailsPage(mediaId: mediaId, providerId: providerId),
           ),
         ),
         GoRoute(
@@ -173,30 +187,32 @@ void main() {
       ],
     );
 
-    return MaterialApp.router(
-      routerConfig: router,
-    );
+    return MaterialApp.router(routerConfig: router);
   }
 
-  testWidgets('DetailsPage displays movie details, metadata, genres, and cast', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1920, 1080);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'DetailsPage displays movie details, metadata, genres, and cast',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(buildTestWidget());
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
 
-    expect(find.text('Інтерстеллар'), findsOneWidget);
-    expect(find.textContaining('2014'), findsWidgets);
-    expect(find.text('Фантастика'), findsWidgets);
-    expect(find.text('Драма'), findsWidgets);
-    expect(find.textContaining('Крістофер Нолан'), findsWidgets);
-    expect(find.textContaining('Меттью МакКонахі'), findsWidgets);
-    expect(find.textContaining('Команда дослідників вирушає крізь червоточину'), findsOneWidget);
-  });
+      expect(find.text('Інтерстеллар'), findsOneWidget);
+      expect(find.textContaining('2014'), findsWidgets);
+      expect(find.text('Фантастика'), findsWidgets);
+      expect(find.text('Драма'), findsWidgets);
+      expect(find.textContaining('Крістофер Нолан'), findsWidgets);
+      expect(find.textContaining('Меттью МакКонахі'), findsWidgets);
+      expect(
+        find.textContaining('Команда дослідників вирушає крізь червоточину'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('DetailsPage adds item to favorites when button is tapped', (
     tester,
@@ -239,7 +255,9 @@ void main() {
       ),
     );
     // Allow stream to emit
-    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 100)));
+    await tester.runAsync(
+      () => Future.delayed(const Duration(milliseconds: 100)),
+    );
 
     await tester.pumpWidget(buildTestWidget(mediaId: 'fav_movie_2'));
     await tester.pumpAndSettle();
@@ -256,34 +274,37 @@ void main() {
     expect(find.byIcon(Icons.favorite_border), findsOneWidget);
   });
 
-  testWidgets('DetailsPage play button navigates to /player with extra streams metadata', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1920, 1080);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'DetailsPage play button navigates to /player with extra streams metadata',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    dynamic capturedExtra;
-    await tester.pumpWidget(buildTestWidget(
-      onNavigate: (route, extra) {
-        if (route == '/player') capturedExtra = extra;
-      },
-    ));
-    await tester.pumpAndSettle();
+      dynamic capturedExtra;
+      await tester.pumpWidget(
+        buildTestWidget(
+          onNavigate: (route, extra) {
+            if (route == '/player') capturedExtra = extra;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    // Find "Дивитися" button
-    final playBtn = find.text('Дивитися');
-    expect(playBtn, findsOneWidget);
-    await tester.tap(playBtn);
-    await tester.pumpAndSettle();
+      // Find "Дивитися" button
+      final playBtn = find.text('Дивитися');
+      expect(playBtn, findsOneWidget);
+      await tester.tap(playBtn);
+      await tester.pumpAndSettle();
 
-    expect(find.text('PlayerScreen'), findsOneWidget);
-    expect(capturedExtra, isNotNull);
-    expect(capturedExtra['title'], 'Інтерстеллар');
-    expect(capturedExtra['url'], 'https://example.com/stream_1080.mp4');
-    expect(capturedExtra['streams'], isA<List<StreamSource>>());
-  });
+      expect(find.text('PlayerScreen'), findsOneWidget);
+      expect(capturedExtra, isNotNull);
+      expect(capturedExtra['title'], 'Інтерстеллар');
+      expect(capturedExtra['url'], 'https://example.com/stream_1080.mp4');
+      expect(capturedExtra['streams'], isA<List<StreamSource>>());
+    },
+  );
 
   testWidgets('DetailsPage renders series with seasons and episode buttons', (
     tester,
@@ -324,28 +345,29 @@ void main() {
     expect(find.text('2'), findsWidgets);
   });
 
-  testWidgets('DetailsPage shows error UI and allows retry when provider fails', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1920, 1080);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'DetailsPage shows error UI and allows retry when provider fails',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    provider.shouldThrow = true;
+      provider.shouldThrow = true;
 
-    await tester.pumpWidget(buildTestWidget(mediaId: 'error_item'));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(buildTestWidget(mediaId: 'error_item'));
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('Помилка'), findsWidgets);
-    final retryBtn = find.text('Спробувати знову');
-    expect(retryBtn, findsOneWidget);
+      expect(find.textContaining('Помилка'), findsWidgets);
+      final retryBtn = find.text('Спробувати знову');
+      expect(retryBtn, findsOneWidget);
 
-    // Fix provider and tap retry
-    provider.shouldThrow = false;
-    await tester.tap(retryBtn);
-    await tester.pumpAndSettle();
+      // Fix provider and tap retry
+      provider.shouldThrow = false;
+      await tester.tap(retryBtn);
+      await tester.pumpAndSettle();
 
-    expect(find.text('Інтерстеллар'), findsOneWidget);
-  });
+      expect(find.text('Інтерстеллар'), findsOneWidget);
+    },
+  );
 }

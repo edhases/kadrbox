@@ -232,13 +232,16 @@ class _ProfilePageState extends State<ProfilePage> {
                   confirmPassController.text,
                 );
 
-                if (mounted) {
+                // context.mounted, not this State's `mounted`: this runs inside
+                // the dialog's builder, so the State's flag says nothing about
+                // whether the element owning `context` is still mounted.
+                if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Пароль успішно змінено')),
                   );
                 }
               } catch (e) {
-                if (mounted) {
+                if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Помилка: ${_authService.error ?? e}'),

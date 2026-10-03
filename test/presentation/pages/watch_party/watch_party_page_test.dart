@@ -136,18 +136,17 @@ void main() {
     mockService = MockWatchPartyService();
     GetIt.I.registerSingleton<WatchPartyService>(mockService);
 
-    // Reset window size to default (phone-like for consistency)
-    final TestWidgetsFlutterBinding binding =
-        TestWidgetsFlutterBinding.ensureInitialized();
-    binding.window.physicalSizeTestValue = const Size(1280, 720);
-    binding.window.devicePixelRatioTestValue = 1.0;
+    // Reset window size to default (phone-like for consistency).
+    // tester.view is the supported replacement for the deprecated
+    // binding.window / *TestValue accessors.
   });
 
   testWidgets('WatchPartyPage shows idle state initially', (
     WidgetTester tester,
   ) async {
     // Add cleanup for window size
-    addTearDown(tester.binding.window.clearPhysicalSizeTestValue);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(createWidget());
     await tester.pumpAndSettle();

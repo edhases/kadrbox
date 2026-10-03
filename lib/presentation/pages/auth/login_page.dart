@@ -556,16 +556,22 @@ class _LoginPageState extends State<LoginPage> {
             onPressed: () async {
               try {
                 await _authService.resetPassword(emailController.text.trim());
-                if (mounted) {
+                // context.mounted, not this State's `mounted`: the dialog builds
+                // its own BuildContext, so the State's flag says nothing about
+                // whether the element that owns `context` is still in the tree.
+                if (context.mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Посилання надіслано на вашу пошту'),
+                      content: Text(
+                        'Якщо акаунт існує, ми надіслали на нього лист для '
+                        'скидання пароля.',
+                      ),
                     ),
                   );
                 }
               } catch (e) {
-                if (mounted) {
+                if (context.mounted) {
                   final err = _authService.error ?? e.toString();
                   ScaffoldMessenger.of(
                     context,

@@ -160,7 +160,9 @@ void main() {
     GetIt.I.registerSingleton<FavoritesService>(mockFavoritesService);
 
     final mockDownloadService = MockDownloadService();
-    when(() => mockDownloadService.getLocalPosterPath(any(), any())).thenReturn(null);
+    when(
+      () => mockDownloadService.getLocalPosterPath(any(), any()),
+    ).thenReturn(null);
     GetIt.I.registerSingleton<DownloadService>(mockDownloadService);
   });
 

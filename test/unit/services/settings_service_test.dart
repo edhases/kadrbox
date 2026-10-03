@@ -121,7 +121,10 @@ void main() {
 
       await settingsService.setCardInfoStyle(CardInfoStyle.below);
       await pumpEventQueue();
-      expect(settingsService.state.uiSettings.cardInfoStyle, CardInfoStyle.below);
+      expect(
+        settingsService.state.uiSettings.cardInfoStyle,
+        CardInfoStyle.below,
+      );
 
       await settingsService.setListStyle(ListStyle.list);
       await pumpEventQueue();
@@ -183,12 +186,18 @@ void main() {
 
       expect(settingsService.isProviderEnabled('uakino'), isTrue);
       expect(settingsService.isProviderEnabled('lavakino'), isFalse);
-      expect(settingsService.isProviderEnabled('nonexistent'), isTrue); // default
+      expect(
+        settingsService.isProviderEnabled('nonexistent'),
+        isTrue,
+      ); // default
 
       // Search enabled preference per provider
       await settingsService.setSearchEnabledForProvider('uakino', false);
       expect(settingsService.isSearchEnabledForProvider('uakino'), isFalse);
-      expect(settingsService.isSearchEnabledForProvider('lavakino'), isFalse); // default is false for separate
+      expect(
+        settingsService.isSearchEnabledForProvider('lavakino'),
+        isFalse,
+      ); // default is false for separate
     });
 
     test('resetAllSettings resets settings back to default', () async {

@@ -63,7 +63,10 @@ void main() {
       expect(dl.headers, contains('TestUA'));
 
       // Initial status is pending, not completed
-      final downloadedBefore = await downloadsDao.isDownloaded('m100', 'uakino');
+      final downloadedBefore = await downloadsDao.isDownloaded(
+        'm100',
+        'uakino',
+      );
       expect(downloadedBefore, isFalse);
 
       final all = await downloadsDao.getAll();
@@ -92,7 +95,12 @@ void main() {
         fileSizeBytes: 1000000,
       );
 
-      var dl = await downloadsDao.getByMediaId('s1', 'lavakino', season: 1, episode: 1);
+      var dl = await downloadsDao.getByMediaId(
+        's1',
+        'lavakino',
+        season: 1,
+        episode: 1,
+      );
       expect(dl!.progress, 0.5);
       expect(dl.downloadedBytes, 500000);
       expect(dl.fileSizeBytes, 1000000);
@@ -103,11 +111,21 @@ void main() {
 
       // Update status to completed
       await downloadsDao.updateStatus(id, DownloadStatus.completed);
-      dl = await downloadsDao.getByMediaId('s1', 'lavakino', season: 1, episode: 1);
+      dl = await downloadsDao.getByMediaId(
+        's1',
+        'lavakino',
+        season: 1,
+        episode: 1,
+      );
       expect(dl!.status, DownloadStatus.completed);
       expect(dl.completedAt, isNotNull);
 
-      final isDl = await downloadsDao.isDownloaded('s1', 'lavakino', season: 1, episode: 1);
+      final isDl = await downloadsDao.isDownloaded(
+        's1',
+        'lavakino',
+        season: 1,
+        episode: 1,
+      );
       expect(isDl, isTrue);
 
       final completed = await downloadsDao.getCompleted();
@@ -276,8 +294,91 @@ void main() {
         mediaType: 'movie',
       );
 
-      final updated = await favoritesDao.watchIsFavorite('react1', 'prov').first;
+      final updated = await favoritesDao
+          .watchIsFavorite('react1', 'prov')
+          .first;
       expect(updated, isTrue);
+    });
+  });
+
+  group('HistoryDao In-Memory DB Tests', () {
+    // HistoryDao was the only DAO wired up in setUp but never exercised. These
+    // cover the contract the rest of the app depends on: movie rows carry NULL
+    // season/episode, so uniqueness must come from the COALESCE'd logical key
+    // rather than a plain column unique constraint.
+    test('saves and reads back a movie by logical key', () async {
+      await historyDao.saveProgress(
+        mediaId: 'lotr',
+        providerId: 'uakino',
+        title: 'Володар Перснів',
+        mediaType: 'movie',
+        positionMs: 42_000,
+        durationMs: 178_000,
+      );
+
+      final entry = await historyDao.getForMedia('lotr', 'uakino');
+      expect(entry, isNotNull);
+      expect(entry!.positionMs, 42_000);
+      expect(
+        await historyDao.getLastPosition('lotr', 'uakino'),
+        const Duration(seconds: 42),
+      );
+    });
+
+    test(
+      'saving the same movie twice keeps one row and the newer position',
+      () async {
+        await historyDao.saveProgress(
+          mediaId: 'dup',
+          providerId: 'uakino',
+          title: 'Dup',
+          mediaType: 'movie',
+          positionMs: 1_000,
+          durationMs: 10_000,
+        );
+        await historyDao.saveProgress(
+          mediaId: 'dup',
+          providerId: 'uakino',
+          title: 'Dup',
+          mediaType: 'movie',
+          positionMs: 9_000,
+          durationMs: 10_000,
+        );
+
+        final all = await historyDao.getAll();
+        expect(all.where((e) => e.mediaId == 'dup'), hasLength(1));
+        expect(
+          (await historyDao.getForMedia('dup', 'uakino'))!.positionMs,
+          9_000,
+        );
+      },
+    );
+
+    test('distinct episodes of one series are separate rows', () async {
+      for (final ep in [1, 2, 3]) {
+        await historyDao.saveProgress(
+          mediaId: 'show',
+          providerId: 'uakino',
+          title: 'Show',
+          mediaType: 'series',
+          season: 1,
+          episode: ep,
+          positionMs: ep * 1_000,
+          durationMs: 45_000,
+        );
+      }
+
+      final all = await historyDao.getAll();
+      expect(all.where((e) => e.mediaId == 'show'), hasLength(3));
+      expect(
+        await historyDao.getForMedia('show', 'uakino', season: 1, episode: 2),
+        isNotNull,
+      );
+    });
+
+    test('missing media resolves to null rather than throwing', () async {
+      expect(await historyDao.getForMedia('nope', 'uakino'), isNull);
+      expect(await historyDao.getLastPosition('nope', 'uakino'), isNull);
     });
   });
 
@@ -313,69 +414,77 @@ void main() {
   });
 
   group('SearchHistoryDao In-Memory DB Tests', () {
-    test('addSearch, getRecent, getSuccessful, and searchByPrefix autocomplete', () async {
-      await searchHistoryDao.addSearch(
-        query: 'Матриця',
-        normalizedQuery: 'матриця',
-        resultCount: 5,
-      );
-      await searchHistoryDao.addSearch(
-        query: 'Мандалорець',
-        normalizedQuery: 'мандалорець',
-        resultCount: 10,
-      );
-      await searchHistoryDao.addSearch(
-        query: 'Неіснуючий фільм',
-        normalizedQuery: 'неіснуючий фільм',
-        resultCount: 0,
-      );
+    test(
+      'addSearch, getRecent, getSuccessful, and searchByPrefix autocomplete',
+      () async {
+        await searchHistoryDao.addSearch(
+          query: 'Матриця',
+          normalizedQuery: 'матриця',
+          resultCount: 5,
+        );
+        await searchHistoryDao.addSearch(
+          query: 'Мандалорець',
+          normalizedQuery: 'мандалорець',
+          resultCount: 10,
+        );
+        await searchHistoryDao.addSearch(
+          query: 'Неіснуючий фільм',
+          normalizedQuery: 'неіснуючий фільм',
+          resultCount: 0,
+        );
 
-      final all = await searchHistoryDao.getAll();
-      expect(all.length, 3);
+        final all = await searchHistoryDao.getAll();
+        expect(all.length, 3);
 
-      final recent = await searchHistoryDao.getRecent(limit: 2);
-      expect(recent.length, 2);
+        final recent = await searchHistoryDao.getRecent(limit: 2);
+        expect(recent.length, 2);
 
-      // getSuccessful should exclude resultCount == 0
-      final successful = await searchHistoryDao.getSuccessful();
-      expect(successful.length, 2);
-      expect(successful.any((s) => s.normalizedQuery == 'неіснуючий фільм'), isFalse);
+        // getSuccessful should exclude resultCount == 0
+        final successful = await searchHistoryDao.getSuccessful();
+        expect(successful.length, 2);
+        expect(
+          successful.any((s) => s.normalizedQuery == 'неіснуючий фільм'),
+          isFalse,
+        );
 
-      // Autocomplete by prefix
-      final prefixMatches = await searchHistoryDao.searchByPrefix('ма');
-      expect(prefixMatches.length, 2);
-      final titles = prefixMatches.map((m) => m.query).toList();
-      expect(titles, containsAll(['Матриця', 'Мандалорець']));
+        // Autocomplete by prefix
+        final prefixMatches = await searchHistoryDao.searchByPrefix('ма');
+        expect(prefixMatches.length, 2);
+        final titles = prefixMatches.map((m) => m.query).toList();
+        expect(titles, containsAll(['Матриця', 'Мандалорець']));
 
-      // Updating existing search increments count
-      await searchHistoryDao.addSearch(
-        query: 'Матриця HD',
-        normalizedQuery: 'матриця',
-        resultCount: 8,
-      );
+        // Updating existing search increments count
+        await searchHistoryDao.addSearch(
+          query: 'Матриця HD',
+          normalizedQuery: 'матриця',
+          resultCount: 8,
+        );
 
-      final updated = await searchHistoryDao.getAll();
-      final matrix = updated.firstWhere((s) => s.normalizedQuery == 'матриця');
-      expect(matrix.searchCount, 2);
-      expect(matrix.resultCount, 8);
-      expect(matrix.query, 'Матриця HD');
+        final updated = await searchHistoryDao.getAll();
+        final matrix = updated.firstWhere(
+          (s) => s.normalizedQuery == 'матриця',
+        );
+        expect(matrix.searchCount, 2);
+        expect(matrix.resultCount, 8);
+        expect(matrix.query, 'Матриця HD');
 
-      // Failed searches
-      final failed = await searchHistoryDao.getFailedSearches();
-      expect(failed.length, 1);
-      expect(failed.first.normalizedQuery, 'неіснуючий фільм');
+        // Failed searches
+        final failed = await searchHistoryDao.getFailedSearches();
+        expect(failed.length, 1);
+        expect(failed.first.normalizedQuery, 'неіснуючий фільм');
 
-      // Watch recent stream
-      final streamFuture = searchHistoryDao.watchRecent().first;
-      expect((await streamFuture).length, 3);
+        // Watch recent stream
+        final streamFuture = searchHistoryDao.watchRecent().first;
+        expect((await streamFuture).length, 3);
 
-      // Delete and clear
-      await searchHistoryDao.deleteById(matrix.id);
-      expect((await searchHistoryDao.getAll()).length, 2);
+        // Delete and clear
+        await searchHistoryDao.deleteById(matrix.id);
+        expect((await searchHistoryDao.getAll()).length, 2);
 
-      await searchHistoryDao.clearAll();
-      expect((await searchHistoryDao.getAll()).isEmpty, isTrue);
-    });
+        await searchHistoryDao.clearAll();
+        expect((await searchHistoryDao.getAll()).isEmpty, isTrue);
+      },
+    );
   });
 
   group('SettingsDao In-Memory DB Tests', () {

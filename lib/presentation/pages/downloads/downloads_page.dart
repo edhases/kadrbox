@@ -499,7 +499,6 @@ class _ActiveDownloadCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isPaused = download.status == DownloadStatus.paused;
     final isFailed = download.status == DownloadStatus.failed;
-    final isDownloading = download.status == DownloadStatus.downloading;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

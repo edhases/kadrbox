@@ -533,9 +533,7 @@ class ServerBackedProvider extends ContentProvider {
         _asString(json['voiceover']) ??
         _asString(json['audio']) ??
         _asString(json['dub']);
-    final player =
-        _asString(json['player']) ??
-        _asString(json['source_name']);
+    final player = _asString(json['player']) ?? _asString(json['source_name']);
     return StreamSource(
       url: url,
       quality: _mapQuality(_asString(json['quality'])),

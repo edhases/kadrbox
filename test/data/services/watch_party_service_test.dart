@@ -203,17 +203,16 @@ void main() {
     // Callbacks to verify actions
     double? lastSpeed;
     Duration? lastSeek;
-    SyncCorrectionMode? lastMode;
 
     setUp(() async {
       // Reset state for sync tests
       lastSpeed = null;
       lastSeek = null;
-      lastMode = null;
 
       service.onSpeedChanged = (speed) => lastSpeed = speed;
       service.onSeek = (pos) => lastSeek = pos;
-      service.onSyncStatusChanged = (mode, drift) => lastMode = mode;
+      // Drift is asserted via service.correctionMode, which the same logic
+      // sets, so this callback does not need its own captured variable.
 
       // Connect as client
       await service.joinRoom('ROOM');
@@ -235,6 +234,37 @@ void main() {
         timestamp: DateTime.now(),
       );
       mockBackend.onMessageCallback?.call(msg);
+    }
+
+    // The sync handler compensates for network latency: it seeks to
+    // `hostPosition + clamp(now - messageTimestamp, 0, 5000)`
+    // (watch_party_service.dart _handleSyncMessage). That `DateTime.now()` is a
+    // real read in production code, so the exact target moves by however long
+    // the event loop took between building the message and handling it — one
+    // millisecond under load, zero when the machine is idle. Asserting the bare
+    // 30000 therefore failed only under parallel execution.
+    //
+    // This brackets that read instead of guessing it: `before` and `after`
+    // sandwich the handler's `now`, and the message's timestamp falls in the
+    // same window, so the compensation is provably within [0, after - before].
+    // When both reads land in the same millisecond the window is empty and the
+    // assertion is exact; when it is wider it is a genuine upper bound on
+    // elapsed time, never a fudge factor around the expected value.
+    ({int seekMs, Duration maxLatencyCompensation}) simulateSyncAndMeasureSeek({
+      required int hostPosMs,
+      required double speed,
+    }) {
+      final before = DateTime.now().toUtc();
+      simulateSyncMessage(hostPosMs: hostPosMs, speed: speed);
+      final after = DateTime.now().toUtc();
+
+      final seek = lastSeek;
+      if (seek == null)
+        return (seekMs: -1, maxLatencyCompensation: Duration.zero);
+      return (
+        seekMs: seek.inMilliseconds,
+        maxLatencyCompensation: after.difference(before),
+      );
     }
 
     test('Drift < 5s (ignore threshold) - No Correction', () {
@@ -277,11 +307,23 @@ void main() {
     test('Drift 20s (behind) - Hard Seek', () {
       // Host at 30s, Me at 10s (Drift -20000ms, > 15s threshold)
       service.updateLocalPosition(const Duration(milliseconds: 10000));
-      simulateSyncMessage(hostPosMs: 30000, speed: 1.0);
+      final result = simulateSyncAndMeasureSeek(hostPosMs: 30000, speed: 1.0);
 
       expect(service.correctionMode, SyncCorrectionMode.hardSeek);
       expect(lastSeek, isNotNull);
-      expect(lastSeek!.inMilliseconds, 30000);
+
+      const hostPositionMs = 30000;
+      expect(
+        result.seekMs,
+        inInclusiveRange(
+          hostPositionMs,
+          hostPositionMs + result.maxLatencyCompensation.inMilliseconds,
+        ),
+        reason:
+            'a hard seek must land on the host position, adjusted only by the '
+            'measured network latency (at most '
+            '${result.maxLatencyCompensation.inMilliseconds}ms here)',
+      );
     });
   });
 }

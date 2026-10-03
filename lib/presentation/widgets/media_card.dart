@@ -225,8 +225,9 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildGradientOverlay() {
-    if (_ui.cardInfoStyle == CardInfoStyle.hidden)
+    if (_ui.cardInfoStyle == CardInfoStyle.hidden) {
       return const SizedBox.shrink();
+    }
 
     return Positioned(
       left: 0,
@@ -251,8 +252,9 @@ class _MediaCardState extends State<MediaCard> {
   }
 
   Widget _buildInfoOverlay() {
-    if (_ui.cardInfoStyle == CardInfoStyle.hidden)
+    if (_ui.cardInfoStyle == CardInfoStyle.hidden) {
       return const SizedBox.shrink();
+    }
 
     final parts = <String>[];
     if (widget.item.year != null && _ui.showYears) {

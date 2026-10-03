@@ -28,37 +28,45 @@ void main() {
       final db = createTestAppDatabase();
 
       // Seed rows with hdrezka
-      await db.into(db.enabledProviders).insert(
-        EnabledProvidersCompanion.insert(providerId: 'hdrezka'),
-        mode: InsertMode.insertOrIgnore,
-      );
-      await db.into(db.favorites).insert(
-        FavoritesCompanion.insert(
-          mediaId: 'rezka1',
-          providerId: 'hdrezka',
-          title: 'Rezka Movie',
-          mediaType: 'movie',
-        ),
-        mode: InsertMode.insertOrIgnore,
-      );
-      await db.into(db.watchHistory).insert(
-        WatchHistoryCompanion.insert(
-          mediaId: 'rezka1',
-          providerId: 'hdrezka',
-          title: 'Rezka History',
-          mediaType: 'movie',
-        ),
-        mode: InsertMode.insertOrIgnore,
-      );
-      await db.into(db.storedMediaItems).insert(
-        StoredMediaItemsCompanion.insert(
-          id: 'rezka1',
-          providerId: 'hdrezka',
-          title: 'Rezka Cache',
-          mediaType: 'movie',
-        ),
-        mode: InsertMode.insertOrReplace,
-      );
+      await db
+          .into(db.enabledProviders)
+          .insert(
+            EnabledProvidersCompanion.insert(providerId: 'hdrezka'),
+            mode: InsertMode.insertOrIgnore,
+          );
+      await db
+          .into(db.favorites)
+          .insert(
+            FavoritesCompanion.insert(
+              mediaId: 'rezka1',
+              providerId: 'hdrezka',
+              title: 'Rezka Movie',
+              mediaType: 'movie',
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+      await db
+          .into(db.watchHistory)
+          .insert(
+            WatchHistoryCompanion.insert(
+              mediaId: 'rezka1',
+              providerId: 'hdrezka',
+              title: 'Rezka History',
+              mediaType: 'movie',
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+      await db
+          .into(db.storedMediaItems)
+          .insert(
+            StoredMediaItemsCompanion.insert(
+              id: 'rezka1',
+              providerId: 'hdrezka',
+              title: 'Rezka Cache',
+              mediaType: 'movie',
+            ),
+            mode: InsertMode.insertOrReplace,
+          );
 
       // Verify row exists before upgrade logic
       var favs = await db.select(db.favorites).get();

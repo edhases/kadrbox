@@ -27,7 +27,10 @@ import 'package:oxide_film/presentation/pages/search/search_page.dart';
 import '../../../helpers/in_memory_db.dart';
 
 class _FakeBanderaProvider extends ServerBackedProvider {
-  _FakeBanderaProvider({this.mockEnvelope, this.throwError = false})
+  // Not constructor parameters: tests mutate them after construction
+  // (banderaProvider.mockEnvelope = ..., .throwError = true), so a parameter
+  // form would never receive a value.
+  _FakeBanderaProvider()
     : super(
         const ProviderCatalogEntry(
           id: 'bandera',
@@ -43,7 +46,7 @@ class _FakeBanderaProvider extends ServerBackedProvider {
       );
 
   SearchEnvelope? mockEnvelope;
-  bool throwError;
+  bool throwError = false;
 
   /// Number of searchEnvelope calls, so a test can assert that a retry really
   /// re-issues the request instead of replaying a cached failure.

@@ -304,8 +304,9 @@ class SearchEnvelope extends Equatable {
     final rawSegments = json['segments'];
     if (rawSegments is List) {
       for (final s in rawSegments) {
-        if (s is Map)
+        if (s is Map) {
           segments.add(SearchSegment.fromJson(Map<String, dynamic>.from(s)));
+        }
       }
     }
     final items = <ScoredMediaItem>[];

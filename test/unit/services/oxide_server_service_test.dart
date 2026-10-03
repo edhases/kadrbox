@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -83,18 +82,20 @@ void main() {
           final b = jsonBody as Map<String, dynamic>;
           if (b['email'] == 'valid@user.com' && b['password'] == 'secret') {
             req.response.statusCode = HttpStatus.ok;
-            req.response.write(jsonEncode({
-              'access_token': 'jwt_access_123',
-              'refresh_token': 'jwt_refresh_456',
-              'user': {
-                'id': 'u100',
-                'email': 'valid@user.com',
-                'username': 'Valik',
-                'bio': 'Test bio',
-                'avatar_url': 'https://example.com/avatar.png',
-                'is_verified': true,
-              },
-            }));
+            req.response.write(
+              jsonEncode({
+                'access_token': 'jwt_access_123',
+                'refresh_token': 'jwt_refresh_456',
+                'user': {
+                  'id': 'u100',
+                  'email': 'valid@user.com',
+                  'username': 'Valik',
+                  'bio': 'Test bio',
+                  'avatar_url': 'https://example.com/avatar.png',
+                  'is_verified': true,
+                },
+              }),
+            );
           } else {
             req.response.statusCode = HttpStatus.unauthorized;
             req.response.write(jsonEncode({'error': 'invalid credentials'}));
@@ -103,69 +104,81 @@ void main() {
 
         case 'POST /api/v1/auth/register':
           req.response.statusCode = HttpStatus.created;
-          req.response.write(jsonEncode({
-            'access_token': 'reg_jwt_access',
-            'refresh_token': 'reg_jwt_refresh',
-            'user': {
-              'id': 'u101',
-              'email': (jsonBody as Map)['email'],
-              'username': (jsonBody as Map)['username'],
-              'is_verified': false,
-            },
-          }));
+          req.response.write(
+            jsonEncode({
+              'access_token': 'reg_jwt_access',
+              'refresh_token': 'reg_jwt_refresh',
+              'user': {
+                'id': 'u101',
+                'email': jsonBody['email'],
+                'username': jsonBody['username'],
+                'is_verified': false,
+              },
+            }),
+          );
           break;
 
         case 'POST /api/v1/auth/google':
         case 'POST /api/v1/auth/discord':
         case 'POST /api/v1/auth/telegram':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode({
-            'access_token': 'oauth_access_token',
-            'refresh_token': 'oauth_refresh_token',
-            'user': {
-              'id': 'oauth_user_1',
-              'email': 'oauth@user.com',
-              'username': 'OAuthUser',
-              'is_verified': true,
-            },
-          }));
+          req.response.write(
+            jsonEncode({
+              'access_token': 'oauth_access_token',
+              'refresh_token': 'oauth_refresh_token',
+              'user': {
+                'id': 'oauth_user_1',
+                'email': 'oauth@user.com',
+                'username': 'OAuthUser',
+                'is_verified': true,
+              },
+            }),
+          );
           break;
 
         case 'POST /api/v1/auth/refresh':
           refreshCallCount++;
           if (return401OnRefresh) {
             req.response.statusCode = HttpStatus.unauthorized;
-            req.response.write(jsonEncode({'error': 'invalid or expired refresh token'}));
+            req.response.write(
+              jsonEncode({'error': 'invalid or expired refresh token'}),
+            );
           } else {
             req.response.statusCode = HttpStatus.ok;
-            req.response.write(jsonEncode({
-              'access_token': 'refreshed_access_token',
-              'refresh_token': 'refreshed_refresh_token',
-            }));
+            req.response.write(
+              jsonEncode({
+                'access_token': 'refreshed_access_token',
+                'refresh_token': 'refreshed_refresh_token',
+              }),
+            );
           }
           break;
 
         case 'GET /api/v1/auth/me':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode({
-            'id': 'u100',
-            'email': 'valid@user.com',
-            'username': 'ValikUpdated',
-            'bio': 'Updated bio',
-            'avatar_url': 'https://example.com/avatar2.png',
-            'is_verified': true,
-          }));
+          req.response.write(
+            jsonEncode({
+              'id': 'u100',
+              'email': 'valid@user.com',
+              'username': 'ValikUpdated',
+              'bio': 'Updated bio',
+              'avatar_url': 'https://example.com/avatar2.png',
+              'is_verified': true,
+            }),
+          );
           break;
 
         case 'PUT /api/v1/auth/profile':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode({
-            'id': 'u100',
-            'email': 'valid@user.com',
-            'username': (jsonBody as Map)['name'] ?? 'Valik',
-            'bio': (jsonBody as Map)['bio'] ?? '',
-            'avatar_url': (jsonBody as Map)['avatar'] ?? '',
-          }));
+          req.response.write(
+            jsonEncode({
+              'id': 'u100',
+              'email': 'valid@user.com',
+              'username': jsonBody['name'] ?? 'Valik',
+              'bio': jsonBody['bio'] ?? '',
+              'avatar_url': jsonBody['avatar'] ?? '',
+            }),
+          );
           break;
 
         case 'POST /api/v1/auth/verify-email':
@@ -180,25 +193,29 @@ void main() {
 
         case 'POST /api/v1/auth/unlink':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode({
-            'id': 'u100',
-            'email': 'valid@user.com',
-            'username': 'Valik',
-            'is_verified': true,
-          }));
+          req.response.write(
+            jsonEncode({
+              'id': 'u100',
+              'email': 'valid@user.com',
+              'username': 'Valik',
+              'is_verified': true,
+            }),
+          );
           break;
 
         case 'GET /api/v1/sync/history':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode([
-            {
-              'media_id': 'm1',
-              'provider_id': 'uakino',
-              'title': 'Test Movie',
-              'position_ms': 120000,
-              'duration_ms': 7200000,
-            }
-          ]));
+          req.response.write(
+            jsonEncode([
+              {
+                'media_id': 'm1',
+                'provider_id': 'uakino',
+                'title': 'Test Movie',
+                'position_ms': 120000,
+                'duration_ms': 7200000,
+              },
+            ]),
+          );
           break;
 
         case 'POST /api/v1/sync/history':
@@ -208,26 +225,30 @@ void main() {
 
         case 'GET /api/v1/sync/continue-watching':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode([
-            {
-              'media_id': 'm1',
-              'provider_id': 'uakino',
-              'title': 'Test Movie',
-              'position_ms': 120000,
-            }
-          ]));
+          req.response.write(
+            jsonEncode([
+              {
+                'media_id': 'm1',
+                'provider_id': 'uakino',
+                'title': 'Test Movie',
+                'position_ms': 120000,
+              },
+            ]),
+          );
           break;
 
         case 'GET /api/v1/sync/favorites':
           req.response.statusCode = HttpStatus.ok;
-          req.response.write(jsonEncode([
-            {
-              'media_id': 'fav1',
-              'provider_id': 'uakino',
-              'title': 'Fav Film',
-              'media_type': 'movie',
-            }
-          ]));
+          req.response.write(
+            jsonEncode([
+              {
+                'media_id': 'fav1',
+                'provider_id': 'uakino',
+                'title': 'Fav Film',
+                'media_type': 'movie',
+              },
+            ]),
+          );
           break;
 
         case 'POST /api/v1/sync/favorites/toggle':
@@ -247,10 +268,12 @@ void main() {
       await req.response.close();
     });
 
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 5),
-    ));
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 5),
+        receiveTimeout: const Duration(seconds: 5),
+      ),
+    );
     apiClient = ApiClient(prefs: prefs, dio: dio);
     service = OxideServerService(prefs, apiClient);
   });
@@ -336,13 +359,16 @@ void main() {
       expect(req['body']['password'], 'secret');
     });
 
-    test('signIn with invalid credentials throws ServerException / rethrows', () async {
-      expect(
-        () => service.signIn('wrong@user.com', 'badpassword'),
-        throwsA(isA<ServerException>()),
-      );
-      expect(service.isAuthenticated, isFalse);
-    });
+    test(
+      'signIn with invalid credentials throws ServerException / rethrows',
+      () async {
+        expect(
+          () => service.signIn('wrong@user.com', 'badpassword'),
+          throwsA(isA<ServerException>()),
+        );
+        expect(service.isAuthenticated, isFalse);
+      },
+    );
 
     test('signUp registers and stores session', () async {
       await service.signUp(
@@ -368,13 +394,19 @@ void main() {
       expect(service.userEmail, 'oauth@user.com');
     });
 
-    test('signInWithDiscordCode sends code and optional redirect_uri', () async {
-      await service.signInWithDiscordCode('discord_code_123', redirectUri: 'http://localhost/cb');
-      expect(service.isAuthenticated, isTrue);
-      final req = capturedRequests['POST /api/v1/auth/discord'];
-      expect(req['body']['code'], 'discord_code_123');
-      expect(req['body']['redirect_uri'], 'http://localhost/cb');
-    });
+    test(
+      'signInWithDiscordCode sends code and optional redirect_uri',
+      () async {
+        await service.signInWithDiscordCode(
+          'discord_code_123',
+          redirectUri: 'http://localhost/cb',
+        );
+        expect(service.isAuthenticated, isTrue);
+        final req = capturedRequests['POST /api/v1/auth/discord'];
+        expect(req['body']['code'], 'discord_code_123');
+        expect(req['body']['redirect_uri'], 'http://localhost/cb');
+      },
+    );
 
     test('signInWithTelegramData sends telegram credentials map', () async {
       await service.signInWithTelegramData({'id': 12345, 'hash': 'abcde'});
@@ -383,29 +415,50 @@ void main() {
       expect(req['body']['id'], 12345);
     });
 
-    test('verifyEmail calls verify-email and marks user verified locally', () async {
-      await service.signIn('valid@user.com', 'secret');
-      await service.verifyEmail('token_xyz');
+    test(
+      'verifyEmail calls verify-email and marks user verified locally',
+      () async {
+        await service.signIn('valid@user.com', 'secret');
+        await service.verifyEmail('token_xyz');
 
-      expect(service.isVerified, isTrue);
-      expect(capturedRequests.containsKey('POST /api/v1/auth/verify-email'), isTrue);
-    });
+        expect(service.isVerified, isTrue);
+        expect(
+          capturedRequests.containsKey('POST /api/v1/auth/verify-email'),
+          isTrue,
+        );
+      },
+    );
 
-    test('resendVerification, requestPasswordReset, resetPassword, changePassword', () async {
-      await service.signIn('valid@user.com', 'secret');
+    test(
+      'resendVerification, requestPasswordReset, resetPassword, changePassword',
+      () async {
+        await service.signIn('valid@user.com', 'secret');
 
-      await service.resendVerification('valid@user.com');
-      expect(capturedRequests.containsKey('POST /api/v1/auth/resend-verification'), isTrue);
+        await service.resendVerification('valid@user.com');
+        expect(
+          capturedRequests.containsKey('POST /api/v1/auth/resend-verification'),
+          isTrue,
+        );
 
-      await service.requestPasswordReset('valid@user.com');
-      expect(capturedRequests.containsKey('POST /api/v1/auth/forgot-password'), isTrue);
+        await service.requestPasswordReset('valid@user.com');
+        expect(
+          capturedRequests.containsKey('POST /api/v1/auth/forgot-password'),
+          isTrue,
+        );
 
-      await service.resetPassword('reset_tok', 'new_pass');
-      expect(capturedRequests.containsKey('POST /api/v1/auth/reset-password'), isTrue);
+        await service.resetPassword('reset_tok', 'new_pass');
+        expect(
+          capturedRequests.containsKey('POST /api/v1/auth/reset-password'),
+          isTrue,
+        );
 
-      await service.changePassword('old_pass', 'new_pass');
-      expect(capturedRequests.containsKey('POST /api/v1/auth/change-password'), isTrue);
-    });
+        await service.changePassword('old_pass', 'new_pass');
+        expect(
+          capturedRequests.containsKey('POST /api/v1/auth/change-password'),
+          isTrue,
+        );
+      },
+    );
 
     test('fetchMe updates user profile from server', () async {
       await service.signIn('valid@user.com', 'secret');
@@ -445,32 +498,38 @@ void main() {
       expect(prefs.getString('oxide_jwt_access_token'), isNull);
     });
 
-    test('signOut clears tokens, user state, and calls onAuthExpired', () async {
-      await service.signIn('valid@user.com', 'secret');
-      bool expiredCalled = false;
-      service.onAuthExpired = () => expiredCalled = true;
+    test(
+      'signOut clears tokens, user state, and calls onAuthExpired',
+      () async {
+        await service.signIn('valid@user.com', 'secret');
+        bool expiredCalled = false;
+        service.onAuthExpired = () => expiredCalled = true;
 
-      await service.signOut();
+        await service.signOut();
 
-      expect(service.isAuthenticated, isFalse);
-      expect(service.accessToken, isNull);
-      expect(service.user, isNull);
-      expect(prefs.getString('oxide_jwt_access_token'), isNull);
-      expect(prefs.getString('oxide_jwt_refresh_token'), isNull);
-      expect(prefs.getString('oxide_user_json'), isNull);
-      expect(expiredCalled, isTrue);
-    });
+        expect(service.isAuthenticated, isFalse);
+        expect(service.accessToken, isNull);
+        expect(service.user, isNull);
+        expect(prefs.getString('oxide_jwt_access_token'), isNull);
+        expect(prefs.getString('oxide_jwt_refresh_token'), isNull);
+        expect(prefs.getString('oxide_user_json'), isNull);
+        expect(expiredCalled, isTrue);
+      },
+    );
   });
 
   group('OxideServerService refreshAuth & Single-Flight Dedup', () {
-    test('refreshAuth returns false and clears session if no refresh_token', () async {
-      bool expiredCalled = false;
-      service.onAuthExpired = () => expiredCalled = true;
+    test(
+      'refreshAuth returns false and clears session if no refresh_token',
+      () async {
+        bool expiredCalled = false;
+        service.onAuthExpired = () => expiredCalled = true;
 
-      final result = await service.refreshAuth();
-      expect(result, isFalse);
-      expect(expiredCalled, isTrue);
-    });
+        final result = await service.refreshAuth();
+        expect(result, isFalse);
+        expect(expiredCalled, isTrue);
+      },
+    );
 
     test('refreshAuth updates tokens successfully', () async {
       await service.signIn('valid@user.com', 'secret');
@@ -478,34 +537,43 @@ void main() {
 
       expect(result, isTrue);
       expect(service.accessToken, 'refreshed_access_token');
-      expect(prefs.getString('oxide_jwt_access_token'), 'refreshed_access_token');
+      expect(
+        prefs.getString('oxide_jwt_access_token'),
+        'refreshed_access_token',
+      );
     });
 
-    test('refreshAuth single-flight deduplicates concurrent requests', () async {
-      await service.signIn('valid@user.com', 'secret');
+    test(
+      'refreshAuth single-flight deduplicates concurrent requests',
+      () async {
+        await service.signIn('valid@user.com', 'secret');
 
-      // Launch 5 concurrent refreshAuth calls
-      final futures = List.generate(5, (_) => service.refreshAuth());
-      final results = await Future.wait(futures);
+        // Launch 5 concurrent refreshAuth calls
+        final futures = List.generate(5, (_) => service.refreshAuth());
+        final results = await Future.wait(futures);
 
-      expect(results.every((r) => r == true), isTrue);
-      // Only 1 actual HTTP request must have been made
-      expect(refreshCallCount, 1);
-    });
+        expect(results.every((r) => r == true), isTrue);
+        // Only 1 actual HTTP request must have been made
+        expect(refreshCallCount, 1);
+      },
+    );
 
-    test('refreshAuth on 401 triggers onAuthExpired and clears session', () async {
-      await service.signIn('valid@user.com', 'secret');
-      return401OnRefresh = true;
+    test(
+      'refreshAuth on 401 triggers onAuthExpired and clears session',
+      () async {
+        await service.signIn('valid@user.com', 'secret');
+        return401OnRefresh = true;
 
-      bool expiredCalled = false;
-      service.onAuthExpired = () => expiredCalled = true;
+        bool expiredCalled = false;
+        service.onAuthExpired = () => expiredCalled = true;
 
-      final result = await service.refreshAuth();
+        final result = await service.refreshAuth();
 
-      expect(result, isFalse);
-      expect(service.isAuthenticated, isFalse);
-      expect(expiredCalled, isTrue);
-    });
+        expect(result, isFalse);
+        expect(service.isAuthenticated, isFalse);
+        expect(expiredCalled, isTrue);
+      },
+    );
   });
 
   group('OxideServerService Cloud Sync (History & Favorites)', () {
@@ -568,7 +636,10 @@ void main() {
 
     test('removeFavorite sends delete request', () async {
       await service.removeFavorite(mediaId: 'fav1', providerId: 'uakino');
-      expect(capturedRequests.containsKey('DELETE /api/v1/sync/favorites'), isTrue);
+      expect(
+        capturedRequests.containsKey('DELETE /api/v1/sync/favorites'),
+        isTrue,
+      );
     });
 
     test('401 on sync calls onAuthExpired, signs out, and rethrows', () async {
@@ -576,8 +647,18 @@ void main() {
       bool expiredCalled = false;
       service.onAuthExpired = () => expiredCalled = true;
 
-      expect(() => service.getHistory(), throwsA(isA<ServerException>()));
-      await Future.delayed(const Duration(milliseconds: 10));
+      // Await the thrown error rather than asserting on a callback that returns
+      // a Future: `expect(() => ..., throwsA(...))` on an async body does not
+      // await it, so the previous `await Future.delayed(10ms)` was the only thing
+      // ordering the assertions — and 10ms is not enough for the three
+      // SharedPreferences removals inside signOut() when the suite runs in
+      // parallel.
+      //
+      // _withAuthRecovery rethrows only *after* `await _handleAuthExpired()`,
+      // which awaits signOut(), which calls onAuthExpired last. So the error
+      // surfacing is itself the completion signal: when this await returns,
+      // the callback has definitely already run.
+      await expectLater(service.getHistory(), throwsA(isA<ServerException>()));
 
       expect(service.isAuthenticated, isFalse);
       expect(expiredCalled, isTrue);

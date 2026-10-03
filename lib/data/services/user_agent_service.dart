@@ -118,17 +118,29 @@ class UserAgentService {
 
       if (response.statusCode == 200) {
         final html = response.body;
-        // Regex to find UAs in textareas (more reliable for useragents.me)
+        // Regex to find UAs in textareas (flexible to match any textarea attributes/classes)
         final taRegex = RegExp(
-          r'<textarea class="form-control ua-textarea">([^<]+)</textarea>',
+          r'<textarea[^>]*>(Mozilla/5\.0[^<]+)</textarea>',
+          caseSensitive: false,
         );
-        final matches = taRegex.allMatches(html);
+        var matches = taRegex.allMatches(html);
 
-        final newUAs = matches
+        var newUAs = matches
             .map((m) => m.group(1)!.trim())
             .where((ua) => ua.length > 50 && ua.length < 300)
             .toSet()
             .toList();
+
+        // Fallback to general UA pattern if textarea format changes
+        if (newUAs.length <= 5) {
+          final fallbackRegex = RegExp(r'Mozilla/5\.0 [^"<> \n\r\t\x27]+');
+          final fallbackMatches = fallbackRegex.allMatches(html);
+          newUAs = fallbackMatches
+              .map((m) => m.group(0)!.trim())
+              .where((ua) => ua.length > 50 && ua.length < 300)
+              .toSet()
+              .toList();
+        }
 
         if (newUAs.length > 5) {
           _cachedUAs = newUAs;
@@ -138,6 +150,12 @@ class UserAgentService {
             tag: 'UA',
           );
           return true;
+        } else {
+          Logger.w(
+            'Failed to parse sufficient User-Agents from $_fallbackUrl (found: ${newUAs.length})',
+            tag: 'UA',
+          );
+          return false;
         }
       }
       Logger.w(
@@ -184,6 +202,12 @@ class UserAgentService {
             tag: 'UA',
           );
           return true;
+        } else {
+          Logger.w(
+            'Failed to parse sufficient User-Agents from $url (found: ${newUAs.length})',
+            tag: 'UA',
+          );
+          return false;
         }
       }
       Logger.w(

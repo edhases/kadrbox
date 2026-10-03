@@ -431,7 +431,6 @@ class WatchPartyService extends ChangeNotifier {
   // Sync state
   SyncCorrectionMode _correctionMode = SyncCorrectionMode.none;
   Duration _lastHostPosition = Duration.zero;
-  DateTime _lastSyncTime = DateTime.now();
   int _consecutiveBufferEvents = 0;
   bool _isCorrecting = false;
 
@@ -823,7 +822,6 @@ class WatchPartyService extends ChangeNotifier {
     final adjustedHostPosition = hostPosition + cappedDelay;
 
     _lastHostPosition = adjustedHostPosition;
-    _lastSyncTime = DateTime.now();
 
     // Calculate drift (positive = we're ahead, negative = we're behind)
     final driftMs = (_currentPosition - adjustedHostPosition).inMilliseconds;
