@@ -279,7 +279,7 @@ func TestCovPgFavorites(t *testing.T) {
 	if isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "uakino"); err != nil || !isFav {
 		t.Fatalf("expected favorite (%v, %v)", isFav, err)
 	}
-	list, err := repo.GetUserFavorites(ctx, user.ID)
+	list, err := repo.GetUserFavorites(ctx, user.ID, 50, 0)
 	if err != nil || len(list) != 1 || list[0].Title != "Матриця" {
 		t.Fatalf("unexpected favorites: %+v (%v)", list, err)
 	}

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/edhases/oxide-server/internal/domain"
@@ -19,6 +20,12 @@ func NewFavoritesRepository(pool *pgxpool.Pool) *FavoritesRepository {
 
 // AddFavorite додає тайтл в обране
 func (r *FavoritesRepository) AddFavorite(ctx context.Context, f *domain.Favorite) error {
+	if f == nil {
+		return errors.New("add favorite: nil favorite")
+	}
+	f.Year = sanitiseYear(f.Year)
+	f.Rating = sanitiseRating(f.Rating)
+	f.MediaType = sanitiseMediaType(f.MediaType)
 	query := `
 		INSERT INTO favorites (user_id, media_id, provider_id, title, poster_url, year, media_type, rating, rating_source, added_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
@@ -44,15 +51,31 @@ func (r *FavoritesRepository) RemoveFavorite(ctx context.Context, userID uuid.UU
 	return nil
 }
 
-// GetUserFavorites повертає список закладок користувача
-func (r *FavoritesRepository) GetUserFavorites(ctx context.Context, userID uuid.UUID) ([]domain.Favorite, error) {
+// GetUserFavorites повертає сторінку закладок користувача.
+//
+// Pagination was missing entirely, so one heavy account made the endpoint
+// return its whole table. limit <= 0 keeps the previous unlimited behaviour for
+// callers that have not been updated yet. `id DESC` breaks added_at ties (all
+// rows of one sync share a timestamp), otherwise the same row appears on two
+// pages while another is skipped.
+func (r *FavoritesRepository) GetUserFavorites(ctx context.Context, userID uuid.UUID, limit, offset int) ([]domain.Favorite, error) {
+	if offset < 0 {
+		offset = 0
+	}
+
 	query := `
 		SELECT id, user_id, media_id, provider_id, title, poster_url, year, media_type, rating, rating_source, added_at
 		FROM favorites
 		WHERE user_id = $1
-		ORDER BY added_at DESC
+		ORDER BY added_at DESC, id DESC
 	`
-	rows, err := r.pool.Query(ctx, query, userID)
+	args := []any{userID}
+	if limit > 0 {
+		query += ` LIMIT $2 OFFSET $3`
+		args = append(args, limit, offset)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get user favorites: %w", err)
 	}
@@ -76,7 +99,23 @@ func (r *FavoritesRepository) GetUserFavorites(ctx context.Context, userID uuid.
 		f.RatingSource = rSource
 		list = append(list, f)
 	}
+	// Without this a connection lost mid-iteration is indistinguishable from a
+	// complete result, and the client caches the short list as authoritative.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get user favorites: %w", err)
+	}
 	return list, nil
+}
+
+// CountUserFavorites повертає загальну кількість закладок, щоб клієнт міг
+// визначити, чи є ще сторінки, без завантаження всіх рядків.
+func (r *FavoritesRepository) CountUserFavorites(ctx context.Context, userID uuid.UUID) (int, error) {
+	var total int
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM favorites WHERE user_id = $1`, userID).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("count user favorites: %w", err)
+	}
+	return total, nil
 }
 
 // IsFavorite перевіряє чи тайтл у збережених

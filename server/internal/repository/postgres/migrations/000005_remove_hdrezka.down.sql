@@ -1,0 +1,9 @@
+-- 000005_remove_hdrezka.down.sql
+-- NOT REVERSIBLE. The rows deleted by 000005 are gone; nothing in this
+-- repository can reconstruct a favourite, a watch-history position or a cached
+-- metadata document. Clients that still carry local hdrezka rows resync them
+-- (the client, not the server, is the source of truth for them), but until they
+-- do the affected users see those titles missing from their account.
+--
+-- Applying this file is therefore a no-op: there is nothing to restore, and
+-- pretending otherwise would be worse than saying so.
