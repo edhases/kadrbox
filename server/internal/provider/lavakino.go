@@ -351,14 +351,16 @@ func (p *LavakinoProvider) GetDetails(ctx context.Context, itemURL string) (*dom
 // / base64) і повертає порожній список + ErrUnresolvablePlayer, якщо
 // придатного медіа немає. Referer тепер береться з медіа-URL, а не з
 // домену агрегатора, і додається Origin.
+// ONE budget covers the item-page fetch AND the iframe fan-out — see the
+// identical note in uakino.GetStreams for the trade-off rationale.
 func (p *LavakinoProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
+	defer cancel()
+
 	html, err := p.client.Get(ctx, itemURL, p.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("lavakino get streams html: %w", err)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
-	defer cancel()
 
 	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html, season, episode, voiceID)
 }

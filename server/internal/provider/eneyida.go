@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -280,8 +279,7 @@ func (p *EneyidaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 
 	var rating float64
 	ratingText := doc.Find(".rating, .imdb-rate, .full-rates").Text()
-	reRating := regexp.MustCompile(`([\d.]+)`)
-	m := reRating.FindString(ratingText)
+	m := reRatingNum.FindString(ratingText)
 	if m != "" {
 		if r, err := strconv.ParseFloat(m, 64); err == nil {
 			rating = r
@@ -325,14 +323,16 @@ func (p *EneyidaProvider) GetDetails(ctx context.Context, itemURL string) (*doma
 // ("Failed to recognize file format."). Тепер iframe розбирається через
 // ResolvePlayerHTML, і за відсутності розпізнаного потоку повертається
 // порожній список + ErrUnresolvablePlayer (а не HTML-сторінка для mpv).
+// ONE budget covers the item-page fetch AND the iframe fan-out — see the
+// identical note in uakino.GetStreams for the trade-off rationale.
 func (p *EneyidaProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
+	defer cancel()
+
 	html, err := p.client.Get(ctx, itemURL, p.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("eneyida get streams: %w", err)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
-	defer cancel()
 
 	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html, season, episode, voiceID)
 }

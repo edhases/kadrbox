@@ -13,6 +13,27 @@ package provider
 // video qualities (1080p, 720p, 480p), and subtitles. This unified resolver discovers
 // all player candidates on the page, extracts all playable streams with their qualities
 // and dubbings, and merges subtitles into a unified ContentStreamsResponse.
+//
+// # Function inventory (a future split should follow these groups)
+//
+//	entry points   ResolvePlayerHTML, resolvePlayerHTML, resolveStreamsFromItemPage
+//	extraction     extractAllStreamsFromPlayer, extractStreamsFromPlaylistTree,
+//	               parseMultiQualityString, parseSubtitlesFromPlayerHTML,
+//	               parseSeasonOrEpisodeNum
+//	URL strategies extractPlayableURL + matchPlayerJSFile / matchSourcesBlock /
+//	               matchHlsLoadSource / matchBase64PlayerJS / matchBareMediaURL
+//	validation     isPlayableMediaURL, newStreamSource, qualityFromURL,
+//	               normalizeQualityLabel, isPlausiblePlayerOrMedia
+//	candidates     rankPlayerCandidates, rankPlayerIframes, scorePlayerIframe,
+//	               scanPlayerURL, absolutizeURL, hostOf, detectPlayerBalancer
+//	utilities      firstCaptured, decodeBase64Loose, originOf
+//
+// Sentinel convention for the error-less parsers: a nil slice means "nothing
+// matched" (the input carried no player config at all), while a non-empty slice
+// that is shorter than the input carried means "parsed but partially rejected"
+// (an entry failed isPlayableMediaURL or was a duplicate). The two are NOT
+// interchangeable — an empty result makes the caller fall through to the next
+// strategy, a short result is returned as-is.
 
 import (
 	"context"
@@ -25,6 +46,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -45,6 +67,18 @@ const (
 
 	// defaultStreamQuality is used when the media URL carries no quality token.
 	defaultStreamQuality = "Auto"
+
+	// playerFanoutConcurrency bounds how many player candidates are fetched at
+	// once. 4 keeps a resolve from opening 8 TLS connections to third-party
+	// hosts (which look like a scraper attack) while still overlapping the
+	// round-trips.
+	playerFanoutConcurrency = 4
+
+	// playerCandidateTimeout is the per-candidate sub-budget. All candidates
+	// share PlayerResolveTimeout, so without a sub-budget ONE hung player host
+	// eats 15s of the 20s and the loop gives up on a title that a later
+	// candidate would have resolved.
+	playerCandidateTimeout = 5 * time.Second
 )
 
 // Package level regexps: compiled once for high-throughput stream resolution.
@@ -273,6 +307,11 @@ func qualityFromURL(mediaURL string) string {
 	return m[1] + "p"
 }
 
+// qualityResolutionTokens is checked in this exact order (highest first), so
+// "1080p" wins over "720p" when a label mentions both. Package level: it was a
+// slice literal inside the range expression, i.e. one allocation per call.
+var qualityResolutionTokens = []string{"1440", "1080", "720", "480", "360"}
+
 // normalizeQualityLabel cleans up quality tokens like "1080p", "720", "4K", "FHD".
 func normalizeQualityLabel(q string) string {
 	q = strings.TrimSpace(q)
@@ -283,7 +322,7 @@ func normalizeQualityLabel(q string) string {
 	if strings.Contains(lower, "fullhd") || strings.Contains(lower, "fhd") {
 		return "1080p"
 	}
-	for _, res := range []string{"1440", "1080", "720", "480", "360"} {
+	for _, res := range qualityResolutionTokens {
 		if strings.Contains(lower, res) {
 			return res + "p"
 		}
@@ -405,22 +444,65 @@ type PlayerCandidate struct {
 	Score int
 }
 
-// isPlausiblePlayerOrMedia checks whether a raw string looks like a player or media link.
-func isPlausiblePlayerOrMedia(s string) bool {
-	if strings.HasPrefix(s, "//") || strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "/") {
-		lower := strings.ToLower(s)
-		for _, skip := range iframeSkips {
-			if strings.Contains(lower, skip) {
-				return false
-			}
+// candidateDataAttrs are the attributes a DLE theme can hang a player URL on.
+// Package level: this was a slice literal inside a per-node loop, i.e. one
+// allocation for each of the ~1000 nodes the selector below matches.
+var candidateDataAttrs = []string{"data-src", "data-player", "data-url", "data-iframe", "data-link", "value"}
+
+// candidateSelector is the theme-agnostic set of elements that can carry a
+// player URL in an attribute (tabs, buttons, select options).
+const candidateSelector = "li, button, a, div, span, option"
+
+// hasURIPrefix reports whether s can be resolved against an item URL.
+func hasURIPrefix(s string) bool {
+	return strings.HasPrefix(s, "//") || strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "/")
+}
+
+// playerURLScan is the per-candidate view shared by the plausibility test and
+// the scorer. Previously each of those re-lowercased the URL and re-parsed it
+// (hostOf was called twice inside a single expression plus url.Parse for the
+// media-extension probe), so one candidate cost three parses and two ~48-entry
+// substring scans.
+type playerURLScan struct {
+	lower string
+	host  string
+	path  string
+	skip  bool // matches an iframeSkips entry
+	hint  bool // matches an iframeHints entry
+}
+
+func scanPlayerURL(raw string) playerURLScan {
+	s := playerURLScan{lower: strings.ToLower(raw)}
+	if u, err := url.Parse(raw); err == nil {
+		s.host = u.Host
+		s.path = u.Path
+	}
+	for _, skip := range iframeSkips {
+		if strings.Contains(s.lower, skip) {
+			s.skip = true
+			break
 		}
+	}
+	// A skipped URL is rejected by both callers, so the hint scan is dead work.
+	if !s.skip {
 		for _, hint := range iframeHints {
-			if strings.Contains(lower, hint) {
-				return true
+			if strings.Contains(s.lower, hint) {
+				s.hint = true
+				break
 			}
 		}
 	}
-	return false
+	return s
+}
+
+// isPlausiblePlayerOrMedia checks whether a raw string looks like a player or media link.
+func isPlausiblePlayerOrMedia(s string) bool {
+	if !hasURIPrefix(s) {
+		return false
+	}
+	scan := scanPlayerURL(s)
+	return !scan.skip && scan.hint
 }
 
 // rankPlayerCandidates extracts all player candidates from tabs, buttons, data-attributes
@@ -462,8 +544,8 @@ func rankPlayerCandidates(html, itemURL string) []PlayerCandidate {
 	}
 
 	// 1. Scan player tabs, buttons, select options and data attributes (e.g. Lavakino, Uakino tabs)
-	doc.Find("li, button, a, div, span, option").Each(func(_ int, s *goquery.Selection) {
-		for _, attr := range []string{"data-src", "data-player", "data-url", "data-iframe", "data-link", "value"} {
+	doc.Find(candidateSelector).Each(func(_ int, s *goquery.Selection) {
+		for _, attr := range candidateDataAttrs {
 			if val, ok := s.Attr(attr); ok && strings.TrimSpace(val) != "" {
 				val = strings.TrimSpace(val)
 				if isPlausiblePlayerOrMedia(val) {
@@ -520,24 +602,24 @@ func rankPlayerIframes(html, itemURL string) []string {
 // scorePlayerIframe returns 0 for frames that must be skipped, otherwise a positive
 // priority: a cross-host iframe is the usual player, and known player hints push it up.
 func scorePlayerIframe(abs, itemHost string) int {
-	lower := strings.ToLower(abs)
-	for _, bad := range iframeSkips {
-		if strings.Contains(lower, bad) {
-			return 0
-		}
+	return scanPlayerURL(abs).score(itemHost)
+}
+
+// score applies the same ranking rules as scorePlayerIframe to an
+// already-computed scan.
+func (s playerURLScan) score(itemHost string) int {
+	if s.skip {
+		return 0
 	}
 
 	score := 1
-	if hostOf(abs) != "" && hostOf(abs) != itemHost {
+	if s.host != "" && s.host != itemHost {
 		score += 4
 	}
-	for _, hint := range iframeHints {
-		if strings.Contains(lower, hint) {
-			score += 4
-			break
-		}
+	if s.hint {
+		score += 4
 	}
-	if u, err := url.Parse(abs); err == nil && reMediaExt.MatchString(u.Path) {
+	if reMediaExt.MatchString(s.path) {
 		score += 2
 	}
 	return score
@@ -583,6 +665,13 @@ func absolutizeURL(src, base string) string {
 // "[1080p]https://cdn/1080.m3u8,[720p]https://cdn/720.m3u8"
 // or "[1080p]https://cdn/1080.m3u8 or [720p]https://cdn/720.m3u8"
 // or a single URL.
+//
+// No error channel: nil means "this input carried no media URL at all" (nothing
+// matched), while a slice shorter than the number of comma/or-separated parts
+// means "parsed but partially rejected" — a part failed isPlayableMediaURL or
+// duplicated an earlier URL. Callers cannot distinguish the two, which is why
+// the caller falls through to the next strategy on nil and accepts a short
+// result as final.
 func parseMultiQualityString(raw, playerURL, playerLabel string) []domain.StreamSource {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -654,6 +743,12 @@ func parseSeasonOrEpisodeNum(text string, fallback int) int {
 
 // extractStreamsFromPlaylistTree searches a PlayerJS playlist structure for streams
 // matching the requested season, episode and voice.
+//
+// No error channel, same convention as parseMultiQualityString: two nils mean
+// "no episode matched the request AND the first-available fallback also yielded
+// nothing"; a nil stream slice with non-nil subs means "subtitles only"; a
+// non-nil stream slice means the request or the fallback produced streams. A
+// season/episode miss is therefore indistinguishable from a genuine absence.
 func extractStreamsFromPlaylistTree(items []playerJSPlaylistItem, playerURL, playerLabel string, season, episode int, voiceID string) ([]domain.StreamSource, []domain.SubtitleSource) {
 	var streams []domain.StreamSource
 	var subs []domain.SubtitleSource
@@ -971,6 +1066,54 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 	return allStreams, allSubs, nil
 }
 
+// playerProbeResult is one candidate's outcome, indexed by candidate rank so the
+// merged response keeps the ranked preference regardless of completion order.
+type playerProbeResult struct {
+	streams []domain.StreamSource
+	subs    []domain.SubtitleSource
+	err     error
+}
+
+// probePlayerCandidates fetches every candidate with a bounded-parallel fan-out.
+//
+// Semantics preserved from the sequential version: EVERY candidate is probed (not
+// just the first success) and results are merged in rank order, de-duplicated by
+// URL. Only the wall-clock changed: latency is now the max of the round-trips
+// instead of their sum, and each candidate carries its own playerCandidateTimeout
+// sub-budget so a hung host cannot consume the whole PlayerResolveTimeout.
+func probePlayerCandidates(ctx context.Context, client *TLSClient, itemURL string, candidates []PlayerCandidate, season, episode int, voiceID string) []playerProbeResult {
+	results := make([]playerProbeResult, len(candidates))
+	sem := make(chan struct{}, playerFanoutConcurrency)
+	var wg sync.WaitGroup
+
+	for i, cand := range candidates {
+		wg.Add(1)
+		go func(idx int, c PlayerCandidate) {
+			defer wg.Done()
+
+			// Respect an already-cancelled caller instead of queueing for a slot.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				results[idx] = playerProbeResult{err: ctx.Err()}
+				return
+			}
+			defer func() { <-sem }()
+
+			// Per-candidate sub-budget: one hung player host must not consume the
+			// shared PlayerResolveTimeout and starve the candidates behind it.
+			candCtx, cancel := context.WithTimeout(ctx, playerCandidateTimeout)
+			defer cancel()
+
+			streams, subs, err := extractAllStreamsFromPlayer(candCtx, client, c.URL, itemURL, c.Label, season, episode, voiceID)
+			results[idx] = playerProbeResult{streams: streams, subs: subs, err: err}
+		}(i, cand)
+	}
+
+	wg.Wait()
+	return results
+}
+
 // resolveStreamsFromItemPage is the shared engine for all DLE GetStreams implementations.
 // It discovers all player candidates on the page, fetches them up to MaxPlayerIframes,
 // collects all playable streams across all balancers/qualities/dubbings, merges subtitles,
@@ -991,20 +1134,19 @@ func resolveStreamsFromItemPage(ctx context.Context, client *TLSClient, provider
 	seenSubURLs := make(map[string]bool)
 	var lastErr error
 
-	for _, cand := range candidates {
-		streams, subs, err := extractAllStreamsFromPlayer(ctx, client, cand.URL, itemURL, cand.Label, season, episode, voiceID)
-		if err != nil {
-			lastErr = err
+	for _, res := range probePlayerCandidates(ctx, client, itemURL, candidates, season, episode, voiceID) {
+		if res.err != nil {
+			lastErr = res.err
 			continue
 		}
 
-		for _, s := range streams {
+		for _, s := range res.streams {
 			if !seenStreamURLs[s.URL] {
 				seenStreamURLs[s.URL] = true
 				resp.Streams = append(resp.Streams, s)
 			}
 		}
-		for _, sub := range subs {
+		for _, sub := range res.subs {
 			if !seenSubURLs[sub.URL] {
 				seenSubURLs[sub.URL] = true
 				resp.Subtitles = append(resp.Subtitles, sub)

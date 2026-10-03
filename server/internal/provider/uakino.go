@@ -301,8 +301,7 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 
 	var rating float64
 	ratesText := doc.Find(".rate-num, .imdb-rate, .movie-rating, [itemprop='ratingValue']").Text()
-	reRating := regexp.MustCompile(`([\d.]+)`)
-	m := reRating.FindString(ratesText)
+	m := reRatingNum.FindString(ratesText)
 	if m != "" {
 		if r, err := strconv.ParseFloat(m, 64); err == nil {
 			rating = r
@@ -346,21 +345,36 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 // демодулювати ("Failed to recognize file format."), тобто 100% відмова відтворення.
 // Тепер iframe лише завантажується і розбирається через ResolvePlayerHTML; якщо
 // жоден потік не розпізнано — повертається порожній список + ErrUnresolvablePlayer.
+// ONE budget covers the item-page fetch AND the iframe fan-out, rather than the
+// item page running under the client's bare 15s timeout while resolve got a
+// separate 20s (35s worst case). Trade-off: a slow item page now eats into the
+// resolve budget, so a provider that needs 12s to answer the item page has 8s
+// left instead of a fresh 20s. That is deliberate — the old stacking meant one
+// call could occupy a request for 35s.
 func (p *UakinoProvider) GetStreams(ctx context.Context, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
+	defer cancel()
+
 	html, err := p.client.Get(ctx, itemURL, p.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("uakino get streams html: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, PlayerResolveTimeout)
-	defer cancel()
-
 	return resolveStreamsFromItemPage(ctx, p.client, p.ID(), itemURL, html, season, episode, voiceID)
 }
 
+// reRatingNum extracts the first decimal number out of a rating label.
+// Shared by uakino and eneyida GetDetails; hoisted to package level because it
+// was compiled per request (regexp.MustCompile costs ~10µs and 5-15KB per call).
+var reRatingNum = regexp.MustCompile(`([\d.]+)`)
+
+// parseYear extracts a 1900-2099 year from arbitrary text.
+//
+// The pattern is the one already compiled once at package level in
+// bandera_types.go (reYearPattern) — recompiling it here ran on every card of
+// every catalogue page.
 func parseYear(text string) int {
-	re := regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
-	match := re.FindString(text)
+	match := reYearPattern.FindString(text)
 	if match != "" {
 		if yr, err := strconv.Atoi(match); err == nil {
 			return yr
@@ -382,4 +396,3 @@ func (p *UakinoProvider) ResolvePosterURL(poster string) string {
 	}
 	return strings.TrimRight(p.baseURL, "/") + "/" + strings.TrimLeft(poster, "/")
 }
-
