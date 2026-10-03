@@ -1,31 +1,23 @@
 {
     "platforms": {
         "android": {
-            "versionCode": 20260208,
-            "versionName": "20260208.0.0",
-            "releaseNotes": "General improvements and bug fixes.",
-            "url": "https://github.com/edhases/oxide_film/releases/download/20260208/oxide_film_v20260208.apk",
-            "sha256": "74543BB2B5D066BE64ADDBF76986C5546D1D657ADEA146F05C605E03A0EF1053",
-            "minVersionCode": 20260205
-        },
-        "windows": {
-            "versionCode": 20260208,
-            "versionName": "20260208.0.0",
-            "releaseNotes": "General improvements and bug fixes.",
-            "url": "https://github.com/edhases/oxide_film/releases/download/20260208/oxide_film_v20260208.exe",
-            "sha256": "EE5D73874B58731B7D36CCDC38E29195CCC94E589578B8C1223E3581AFF1C3A6",
-            "minVersionCode": 20260205
-        },
-        "linux": {
-            "versionCode": 20260208,
-            "versionName": "20260208.0.0",
-            "releaseNotes": "General improvements and bug fixes.",
+            "versionCode": 2,
+            "versionName": "2026.9.30",
+            "releaseNotes": "",
             "url": "",
             "sha256": "",
-            "minVersionCode": 20260205
+            "minVersionCode": 2
+        },
+        "windows": {
+            "versionCode": 2,
+            "versionName": "2026.9.30",
+            "releaseNotes": "",
+            "url": "",
+            "sha256": "",
+            "minVersionCode": 2
         }
     },
-    "versionName": "20260208.0.0",
-    "changelog": "- General improvements and bug fixes",
-    "versionCode": 20260208
+    "versionName": "2026.9.30",
+    "changelog": "",
+    "versionCode": 2
 }

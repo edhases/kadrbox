@@ -5,7 +5,6 @@ class AppConfig {
   AppConfig._();
 
   static const String appName = 'Oxide Film';
-  static const String appVersion = '1.0.0';
 
   // Oxide Go Server backend (high-performance lightweight Go + PostgreSQL + Redis via Cloudflare Tunnel)
   static const String defaultServerUrl = 'https://film.oxideteam.pp.ua';

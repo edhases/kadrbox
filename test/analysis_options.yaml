@@ -1,0 +1,19 @@
+# Tests are analyzed with the root config as their base, but relaxations that
+# only make sense in test code live here so they can never weaken lib/.
+#
+# `include` walks up to the nearest analysis_options.yaml, so lib/ keeps its full
+# lint set while test/ gets these exceptions.
+analyzer:
+  errors:
+    # Tests legitimately print diagnostics and use throwaway `__` bindings for
+    # positional callbacks.
+    avoid_print: ignore
+    unnecessary_underscores: ignore
+    # A test's `expect` blocks are deliberately sequential; the lint about
+    # sync gaps is meaningless when every await is the assertion boundary.
+    use_build_context_synchronously: ignore
+
+linter:
+  rules:
+    prefer_const_constructors: false
+    prefer_const_literals_to_create_immutables: false

@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
-import 'package:injectable/injectable.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -16,7 +16,6 @@ import 'settings_service.dart';
 enum UpdateCheckResult { upToDate, updateAvailable, forcedUpdate, error }
 
 /// Service for handling OTA updates via GitHub Releases
-@lazySingleton
 class UpdateService {
   final SettingsService _settingsService;
   final Dio _dio = Dio(
@@ -28,9 +27,53 @@ class UpdateService {
   );
   static const String _tag = 'UpdateService';
 
-  // URL to update.json on GitHub
+  /// OTA manifest location.
+  ///
+  /// MUST be an immutable ref (a release tag, or a path pinned to a release).
+  /// It used to be `.../master/update.json` and `master` does not exist in this
+  /// repository, so every single check 404'd.
+  ///
+  /// RESIDUAL RISK: this ref is still mutable in the tree — `raw.githubusercontent.com`
+  /// serves whatever is committed at that ref right now, with no caching of its
+  /// own. See [_trustedManifestSha256] for what actually stops that from
+  /// mattering, and note that serving this from a release tag plus TUF-style
+  /// signed root metadata is the real fix.
   static const String _updateJsonUrl =
-      'https://raw.githubusercontent.com/edhases/oxide_film/master/update.json';
+      'https://raw.githubusercontent.com/edhases/oxide_film/main/update.json';
+
+  /// Trust anchor for the OTA manifest: the SHA-256 digests of the manifest
+  /// revisions this build is willing to act on.
+  ///
+  /// This deliberately does *not* travel with the manifest. The manifest's own
+  /// `sha256` fields authenticate a download against the manifest, so an
+  /// attacker who can rewrite `update.json` can always supply a URL and a
+  /// matching digest. Pinning the digest of the manifest in the binary is what
+  /// actually breaks that: a tampered manifest no longer matches and the check
+  /// fails closed.
+  ///
+  /// ROTATION: cutting a release means (1) committing the new `update.json` and
+  /// (2) prepending its digest here in the same change. Digests are kept, not
+  /// replaced, so a client shipped one release ago still verifies instead of
+  /// hard-failing on a manifest it has never seen.
+  ///
+  /// RESIDUAL RISK: a digest is a pin, not a signature. There is no key
+  /// rotation and no revocation, the set must be edited by hand and shipped in
+  /// a new binary, and a digest pinned this way cannot be rolled back by
+  /// revoking anything server-side. Signed root metadata (TUF) is the real fix;
+  /// this is the minimum that makes a compromised manifest detectable.
+  static const Set<String> _trustedManifestSha256 = {
+    // update.json @ main, versionCode 2 / 2026.9.30
+    '30b59002eb806e6948eb3d912deeef27eb9ad33597b3394711e75dfe6c206bb1',
+  };
+
+  /// Per-platform escape hatch for the download digest check.
+  ///
+  /// Must stay `false` in release builds. `installUpdate` hands the downloaded
+  /// file to the OS installer, so with this set to `true` a compromised
+  /// download host is arbitrary code execution. It exists so a platform with no
+  /// publishable digest can be developed against locally; it is not a supported
+  /// configuration.
+  static const bool kAllowUnverifiedDownloads = false;
 
   UpdateService(this._settingsService);
 
@@ -64,12 +107,17 @@ class UpdateService {
       // Fetch update.json from GitHub (add timestamp to bust cache)
       final url = '$_updateJsonUrl?t=${DateTime.now().millisecondsSinceEpoch}';
 
-      final response = await _dio.get(
+      final response = await _dio.get<List<int>>(
         url,
         options: Options(
-          responseType: ResponseType.json,
+          // Fetch raw bytes: the trust anchor is a digest over the exact
+          // response body, so it must be hashed before it is parsed.
+          responseType: ResponseType.bytes,
           receiveTimeout: const Duration(seconds: 10),
           sendTimeout: const Duration(seconds: 10),
+          // The manifest decides what gets executed on the device. Do not let a
+          // proxy or a captive portal answer for it.
+          headers: const {'Cache-Control': 'no-cache'},
         ),
       );
 
@@ -81,12 +129,29 @@ class UpdateService {
         return (UpdateCheckResult.error, null);
       }
 
-      Object data = response.data;
-      if (data is String) {
-        data = jsonDecode(data);
+      final body = response.data;
+      if (body == null || body.isEmpty) {
+        Logger.w('Empty update.json response', tag: _tag);
+        return (UpdateCheckResult.error, null);
       }
 
-      final updateInfo = UpdateInfo.fromJson(data as Map<String, dynamic>);
+      final digest = sha256.convert(body).toString().toLowerCase();
+      if (!_trustedManifestSha256.contains(digest)) {
+        Logger.e(
+          'update.json digest $digest is not a trusted manifest. Refusing to '
+          'act on it. Update _trustedManifestSha256 in this file.',
+          tag: _tag,
+        );
+        return (UpdateCheckResult.error, null);
+      }
+
+      Object? data = jsonDecode(utf8.decode(body));
+      if (data is! Map<String, dynamic>) {
+        Logger.w('update.json is not a JSON object', tag: _tag);
+        return (UpdateCheckResult.error, null);
+      }
+
+      final updateInfo = UpdateInfo.fromJson(data);
       final platformInfo = updateInfo.forCurrentPlatform;
 
       if (platformInfo == null) {
@@ -116,9 +181,16 @@ class UpdateService {
       Logger.d('App is up to date', tag: _tag);
       return (UpdateCheckResult.upToDate, null);
     } on DioException catch (e) {
+      // "Cannot reach the manifest" and "you are current" are different facts.
+      // Reporting 404 as upToDate is what let the dead `master` URL masquerade
+      // as a healthy updater for the entire life of the feature.
       if (e.response?.statusCode == 404) {
-        Logger.d('No update.json found (404), assuming up to date', tag: _tag);
-        return (UpdateCheckResult.upToDate, null);
+        Logger.e(
+          'update.json not found at $_updateJsonUrl. The OTA manifest URL is '
+          'wrong or the ref does not exist.',
+          tag: _tag,
+        );
+        return (UpdateCheckResult.error, null);
       }
       Logger.e('Error checking for updates', tag: _tag, error: e);
       return (UpdateCheckResult.error, null);
@@ -144,6 +216,19 @@ class UpdateService {
       final expectedHash = platformInfo.sha256;
       if (downloadUrl.isEmpty) {
         throw UnsupportedError('No download URL for current platform');
+      }
+      // The digest is what stands between a hostile mirror and the OS
+      // installer. An absent digest used to skip verification silently and
+      // install anyway; it is now a hard failure unless the compile-time
+      // escape hatch above is explicitly turned on.
+      if (expectedHash.isEmpty && !kAllowUnverifiedDownloads) {
+        throw StateError(
+          'Manifest carries no SHA-256 for this platform; refusing to install '
+          'an unverified binary',
+        );
+      }
+      if (!downloadUrl.startsWith('https://')) {
+        throw StateError('Refusing to download an update over $downloadUrl');
       }
       final extension = Platform.isAndroid ? 'apk' : 'exe';
 
