@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:window_manager/window_manager.dart';
 import '../../core/config/app_config.dart';
 import '../../core/error/exceptions.dart';
 import '../../core/network/api_client.dart';
@@ -344,6 +345,15 @@ class OxideServerService {
           refreshToken: refreshToken,
         );
         Logger.i('OAuth $provider sign in successful: $userEmail', tag: _tag);
+        if (!kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.windows ||
+                defaultTargetPlatform == TargetPlatform.linux ||
+                defaultTargetPlatform == TargetPlatform.macOS)) {
+          try {
+            await windowManager.show();
+            await windowManager.focus();
+          } catch (_) {}
+        }
       } else {
         throw Exception('Токени не отримано від сервера авторизації');
       }
@@ -366,19 +376,30 @@ class OxideServerService {
         : '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
     final safeTitle = htmlEscape.convert(title);
     final safeMessage = htmlEscape.convert(message);
-    final autoClose = success
-        ? '<p class="hint" id="countdown"></p>\n'
-              '    <button class="btn" onclick="window.close()">Закрити вкладку</button>\n'
+    final actionHtml = success
+        ? '<p class="hint" id="hint-text">Тепер ви можете повернутися до програми Oxide Film.</p>\n'
+              '    <button class="btn" id="close-btn" onclick="attemptClose()">Закрити вкладку</button>\n'
               '    <script>\n'
-              '      var s = 8;\n'
-              '      var el = document.getElementById("countdown");\n'
-              '      function tick() {\n'
-              '        if (s <= 0) { window.close(); el.textContent = "Можете закрити цю вкладку вручну."; return; }\n'
-              '        el.textContent = "Вкладка закриється автоматично через " + s + " с.";\n'
-              '        s--;\n'
-              '        setTimeout(tick, 1000);\n'
+              '      function attemptClose() {\n'
+              '        try {\n'
+              '          window.opener = null;\n'
+              '          window.open("", "_self");\n'
+              '          window.close();\n'
+              '        } catch (e) {}\n'
+              '        setTimeout(function() {\n'
+              '          var hint = document.getElementById("hint-text");\n'
+              '          if (hint) {\n'
+              '            hint.innerHTML = "Браузер блокує закриття з міркувань безпеки.<br>Будь ласка, закрийте її хрестиком або натисніть <b>Ctrl + W</b>.";\n'
+              '            hint.style.color = "#cbd5e1";\n'
+              '          }\n'
+              '          var btn = document.getElementById("close-btn");\n'
+              '          if (btn) {\n'
+              '            btn.innerHTML = "Натисніть Ctrl + W";\n'
+              '            btn.style.borderColor = "#6366f1";\n'
+              '          }\n'
+              '        }, 150);\n'
               '      }\n'
-              '      tick();\n'
+              '      try { window.close(); } catch(e) {}\n'
               '    </script>'
         : '<button class="btn" onclick="window.close()">Закрити вкладку</button>';
     return '''<!DOCTYPE html>
@@ -439,7 +460,7 @@ class OxideServerService {
     <div class="icon">$icon</div>
     <h1>$safeTitle</h1>
     <p class="msg">$safeMessage</p>
-    $autoClose
+    $actionHtml
   </div>
 </body>
 </html>''';
