@@ -50,6 +50,24 @@ UPDATE watch_history SET duration_ms  = 0 WHERE duration_ms  < 0;
 UPDATE watch_history SET position_ms = duration_ms
     WHERE duration_ms > 0 AND position_ms > duration_ms;
 
+-- Deduplicate watch_history rows where setting season/episode < 1 to NULL would
+-- collide with an existing row under uq_user_history (user_id, media_id, provider_id, season, episode).
+-- Keeps the most recently watched / further progressed row.
+WITH duplicates AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id, media_id, provider_id,
+                            (CASE WHEN season IS NOT NULL AND season < 1 THEN NULL ELSE season END),
+                            (CASE WHEN episode IS NOT NULL AND episode < 1 THEN NULL ELSE episode END)
+               ORDER BY watched_at DESC, position_ms DESC, id DESC
+           ) AS rn
+    FROM watch_history
+)
+DELETE FROM watch_history
+WHERE id IN (
+    SELECT id FROM duplicates WHERE rn > 1
+);
+
 UPDATE watch_history SET season  = NULL WHERE season  IS NOT NULL AND season  < 1;
 UPDATE watch_history SET episode = NULL WHERE episode IS NOT NULL AND episode < 1;
 
