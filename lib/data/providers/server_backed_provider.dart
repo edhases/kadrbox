@@ -530,39 +530,86 @@ class ServerBackedProvider extends ContentProvider {
 
   MediaDetails _mapDetails(Map<String, dynamic> json) {
     final item = _mapItem(json);
-    final seasonsJson = json['seasons'];
-    List<Season>? seasons;
-    if (seasonsJson is List) {
-      seasons = seasonsJson.whereType<Map>().map((s) {
-        final sm = Map<String, dynamic>.from(s);
-        final eps = sm['episodes'];
-        return Season(
-          number: (sm['number'] as num?)?.toInt() ?? 0,
-          title: sm['title'] as String?,
-          episodes: eps is List
-              ? eps.whereType<Map>().map((e) {
-                  final em = Map<String, dynamic>.from(e);
-                  final rawRef = em['stream_ref'] ?? em['url'];
-                  final String? refStr = rawRef is String
-                      ? rawRef
-                      : (rawRef != null ? jsonEncode(rawRef) : null);
-                  return Episode(
-                    number: (em['number'] as num?)?.toInt() ?? 0,
-                    title: em['title'] as String?,
-                    streamRef: refStr,
-                  );
-                }).toList()
-              : const [],
-        );
-      }).toList();
-    }
     final genres = json['genres'];
     return MediaDetails(
       item: item,
       fullDescription: json['description'] as String?,
       genres: genres is List ? genres.map((e) => e.toString()).toList() : null,
-      seasons: seasons,
+      seasons: _mapSeasons(json['seasons']),
+      voiceovers: _mapVoiceovers(json['voiceovers']),
     );
+  }
+
+  /// Parses a `seasons` array, or null when the key is absent.
+  ///
+  /// null and `[]` mean different things: null is "the backend said nothing
+  /// about seasons", which is what a movie looks like, and `MediaDetails`
+  /// relies on that to decide whether to render an episode picker.
+  List<Season>? _mapSeasons(Object? raw) {
+    if (raw is! List) return null;
+    final result = <Season>[];
+    for (final entry in raw.whereType<Map>()) {
+      result.add(_mapSeason(entry));
+    }
+    return result;
+  }
+
+  Season _mapSeason(Map<dynamic, dynamic> raw) {
+    final sm = Map<String, dynamic>.from(raw);
+    final eps = sm['episodes'];
+    final episodes = <Episode>[];
+    if (eps is List) {
+      for (final entry in eps.whereType<Map>()) {
+        episodes.add(_mapEpisode(entry));
+      }
+    }
+    return Season(
+      number: (sm['number'] as num?)?.toInt() ?? 0,
+      title: sm['title'] as String?,
+      episodes: episodes,
+    );
+  }
+
+  Episode _mapEpisode(Map<dynamic, dynamic> raw) {
+    final em = Map<String, dynamic>.from(raw);
+    final ref = em['stream_ref'] ?? em['url'];
+    final String? refStr;
+    if (ref is String) {
+      refStr = ref;
+    } else if (ref == null) {
+      refStr = null;
+    } else {
+      refStr = jsonEncode(ref);
+    }
+    return Episode(
+      number: (em['number'] as num?)?.toInt() ?? 0,
+      title: em['title'] as String?,
+      streamRef: refStr,
+    );
+  }
+
+  /// Parses the `voiceovers` array. Always returns a list, never null.
+  ///
+  /// Backends that predate the field omit it entirely, so the caller gets an
+  /// empty list and keeps its pre-voiceover behaviour instead of crashing on a
+  /// null. A voiceover without a name is dropped: the UI has nothing to label
+  /// it with, and an unnamed entry would render as a blank dropdown row.
+  List<Voiceover> _mapVoiceovers(Object? raw) {
+    if (raw is! List) return const [];
+    final result = <Voiceover>[];
+    for (final entry in raw.whereType<Map>()) {
+      final vm = Map<String, dynamic>.from(entry);
+      final name = vm['name'];
+      if (name is! String || name.isEmpty) continue;
+      result.add(
+        Voiceover(
+          id: _asString(vm['id']) ?? name,
+          name: name,
+          seasons: _mapSeasons(vm['seasons']) ?? const [],
+        ),
+      );
+    }
+    return result;
   }
 
   StreamSource _mapStream(Map<String, dynamic> json) {
@@ -585,7 +632,12 @@ class ServerBackedProvider extends ContentProvider {
       quality: _mapQuality(_asString(json['quality'])),
       type: _mapStreamType(url),
       language: language,
-      voiceover: voiceover ?? player,
+      // Deliberately NOT `voiceover ?? player`. A player is a CDN/balancer
+      // ("HDVB", "Ashdi"), a voiceover is a dubbing studio ("1+1"). Falling
+      // back put CDN names in the voiceover dropdown, which is exactly the
+      // confusion this separation removes. DLE streams carry no studio, so
+      // their voiceover stays null and the selector labels them by player.
+      voiceover: voiceover,
       sourceName: player,
       headers: headers is Map
           ? headers.map((k, v) => MapEntry(k.toString(), v.toString()))

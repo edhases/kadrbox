@@ -54,32 +54,40 @@ func TestUakino_ParsesCatalogFixture(t *testing.T) {
 		id         string
 	}{
 		{
-			idx: 0, title: "Sample Movie", year: 2021,
-			posterPath: "/uploads/posts/sample.jpg", mediaType: "movie",
-			id: "https://uakino.biz/1-sample-movie.html",
+			// Рік на живому сайті лежить у рядку «Рік виходу:» з
+			// посиланням /find/year/YYYY/. Старий селектор .movie-date
+			// на uakino.biz не трапляється взагалі, тож рік був 0.
+			idx: 0, title: "Погані вожаті", year: 2026,
+			posterPath: "/uploads/mini/poster/9d/b2eec283.webp", mediaType: "movie",
+			id: "https://uakino.biz/filmy/genre_comedy/36141-seredina-90.html",
 		},
 		{
-			// Two anchors in .movie-title. Without .First() the title came out
-			// as "Дюна: Частина друга Фантастика" paired with the first href.
-			idx: 1, title: "Дюна: Частина друга", year: 2024,
-			posterPath: "/uploads/posts/dune-2.jpg", mediaType: "movie",
-			id: "https://uakino.biz/123-dune-chastyna-druha.html",
+			// /animeukr/anime-series/ містить і «anime», і «series».
+			// Перевірка anime має бути першою, інакше картка
+			// прочиталася б як серіал.
+			idx: 1, title: "Агенти часу", year: 2025,
+			posterPath: "/uploads/mini/poster/7c/animated.webp", mediaType: "anime",
+			id: "https://uakino.biz/animeukr/anime-series/35681-seredina-90.html",
 		},
 		{
 			// Poster only in data-src: the lazy-loaded case.
-			idx: 2, title: "Атака титанів", year: 2013,
-			posterPath: "/uploads/posts/shingeki.jpg", mediaType: "movie",
-			id: "https://uakino.biz/456-ataka-titanov.html",
+			idx: 2, title: "Снігопад", year: 2019,
+			posterPath: "/uploads/mini/poster/aa/snowfall.webp", mediaType: "series",
+			id: "https://uakino.biz/seriesss/drama_series/35629-seredina-90.html",
 		},
 		{
-			idx: 3, title: "Гравіті Фоллз", year: 2012,
-			posterPath: "/uploads/posts/gravity-falls.jpg", mediaType: "series",
-			id: "https://uakino.biz/serials/789-gravity-falls.html",
+			// /cartoon/cartoonseries/ містить і «cartoon», і «series» —
+			// та сама вимога до порядку перевірок.
+			idx: 3, title: "Малюк Спіру", year: 2004,
+			posterPath: "/uploads/mini/poster/bb/spiroul.webp", mediaType: "cartoon",
+			id: "https://uakino.biz/cartoon/cartoonseries/36136-seredina-90.html",
 		},
 		{
-			idx: 4, title: "Людина-паук", year: 2018,
-			posterPath: "/uploads/posts/spiderman.jpg", mediaType: "cartoon",
-			id: "https://uakino.biz/cartoon/890-spiderman.html",
+			// Корінь без маркера розділу: тип лишається movie.
+			// Такі URL бувають у результатах пошуку.
+			idx: 4, title: "Дюна: Частина друга", year: 2024,
+			posterPath: "/uploads/mini/poster/dd/dune.webp", mediaType: "movie",
+			id: "https://uakino.biz/123-dune-chastyna-druha.html",
 		},
 	}
 

@@ -1,0 +1,73 @@
+[
+  {
+    "title": "Сезон 1",
+    "folder": [
+      {
+        "title": "Серія 1",
+        "file": "{1+1}https://calypso.tortuga.tw/hls/serials/muhtesem.yuzyil/s01/muhtesem.yuzyil.s01e01.1plus1.mvo_66961/hls/index.m3u8(subtitle:)",
+        "poster": "https://calypso.tortuga.tw/content/stream/serials/muhtesem.yuzyil/s01/muhtesem.yuzyil.s01e01.1plus1.mvo_66961/screen.jpg",
+        "subtitle": "",
+        "id": "66961",
+        "vid": "66961"
+      },
+      {
+        "title": "Серія 2",
+        "file": "{1+1}https://calypso.tortuga.tw/hls/serials/muhtesem.yuzyil/s01/muhtesem.yuzyil.s01e02.1plus1.mvo_66962/hls/index.m3u8(subtitle:)",
+        "poster": "",
+        "subtitle": "",
+        "id": "66962",
+        "vid": "66962"
+      },
+      {
+        "title": "Трейлер",
+        "file": "{1+1}https://calypso.tortuga.tw/hls/trailers/muhtesem_yuzyil_2011/hls/index.m3u8(subtitle:)",
+        "poster": "",
+        "subtitle": "",
+        "id": "66960",
+        "vid": "66960"
+      },
+      {
+        "title": "Серія 3",
+        "file": "{1+1}https://calypso.tortuga.tw/hls/serials/muhtesem.yuzyil/s01/muhtesem.yuzyil.s01e03.1plus1.mvo_66963/hls/index.m3u8?geoblock=1(subtitle:[Українська]https://calypso.tortuga.tw/sub/s01e03.uk.vtt)",
+        "poster": "",
+        "subtitle": "[Українська]https://calypso.tortuga.tw/sub/s01e03.uk.vtt",
+        "id": "66963",
+        "vid": "66963"
+      }
+    ]
+  },
+  {
+    "title": "Сезон 2",
+    "folder": [
+      {
+        "title": "Серія 1",
+        "file": "{2+2}https://calypso.tortuga.tw/hls/serials/muhtesem.yuzyil/s02/muhtesem.yuzyil.s02e01.2plus2.mvo_67001/hls/index.m3u8(subtitle:)",
+        "poster": "",
+        "subtitle": "",
+        "id": "67001",
+        "vid": "67001"
+      },
+      {
+        "title": "Серія 2",
+        "file": "{2+2}https://calypso.tortuga.tw/hls/serials/muhtesem.yuzyil/s02/muhtesem.yuzyil.s02e02.2plus2.mvo_67002/hls/index.m3u8(subtitle:)",
+        "poster": "",
+        "subtitle": "",
+        "id": "67002",
+        "vid": "67002"
+      }
+    ]
+  },
+  {
+    "title": "Сезон 3",
+    "folder": [
+      {
+        "title": "Серія 1",
+        "file": "{2+2}https://calypso.tortuga.tw/hls/serials/muhtesem.yuzyil/s03/muhtesem.yuzyil.s03e01.2plus2.mvo_67051/hls/index.m3u8(subtitle:)",
+        "poster": "",
+        "subtitle": "",
+        "id": "67051",
+        "vid": "67051"
+      }
+    ]
+  }
+]

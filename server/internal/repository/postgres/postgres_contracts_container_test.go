@@ -975,7 +975,7 @@ func TestCtRepositorySanitisesRatherThanRejects(t *testing.T) {
 	h := &domain.WatchHistory{
 		UserID: userID, MediaID: "ct-dirty", ProviderID: "uakino", Title: "t",
 		PositionMs: 500, DurationMs: 100, // position beyond duration
-		Year:       &outOfRangeYear, Rating: &outOfRangeRating,
+		Year: &outOfRangeYear, Rating: &outOfRangeRating,
 		Season: &zeroSeason, Episode: &zeroEpisode,
 		MediaType: "  MOVIE  ",
 	}

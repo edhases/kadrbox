@@ -1,0 +1,10 @@
+{
+    "comment":  "Вектор розшифровки data-tag: реальні ciphertext/iv/salt з uaserials.com/422-velychne-stolittya-roksolana-2011s.html (2026-10-05).",
+    "passphrase":  "297796CCB81D255125",
+    "tag":  {
+                "ciphertext":  "4f28gsXfsdAoS5ApG3bZFnKy8Esfh0EI8WTyOqBgGqDS61Jv0k7C1KBkWVJryc1sTPmhZJZ4r3IB82TpQWCwvi2Ksh45CiaDvNQEF5TvQXRVAdqaCqx7q/gkDql3cYK4flf343PFv4qe/iWvNtYtSRVzoHb856v2jJcv07sijEX1mnNmnp9NpK4S+L/6mWIR",
+                "iv":  "e454641dbf7a315191dd7b6547771a42",
+                "salt":  "556e6fce84fec3e81764b787d888a6565278f67635ba056555d0af9f8680bb9088117341bab6896cc59ff1894001bd6da14be30e1c3844d9df05930d6141dad2e374024b0b14caf0be414bd797d2a35b712e2f89c96f491d19be1a75ee7fb267e951888e34d7bb08bdeb4b0a38e3dfa3590982b899682d8689521f43a7fff6ac459fe004048129c86b6c7e86ad5d74ee6850e576d25ff358b59de55e4072da59fcb8e5adea03f135610b0008cbefea78a93cade4c9a16a87ce7e2209f2758060ea10a19a630dd979e3a43a388fb4dc5b3c4c25a63713f46ebe3608d2b02758a59366f26ccf6d1f51a4ab6dfa075a9c565c3d4f3c517c351ecee867a092c64c63"
+            },
+    "plain":  "[{\"tabName\":\"Плеєр\",\"url\":\"https:\\/\\/tortuga.tw\\/embed\\/98\"},{\"tabName\":\"Трейлер\",\"url\":\"https:\\/\\/tortuga.tw\\/vod\\/5008\"}]"
+}

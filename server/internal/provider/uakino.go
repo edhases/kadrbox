@@ -117,6 +117,17 @@ func (p *UakinoProvider) GetByCategory(ctx context.Context, category, contentTyp
 	return p.fetchCatalog(ctx, reqURL)
 }
 
+// getSection повертає слаг розділу uakino.biz.
+//
+// Усі чотири значення перевірені живими запитами (200 OK):
+//
+//	/filmy/     фільми
+//	/seriesss/  серіали  (так, з трьома s — це не помилка)
+//	/cartoon/   мультфільми та мультсеріали
+//	/animeukr/  аніме
+//
+// Значення, яких на живому сайті немає: /multfilmy/ (404),
+// /anime/ (404), /serials/ (404).
 func (p *UakinoProvider) getSection(contentType string) string {
 	switch contentType {
 	case "movie":
@@ -130,6 +141,38 @@ func (p *UakinoProvider) getSection(contentType string) string {
 	default:
 		return ""
 	}
+}
+
+// classifyByPath — єдине джерело правди про тип матеріалу за URL.
+//
+// Раніше дві різні сходи читавали один і той самий href:
+// fetchCatalog шукав «cartoon»/«мультфільм», а GetDetails — «mult».
+// Через це /multfilmy/123.html у каталозі давав movie, а на сторінці
+// опису — cartoon. Різниця була відкритим дефектом.
+//
+// Реальні шляхи uakino.biz (перевірено живими запитами):
+//
+//	/filmy/genre_comedy/36141-…            movie
+//	/seriesss/drama_series/35629-…         series
+//	/seriesss/subtitle-serials/…           series
+//	/cartoon/cartoonseries/36136-…         cartoon
+//	/animeukr/anime-series/35681-…         anime
+//
+// Порядок перевірок навмисний: /animeukr/anime-series/ містить і
+// «anime», і «series», а /cartoon/cartoonseries/ — і «cartoon», і
+// «series», тож anime та cartoon перевіряються ПЕРШИМИ. Інакше
+// мультсеріал прочитався б як серіал.
+func classifyByPath(href string) string {
+	lower := strings.ToLower(href)
+	switch {
+	case strings.Contains(lower, "animeukr"), strings.Contains(lower, "/anime/"):
+		return "anime"
+	case strings.Contains(lower, "cartoon"), strings.Contains(lower, "mult"):
+		return "cartoon"
+	case strings.Contains(lower, "seriesss"), strings.Contains(lower, "serial"):
+		return "series"
+	}
+	return "movie"
 }
 
 func (p *UakinoProvider) fetchCatalog(ctx context.Context, reqURL string) ([]domain.MediaItem, error) {
@@ -162,17 +205,16 @@ func (p *UakinoProvider) fetchCatalog(ctx context.Context, reqURL string) ([]dom
 		}
 		poster = p.ResolvePosterURL(poster)
 
+		// Рік на живому uakino.biz лежить у рядку «Рік виходу:» всередині
+		// .movie-desk-item, а старий селектор .movie-date/.year на сайті
+		// не трапляється взагалі (0 збігів), тож рік був завжди 0.
 		yearStr := s.Find(".movie-date, .year").Text()
 		year := parseYear(yearStr)
-
-		mediaType := "movie"
-		if strings.Contains(strings.ToLower(href), "serial") || strings.Contains(strings.ToLower(title), "серіал") {
-			mediaType = "series"
-		} else if strings.Contains(strings.ToLower(href), "anime") || strings.Contains(strings.ToLower(title), "аніме") {
-			mediaType = "anime"
-		} else if strings.Contains(strings.ToLower(href), "cartoon") || strings.Contains(strings.ToLower(title), "мультфільм") {
-			mediaType = "cartoon"
+		if year == 0 {
+			year = parseYear(s.Find(`a[href*="/find/year/"]`).First().Text())
 		}
+
+		mediaType := classifyByPath(href)
 
 		items = append(items, domain.MediaItem{
 			ID:         href,
@@ -336,17 +378,10 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 		}
 	}
 
-	mediaType := "movie"
-	lowerHref := strings.ToLower(itemURL)
-	if strings.Contains(lowerHref, "serial") {
-		mediaType = "series"
-	} else if strings.Contains(lowerHref, "mult") {
-		mediaType = "cartoon"
-	} else if strings.Contains(lowerHref, "anime") {
-		mediaType = "anime"
-	}
-
-	return &domain.MediaDetails{
+	// Тип матеріалу — та сама classifyByPath, що й у каталозі (див. її
+	// коментар: раніше дві різні сходи давали різні відповіді на одному
+	// й тому самому шляху).
+	details := &domain.MediaDetails{
 		MediaItem: domain.MediaItem{
 			ID:            itemURL,
 			ProviderID:    p.ID(),
@@ -355,7 +390,7 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 			PosterURL:     poster,
 			Year:          year,
 			Rating:        rating,
-			Type:          mediaType,
+			Type:          classifyByPath(itemURL),
 			URL:           itemURL,
 		},
 		Description: desc,
@@ -364,7 +399,18 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 		Director:    director,
 		Actors:      actors,
 		Duration:    duration,
-	}, nil
+	}
+
+	// Сезони й озвучки з дерева PlayerJS-плейлиста.
+	//
+	// На uakino.biz плеєр вантажиться окремим AJAX-запитом, і в
+	// статичному HTML сторінки опису його немає — тоді дерево не
+	// знайдеться і поля лишаться порожніми, що коректніше за вигадані
+	// сезони. Коли розділ вбудовує плеєр прямо в HTML (або iframe
+	// містить плейлист), сезони й озвучки заповнюються.
+	applyPlaylistDetails(ctx, p.client, p.baseURL, details, html, itemURL)
+
+	return details, nil
 }
 
 // GetStreams знаходить плеєр у iframe та резолвить його у прямий медіа-потік.

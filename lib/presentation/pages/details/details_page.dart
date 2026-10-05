@@ -49,6 +49,43 @@ class _DetailsPageState extends State<DetailsPage> {
   int? _selectedEpisode;
   bool _isLoadingEpisode = false;
 
+  /// Id of the dubbing studio picked in the voiceover selector.
+  ///
+  /// Null means "the first one", which is what the backend considers the
+  /// preferred studio (it sorts them by dub weight).
+  String? _selectedVoiceoverId;
+
+  /// Dubbing studios reported by the backend, each with its own season tree.
+  List<Voiceover> get _voiceovers =>
+      _details?.voiceovers ?? const <Voiceover>[];
+
+  /// The voiceover the selector currently points at.
+  ///
+  /// Never null while [_voiceovers] is non-empty.
+  Voiceover? get _activeVoiceover {
+    final all = _voiceovers;
+    if (all.isEmpty) return null;
+    final id = _selectedVoiceoverId;
+    if (id != null) {
+      for (final voiceover in all) {
+        if (voiceover.id == id) return voiceover;
+      }
+    }
+    return all.first;
+  }
+
+  /// Seasons of the active voiceover, falling back to the top-level seasons.
+  ///
+  /// A backend may report both, but the per-voiceover tree is the one whose
+  /// episode refs actually resolve for that studio, so it wins.
+  List<Season> get _activeSeasons {
+    final fromVoiceover = _activeVoiceover?.seasons;
+    if (fromVoiceover != null && fromVoiceover.isNotEmpty) {
+      return fromVoiceover;
+    }
+    return _details?.seasons ?? const [];
+  }
+
   @override
   void initState() {
     super.initState();
@@ -383,8 +420,10 @@ class _DetailsPageState extends State<DetailsPage> {
         _buildInfoRow(),
         const SizedBox(height: 24),
 
-        // Voiceover/Quality selector (if multiple streams)
-        if (_streams.length > 1) ...[
+        // Voiceover/Quality selector. Shown whenever the backend reported
+        // dubbing studios (one studio still needs naming) or when there is a
+        // real choice of streams.
+        if (_voiceovers.isNotEmpty || _streams.length > 1) ...[
           _buildStreamSelector(),
           const SizedBox(height: 16),
         ],
@@ -541,8 +580,11 @@ class _DetailsPageState extends State<DetailsPage> {
           const SizedBox(height: 24),
         ],
 
-        // Seasons & Episodes (for series)
-        if (_details?.isSeries == true) ...[
+        // Seasons & Episodes (for series). Skipped when the backend reported
+        // per-voiceover season trees: the voiceover selector above already
+        // renders season and episode pickers, and a second copy would offer
+        // the user two conflicting selections.
+        if (_details?.isSeries == true && _voiceovers.isEmpty) ...[
           _buildSeasonsSection(),
           const SizedBox(height: 24),
         ],
@@ -554,6 +596,14 @@ class _DetailsPageState extends State<DetailsPage> {
   }
 
   Widget _buildStreamSelector() {
+    // The backend's own season tree wins over anything derived from streams.
+    // DLE streams carry a CDN/player name at best and no episode numbers at
+    // all, so grouping them by `voiceover` produced a list of "Ashdi",
+    // "Zenith", "HDVB" where the user expects "1+1", "Postmodern".
+    if (_voiceovers.isNotEmpty) {
+      return _buildVoiceoverSelector();
+    }
+
     // Check if this is a series with episodes
     final hasEpisodes = _streams.any((s) => s.episode != null);
 
@@ -563,6 +613,259 @@ class _DetailsPageState extends State<DetailsPage> {
 
     // For movies - simple voiceover/quality selector
     return _buildMovieStreamSelector();
+  }
+
+  /// Voiceover selector driven by [MediaDetails.voiceovers].
+  ///
+  /// Shows studio → season → episode, the same hierarchy the backend reports.
+  /// A movie arrives here as one voiceover with one season holding one episode,
+  /// so the season and episode rows collapse away and only the studio list
+  /// remains.
+  Widget _buildVoiceoverSelector() {
+    final voiceovers = _voiceovers;
+    final current = _activeVoiceover;
+    if (current == null) return const SizedBox.shrink();
+
+    final seasons = current.seasons;
+    final season = _findSeason(current, _selectedSeason);
+    // `_findSeason` falls back to the first season, so this always matches what
+    // is actually rendered even when `_selectedSeason` points nowhere.
+    final seasonNumber = season?.number ?? 0;
+    final episodes = season?.episodes ?? const <Episode>[];
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.settings, size: 18, color: Colors.grey[400]),
+              const SizedBox(width: 8),
+              Text(
+                'Налаштування відтворення',
+                style: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Voiceover (dubbing studio) row. Chips rather than a dropdown so
+          // every studio is visible without an extra tap.
+          Row(
+            children: [
+              const Icon(Icons.record_voice_over, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: voiceovers.map((v) {
+                    return ChoiceChip(
+                      label: Text(v.name),
+                      selected: v.id == current.id,
+                      selectedColor: Theme.of(context).colorScheme.primary,
+                      onSelected: (_) => _selectVoiceover(v),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Season chips — only when there is a choice to make.
+          if (seasons.length > 1) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: seasons.map((s) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text('Сезон ${s.number}'),
+                      selected: s.number == seasonNumber,
+                      selectedColor: Theme.of(context).colorScheme.primary,
+                      onSelected: (_) => _selectSeason(s.number),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // Episode grid — only when there is a choice to make.
+          if (episodes.length > 1) ...[
+            Row(
+              children: [
+                const Icon(Icons.movie, size: 20),
+                const SizedBox(width: 12),
+                Text(
+                  'Серії (${episodes.length})',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: episodes.map((episode) {
+                final sameSeason = _selectedSeason == seasonNumber;
+                final selected =
+                    sameSeason && _selectedEpisode == episode.number;
+                return FocusableCard(
+                  onTap: () => _selectEpisode(seasonNumber, episode.number),
+                  borderRadius: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).dividerColor,
+                      ),
+                    ),
+                    child: Text(
+                      '${episode.number}',
+                      style: TextStyle(
+                        color: selected ? Colors.white : Colors.grey[300],
+                        fontWeight: _fontWeightFor(selected),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // Sources resolved for the current voiceover/episode.
+          ..._buildResolvedSourceTiles(),
+        ],
+      ),
+    );
+  }
+
+  static FontWeight _fontWeightFor(bool selected) {
+    if (selected) return FontWeight.bold;
+    return FontWeight.normal;
+  }
+
+  /// Season to show when nothing has been picked yet.
+  static int? _defaultSeasonNumber(Voiceover voiceover) {
+    if (voiceover.seasons.isEmpty) return null;
+    return voiceover.seasons.first.number;
+  }
+
+  /// Season [number] inside [voiceover], falling back to its first one.
+  Season? _findSeason(Voiceover voiceover, int? number) {
+    final seasons = voiceover.seasons;
+    if (seasons.isEmpty) return null;
+    if (number != null) {
+      final match = voiceover.seasonByNumber(number);
+      if (match != null) return match;
+    }
+    return seasons.first;
+  }
+
+  /// Player names of the streams resolved for the current selection.
+  ///
+  /// Shows the CDN ("HDVB") rather than the studio: the studio is already the
+  /// selector above, and the player is the only thing left that differs.
+  List<Widget> _buildResolvedSourceTiles() {
+    if (_streams.isEmpty) return const [];
+    // Until an episode is picked on a multi-season title, `_streams` holds
+    // whatever the series page url resolved to — not the episode the user is
+    // about to watch. Listing its CDN here would claim a source for an episode
+    // that was never resolved.
+    final seasons = _activeSeasons;
+    final singlePart =
+        seasons.length == 1 && seasons.first.episodes.length == 1;
+    final isUnambiguous = _selectedEpisode != null || singlePart;
+    if (!isUnambiguous) return const [];
+    final players = <String>[];
+    for (final stream in _streams) {
+      final name = stream.sourceName;
+      if (name == null || name.isEmpty) continue;
+      if (players.contains(name)) continue;
+      players.add(name);
+    }
+    if (players.isEmpty) return const [];
+    return [
+      Row(
+        children: [
+          const Icon(Icons.dns, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: players.map((name) {
+                return Chip(
+                  label: Text(name),
+                  avatar: const Icon(Icons.cast, size: 16),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  /// Title of the currently selected episode, or null when nothing is selected.
+  ///
+  /// The previous inline version indexed `seasons.first.episodes.first`
+  /// unguarded, so a details payload with an empty season threw a RangeError
+  /// inside the download handler.
+  String? _resolveEpisodeTitle() {
+    final seasons = _activeSeasons;
+    if (seasons.isEmpty || _selectedEpisode == null) return null;
+    Season? season;
+    for (final candidate in seasons) {
+      if (candidate.number == _selectedSeason) {
+        season = candidate;
+        break;
+      }
+    }
+    season ??= seasons.first;
+    for (final episode in season.episodes) {
+      if (episode.number == _selectedEpisode) return episode.title;
+    }
+    return null;
+  }
+
+  void _selectVoiceover(Voiceover voiceover) {
+    setState(() {
+      _selectedVoiceoverId = voiceover.id;
+      // Each studio numbers its seasons independently, so a season index
+      // carried over from another studio points at nothing.
+      _selectedSeason = _defaultSeasonNumber(voiceover);
+      _selectedEpisode = null;
+      _selectedStream = null;
+      _streams = [];
+    });
   }
 
   Widget _buildSeriesStreamSelector() {
@@ -1035,25 +1338,15 @@ class _DetailsPageState extends State<DetailsPage> {
     try {
       final downloadService = GetIt.I<DownloadService>();
 
+      final episodeTitle = _resolveEpisodeTitle();
+
       // For series, we need to pass season/episode
       await downloadService.downloadContent(
         item: _details!.item,
         source: stream,
         season: _selectedSeason,
         episode: _selectedEpisode,
-        episodeTitle: _details!.seasons != null && _selectedSeason != null
-            ? _details!.seasons!
-                  .firstWhere(
-                    (s) => s.number == _selectedSeason,
-                    orElse: () => _details!.seasons!.first,
-                  )
-                  .episodes
-                  .firstWhere(
-                    (e) => e.number == _selectedEpisode,
-                    orElse: () => _details!.seasons!.first.episodes.first,
-                  )
-                  .title
-            : null,
+        episodeTitle: episodeTitle,
         duration: _details!.duration?.inSeconds,
       );
 
@@ -1080,7 +1373,7 @@ class _DetailsPageState extends State<DetailsPage> {
   void _playStream({StreamSource? stream}) {
     final source = stream ?? _selectedStream ?? _streams.first;
     final title = _details?.item.title ?? '';
-    final subtitle = source.voiceover ?? source.quality.displayName;
+    final subtitle = _subtitleFor(source);
 
     context.push(
       '/player',
@@ -1100,6 +1393,23 @@ class _DetailsPageState extends State<DetailsPage> {
     );
   }
 
+  /// Human-readable label for a stream: studio, else CDN, else quality.
+  ///
+  /// The studio comes from the details payload (the user picked it), while a
+  /// stream only knows its studio when the backend spelled it out — a DLE
+  /// stream reports the player instead, so that is the next best label.
+  String _subtitleFor(StreamSource source) {
+    final selectedVoiceover = _activeVoiceover?.name;
+    if (selectedVoiceover != null && selectedVoiceover.isNotEmpty) {
+      return selectedVoiceover;
+    }
+    final voiceover = source.voiceover;
+    if (voiceover != null && voiceover.isNotEmpty) return voiceover;
+    final player = source.sourceName;
+    if (player != null && player.isNotEmpty) return player;
+    return source.quality.displayName;
+  }
+
   void _startWatchParty() {
     if (_streams.isEmpty) return;
 
@@ -1113,10 +1423,13 @@ class _DetailsPageState extends State<DetailsPage> {
   }
 
   Widget _buildSeasonsSection() {
-    if (_details == null || _details!.seasons == null) {
+    // `_activeSeasons`, not `details.seasons`: when the backend reported a
+    // per-voiceover season tree this section must describe the studio the
+    // user selected, not the top-level one.
+    final seasons = _activeSeasons;
+    if (seasons.isEmpty) {
       return const SizedBox.shrink();
     }
-    final seasons = _details!.seasons!;
 
     // Auto-select first season if not selected
     _selectedSeason ??= seasons.first.number;
@@ -1231,7 +1544,10 @@ class _DetailsPageState extends State<DetailsPage> {
     setState(() {
       _selectedSeason = season;
       _selectedEpisode = null;
+      // Dropping the resolved sources avoids showing episode 3's CDN under
+      // season 2 until a new episode is picked.
       _streams = [];
+      _selectedStream = null;
     });
   }
 
@@ -1250,18 +1566,14 @@ class _DetailsPageState extends State<DetailsPage> {
       }
 
       String targetId = widget.mediaId;
-      final currentDetails = _details;
-      if (currentDetails != null && currentDetails.seasons != null) {
-        for (final s in currentDetails.seasons!) {
-          if (s.number == season) {
-            for (final ep in s.episodes) {
-              if (ep.number == episode &&
-                  ep.streamRef != null &&
-                  ep.streamRef!.isNotEmpty) {
-                targetId = ep.streamRef!;
-                break;
-              }
-            }
+      for (final s in _activeSeasons) {
+        if (s.number != season) continue;
+        for (final ep in s.episodes) {
+          if (ep.number == episode &&
+              ep.streamRef != null &&
+              ep.streamRef!.isNotEmpty) {
+            targetId = ep.streamRef!;
+            break;
           }
         }
       }
@@ -1305,7 +1617,7 @@ class _DetailsPageState extends State<DetailsPage> {
       extra: {
         'url': stream.url,
         'title': '$title - $episodeTitle',
-        'subtitle': stream.voiceover ?? stream.quality.displayName,
+        'subtitle': _subtitleFor(stream),
         'streams': _streams,
         'mediaId': widget.mediaId,
         'providerId': widget.providerId,

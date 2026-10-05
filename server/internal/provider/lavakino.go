@@ -311,17 +311,7 @@ func (p *LavakinoProvider) GetDetails(ctx context.Context, itemURL string) (*dom
 		}
 	}
 
-	mediaType := "movie"
-	lowerHref := strings.ToLower(itemURL)
-	if strings.Contains(lowerHref, "serial") {
-		mediaType = "series"
-	} else if strings.Contains(lowerHref, "mult") || strings.Contains(lowerHref, "cartoon") {
-		mediaType = "cartoon"
-	} else if strings.Contains(lowerHref, "anime") {
-		mediaType = "anime"
-	}
-
-	return &domain.MediaDetails{
+	details := &domain.MediaDetails{
 		MediaItem: domain.MediaItem{
 			ID:            itemURL,
 			ProviderID:    p.ID(),
@@ -330,7 +320,7 @@ func (p *LavakinoProvider) GetDetails(ctx context.Context, itemURL string) (*dom
 			PosterURL:     poster,
 			Year:          year,
 			Rating:        rating,
-			Type:          mediaType,
+			Type:          lavakinoTypeByPath(itemURL),
 			URL:           itemURL,
 		},
 		Description: desc,
@@ -339,7 +329,32 @@ func (p *LavakinoProvider) GetDetails(ctx context.Context, itemURL string) (*dom
 		Director:    director,
 		Actors:      actors,
 		Duration:    duration,
-	}, nil
+	}
+
+	// Сезони й озвучки з дерева PlayerJS-плейлиста (спільно з uakino
+	// та eneyida). Якщо плейлиста немає — поля лишаються порожніми.
+	applyPlaylistDetails(ctx, p.client, p.baseURL, details, html, itemURL)
+
+	return details, nil
+}
+
+// lavakinoTypeByPath визначає тип матеріалу за шляхом URL.
+//
+// Слади розділів lavakino.net перевірені живими запитами: /filmys/,
+// /serialy/, /cartoonss/, /anime/ — усі 200 OK. Слади /films/ та
+// /series/ дають 404. Тому «serialy» і «cartoonss» — правильні
+// маркери саме для цього сайту.
+func lavakinoTypeByPath(href string) string {
+	lower := strings.ToLower(href)
+	switch {
+	case strings.Contains(lower, "/anime/"):
+		return "anime"
+	case strings.Contains(lower, "cartoonss"), strings.Contains(lower, "/cartoon/"), strings.Contains(lower, "/mult"):
+		return "cartoon"
+	case strings.Contains(lower, "serialy"), strings.Contains(lower, "/serial"):
+		return "series"
+	}
+	return "movie"
 }
 
 // GetStreams знаходить плеєр (hdvbua, ashdi, zenith) та розбирає прямі стріми.

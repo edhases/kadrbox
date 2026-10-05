@@ -197,9 +197,9 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 			Status string `json:"status"`
 		} `json:"segments"`
 		Items []struct {
-			ID      string   `json:"id"`
-			Title   string   `json:"title"`
-			Score   float64  `json:"score"`
+			ID      string  `json:"id"`
+			Title   string  `json:"title"`
+			Score   float64 `json:"score"`
 			Sources []struct {
 				SourceKey string `json:"source_key"`
 			} `json:"sources"`

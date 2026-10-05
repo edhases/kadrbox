@@ -1,0 +1,97 @@
+<!-- Фрагмент справжньої сторінки каталогу eneyida.tv.
+     Знято 2026-10 з https://eneyida.tv/films/ (Chrome120UserAgent,
+     Referer: https://eneyida.tv/), розмітка скорочена до карток.
+
+     Навіщо реальний фрагмент, а не вигаданий рядок у тесті: старий
+     селектор «h2.short_title a, .short_title a» проходив на вигаданому
+     маркові <h2 class="short_title"><a…> і не знаходив ЖОДНОЇ картки на
+     живому сайті, де .short_title — це сам <a class="short_title">.
+     Каталог був порожнім, а тест був зеленим.
+
+     Картка 1  /films/                  -> movie, без .metaBottom
+     Картка 2  .metaBottom «2 сезон 1 серія» в /series/ -> series
+     Картка 3  .metaBottom в /anime/   -> anime (розділ розрізняє)
+     Картка 4  .metaBottom в /cartoon-series/ -> cartoon
+     Картка 5  .short_subtitle без лінка року -> оригінальна назва з тексту
+     Картка 6  без .short_title (лише .short_img) -> пропускається
+     Картка 7  без href                  -> пропускається
+-->
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/10199-salmokdzhi-shepit-vody.html" id="short_img" title="Сальмокджі: Шепіт води">
+			<img data-src="/uploads/posts/2026-09/mv5bmte5nzg1mzytmdg5ys00zjyyltg2.webp" alt="Постер до Сальмокджі: Шепіт води">
+			<div class="mask fx_col fx_center fx_middle"><div><span class="fab fa-google-play"></span></div></div>
+			<div class="meta short_perc"><span class="ratingtypeplusminus ratingplus">+1</span><span data-vote-num-id="10199">1</span></div>
+			<div class="meta label_quel-hd">FHD 1080p</div>
+		</a>
+        <a class="short_title" id="short_title" href="https://eneyida.tv/10199-salmokdzhi-shepit-vody.html">Сальмокджі: Шепіт води</a>
+		<div class="short_subtitle"><a href="https://eneyida.tv/xfsearch/year/2026/">2026</a> &bull; Salmokji: Whispering Water</div>
+	</div>
+</article>
+
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/9516-temna-materiia-2024.html" id="short_img" title="Темна матерія">
+			<img data-src="/uploads/posts/2024-05/1715241899_p.jpg" alt="Постер до Темна матерія">
+			<div class="meta label_quel-hd">FHD 1080p</div>
+			<div class="metaBottom label_quel-camrip">2 сезон 1 серія</div>
+		</a>
+        <a class="short_title" id="short_title" href="https://eneyida.tv/9516-temna-materiia-2024.html">Темна матерія</a>
+		<div class="short_subtitle"><a href="https://eneyida.tv/xfsearch/year/2024/">2024</a> &bull; Dark Matter</div>
+	</div>
+</article>
+
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/10111-poza-mezhamy-chasu.html" id="short_img" title="Поза межами часу">
+			<img data-src="/uploads/posts/2026-09/poza.webp" alt="Постер до Поза межами часу">
+			<div class="meta label_quel-hd">FHD 1080p</div>
+			<div class="metaBottom label_quel-camrip">1 сезон 12 серія</div>
+		</a>
+        <a class="short_title" id="short_title" href="https://eneyida.tv/10111-poza-mezhamy-chasu.html">Поза межами часу</a>
+		<div class="short_subtitle"><a href="https://eneyida.tv/xfsearch/year/2026/">2026</a> &bull; Guangyin Zhi Wai</div>
+	</div>
+</article>
+
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/10168-zvilnyty-tu-vidmu.html" id="short_img" title="Звільнити ту відьму">
+			<img data-src="/uploads/posts/2026-09/vidma.webp" alt="Постер до Звільнити ту відьму">
+			<div class="meta label_quel-hd">FHD 1080p</div>
+			<div class="metaBottom label_quel-camrip">1 сезон 8 серія</div>
+		</a>
+        <a class="short_title" id="short_title" href="https://eneyida.tv/10168-zvilnyty-tu-vidmu.html">Звільнити ту відьму</a>
+		<div class="short_subtitle"><a href="https://eneyida.tv/xfsearch/year/2026/">2026</a> &bull; Release that Witch</div>
+	</div>
+</article>
+
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/6782-matrycia.html" id="short_img" title="Матриця: Воскресіння">
+			<img data-src="/uploads/posts/2021-12/1640692999_p.jpg" alt="Постер до Матриця: Воскресіння">
+			<div class="meta label_quel-hd">FHD 1080p</div>
+		</a>
+        <a class="short_title" id="short_title" href="https://eneyida.tv/6782-matrycia.html">Матриця: Воскресіння</a>
+		<div class="short_subtitle">The Matrix Resurrections</div>
+	</div>
+</article>
+
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/9999-bez-nazvy.html" id="short_img">
+			<img data-src="/uploads/posts/2026-09/anon.webp" alt="Без назви">
+			<div class="meta label_quel-hd">FHD 1080p</div>
+		</a>
+		<div class="short_subtitle"><a href="https://eneyida.tv/xfsearch/year/2026/">2026</a></div>
+	</div>
+</article>
+
+<article class="short related_item ignore-select clearfix">
+	<div class="short_in">
+		<a class="short_img img_box with_mask" href="https://eneyida.tv/9998-bez-href.html" id="short_img">
+			<img data-src="/uploads/posts/2026-09/anon2.webp" alt="Без href">
+		</a>
+        <a class="short_title" id="short_title">Без посилання</a>
+		<div class="short_subtitle"><a href="https://eneyida.tv/xfsearch/year/2026/">2026</a></div>
+	</div>
+</article>

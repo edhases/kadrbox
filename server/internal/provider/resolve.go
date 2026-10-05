@@ -242,6 +242,15 @@ func isPlayableMediaURL(raw string) bool {
 	if raw == "" || len(raw) > 2048 {
 		return false
 	}
+	// Другий рубеж (перший — scanPlayerURL): трейлер уже міг
+	// потрапити в стрим із розібраного плеєра, а не з кандидата на
+	// сторінці. На живому eneyida iframe трейлера
+	// https://hdvbua.pro/vid/97206?tr=1 віддає справжній m3u8
+	// .../hls/trailers/dark.matter.2024_97206/hls/index.m3u8,
+	// який зовні не відрізняється від серії.
+	if IsTrailerURL(raw) {
+		return false
+	}
 	// Markup, whitespace or an embedded quote means we grabbed a chunk of HTML.
 	if strings.ContainsAny(raw, "<>\"' \t\r\n") {
 		return false
@@ -429,6 +438,10 @@ var iframeHints = []string{
 
 // iframeSkips are comment widgets, ad slots, promo banners and social widgets that
 // regularly precede the real player inside the first <iframe> of a DLE page.
+//
+// «trailer» тут — лише перша лінія оборони. Реальний iframe трейлера на
+// eneyida.tv — https://hdvbua.pro/vid/97206?tr=1, де цього слова немає взагалі;
+// його ловить trailerGuard через scanPlayerURL.
 var iframeSkips = []string{
 	"about:blank", "javascript:", "data:", "recaptcha", "doubleclick",
 	"googlesyndication", "googleadservices", "adsbygoogle", "/ads/", "adframe",
@@ -477,6 +490,16 @@ func scanPlayerURL(raw string) playerURLScan {
 	if u, err := url.Parse(raw); err == nil {
 		s.host = u.Host
 		s.path = u.Path
+	}
+	// Окремо від iframeSkips: трейлер не має слова «trailer» у самому
+	// URL iframe-а, лише «?tr=1», а iframeSkips шукає підрядки.
+	// Регулярка trailerGuard (playlist_tree.go) ловить і «?tr=1», і
+	// «/trailers/» у внутрішньому шляху m3u8. Без цього трейлер
+	// отримував такий самий score, як справжній плеєр, і віддавав
+	// «грабельний» .../hls/trailers/.../index.m3u8 у список стримів.
+	if IsTrailerURL(raw) {
+		s.skip = true
+		return s
 	}
 	for _, skip := range iframeSkips {
 		if strings.Contains(s.lower, skip) {

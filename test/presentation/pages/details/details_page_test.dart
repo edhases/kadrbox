@@ -40,6 +40,12 @@ class _TestContentProvider extends ContentProvider {
   MediaDetails? customDetails;
   List<StreamSource>? customStreams;
 
+  /// Per-episode-ref sources, keyed by the id the page asks for.
+  final Map<String, List<StreamSource>> episodeStreams = {};
+
+  /// Every id `getStreams` was called with, in order.
+  final List<String> streamRequests = [];
+
   @override
   Future<MediaDetails> getDetails(String id) async {
     if (shouldThrow) throw Exception('Помилка завантаження деталей');
@@ -73,6 +79,9 @@ class _TestContentProvider extends ContentProvider {
     int? episode,
   }) async {
     if (shouldThrow) throw Exception('Помилка завантаження стрімів');
+    streamRequests.add(id);
+    final byRef = episodeStreams[id];
+    if (byRef != null) return byRef;
     return customStreams ??
         [
           StreamSource(
@@ -146,6 +155,8 @@ void main() {
     GetIt.I.registerSingleton<ProviderRegistry>(registry);
     GetIt.I.registerSingleton<FavoritesService>(favoritesService);
     GetIt.I.registerSingleton<DownloadService>(downloadService);
+    // FocusableCard resolves SettingsService for its focus behaviour.
+    GetIt.I.registerSingleton<SettingsService>(settingsService);
 
     await Future.delayed(const Duration(milliseconds: 50));
   });
@@ -344,6 +355,300 @@ void main() {
     expect(find.text('1'), findsWidgets);
     expect(find.text('2'), findsWidgets);
   });
+
+  testWidgets(
+    'DetailsPage prefers details.voiceover studios over stream voiceovers',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // Two DLE streams whose only distinguishing label is the CDN. The old
+      // selector grouped by `stream.voiceover`, so this rendered "HDVB" and
+      // "Ashdi" as the dubbing options.
+      provider.customStreams = const [
+        StreamSource(
+          url: 'https://cdn.tv/hdvb/master.m3u8',
+          sourceName: 'HDVB',
+          type: StreamType.hls,
+        ),
+        StreamSource(
+          url: 'https://cdn.tv/ashdi/master.m3u8',
+          sourceName: 'Ashdi',
+          type: StreamType.hls,
+        ),
+      ];
+
+      provider.customDetails = MediaDetails(
+        item: MediaItem(
+          id: 'series_vo',
+          providerId: 'test_provider',
+          title: 'Візит Президента',
+          type: ContentType.series,
+        ),
+        voiceovers: const [
+          Voiceover(
+            id: '1plus1',
+            name: '1+1',
+            seasons: [
+              Season(
+                number: 1,
+                episodes: [
+                  Episode(number: 1, title: 'Початок'),
+                  Episode(number: 2, title: 'Далі'),
+                ],
+              ),
+            ],
+          ),
+          Voiceover(
+            id: 'postmodern',
+            name: 'Postmodern',
+            seasons: [
+              Season(
+                number: 1,
+                episodes: [Episode(number: 1, title: 'Початок')],
+              ),
+            ],
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(buildTestWidget(mediaId: 'series_vo'));
+      await tester.pumpAndSettle();
+
+      // Studio names from the details payload.
+      expect(find.text('1+1'), findsOneWidget);
+      expect(find.text('Postmodern'), findsOneWidget);
+
+      // The CDN names must not have been offered as dubbing studios.
+      expect(find.text('HDVB'), findsNothing);
+      expect(find.text('Ashdi'), findsNothing);
+    },
+  );
+
+  testWidgets('DetailsPage renders season and episode pickers per voiceover', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    provider.customStreams = const [
+      StreamSource(url: 'https://cdn.tv/a.m3u8', sourceName: 'HDVB'),
+    ];
+
+    provider.customDetails = MediaDetails(
+      item: MediaItem(
+        id: 'series_4seasons',
+        providerId: 'test_provider',
+        title: 'Довгий серіал',
+        type: ContentType.series,
+      ),
+      voiceovers: const [
+        Voiceover(
+          id: 'a',
+          name: 'Студія A',
+          seasons: [
+            Season(
+              number: 1,
+              episodes: [Episode(number: 1), Episode(number: 2)],
+            ),
+            Season(number: 2, episodes: [Episode(number: 1)]),
+            Season(number: 3, episodes: [Episode(number: 1)]),
+            Season(number: 4, episodes: [Episode(number: 1)]),
+          ],
+        ),
+        Voiceover(
+          id: 'b',
+          name: 'Студія B',
+          seasons: [
+            Season(
+              number: 1,
+              episodes: [Episode(number: 1), Episode(number: 2)],
+            ),
+          ],
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(buildTestWidget(mediaId: 'series_4seasons'));
+    await tester.pumpAndSettle();
+
+    // Both studios listed.
+    expect(find.text('Студія A'), findsOneWidget);
+    expect(find.text('Студія B'), findsOneWidget);
+
+    // Four seasons for the active studio, but only two episodes in season 1.
+    expect(find.text('Сезон 1'), findsOneWidget);
+    expect(find.text('Сезон 2'), findsOneWidget);
+    expect(find.text('Сезон 3'), findsOneWidget);
+    expect(find.text('Сезон 4'), findsOneWidget);
+    expect(find.text('Серії (2)'), findsOneWidget);
+
+    // Exactly one episode section, not the old duplicate seasons section.
+    expect(find.text('Сезони та серії'), findsNothing);
+
+    // Switching studio must rebuild season and episode rows from THAT
+    // studio's tree. Студія B has a single season of two episodes, so the
+    // four season chips collapse into one episode row.
+    await tester.tap(find.text('Студія B'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Сезон 1'), findsNothing);
+    expect(find.text('Сезон 2'), findsNothing);
+    expect(find.text('Сезон 3'), findsNothing);
+    expect(find.text('Сезон 4'), findsNothing);
+    expect(find.text('Серії (2)'), findsOneWidget);
+    expect(find.text('Сезони та серії'), findsNothing);
+  });
+
+  testWidgets(
+    'DetailsPage does not render a series selector for a single-episode movie',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // The exact shape a DLE backend sends for a film: one season, one
+      // "episode", type movie.
+      provider.customDetails = MediaDetails(
+        item: MediaItem(
+          id: 'movie_single',
+          providerId: 'test_provider',
+          title: 'Одинокий фільм',
+          type: ContentType.movie,
+        ),
+        seasons: const [
+          Season(number: 1, episodes: [Episode(number: 1, title: 'Фільм')]),
+        ],
+        voiceovers: const [
+          Voiceover(
+            id: 'one',
+            name: 'Основна',
+            seasons: [
+              Season(number: 1, episodes: [Episode(number: 1)]),
+            ],
+          ),
+        ],
+      );
+
+      expect(provider.customDetails!.isSeries, isFalse);
+
+      await tester.pumpWidget(buildTestWidget(mediaId: 'movie_single'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Одинокий фільм'), findsOneWidget);
+      expect(find.text('Сезони та серії'), findsNothing);
+      expect(find.text('Сезон 1'), findsNothing);
+      expect(find.text('Серії (1)'), findsNothing);
+      // The studio is still named, so the user knows which dub will play.
+      expect(find.text('Основна'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'DetailsPage keeps the stream-based selector when no voiceovers are reported',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      provider.customStreams = const [
+        StreamSource(
+          url: 'https://cdn.tv/a.m3u8',
+          voiceover: 'Українська',
+          quality: StreamQuality.q1080p,
+        ),
+        StreamSource(
+          url: 'https://cdn.tv/b.m3u8',
+          voiceover: 'Російська',
+          quality: StreamQuality.q720p,
+        ),
+      ];
+
+      await tester.pumpWidget(buildTestWidget(mediaId: 'movie_legacy'));
+      await tester.pumpAndSettle();
+
+      // Backwards-compatible path: dropdowns built from the streams themselves.
+      expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+      expect(find.text('Українська'), findsOneWidget);
+      expect(find.text('Оригінал'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'DetailsPage plays the episode selected in the voiceover selector',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      provider.customStreams = const [
+        StreamSource(url: 'https://cdn.tv/default.m3u8', sourceName: 'HDVB'),
+      ];
+      provider.customDetails = MediaDetails(
+        item: MediaItem(
+          id: 'series_play',
+          providerId: 'test_provider',
+          title: 'Серіал',
+          type: ContentType.series,
+        ),
+        voiceovers: const [
+          Voiceover(
+            id: 'a',
+            name: '1+1',
+            seasons: [
+              Season(
+                number: 1,
+                episodes: [
+                  Episode(number: 1, streamRef: 'ref-e1'),
+                  Episode(number: 2, streamRef: 'ref-e2'),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+
+      // Return a distinct stream per requested episode ref.
+      provider.episodeStreams['ref-e2'] = [
+        StreamSource(
+          url: 'https://cdn.tv/episode2.m3u8',
+          sourceName: 'Ashdi',
+          type: StreamType.hls,
+        ),
+      ];
+
+      dynamic capturedExtra;
+      await tester.pumpWidget(
+        buildTestWidget(
+          mediaId: 'series_play',
+          onNavigate: (route, extra) {
+            if (route == '/player') capturedExtra = extra;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('2'));
+      await tester.pumpAndSettle();
+
+      expect(capturedExtra, isNotNull);
+      expect(capturedExtra['url'], 'https://cdn.tv/episode2.m3u8');
+      expect(capturedExtra['episode'], 2);
+      expect(capturedExtra['season'], 1);
+      // The subtitle is the studio the user picked, not the CDN.
+      expect(capturedExtra['subtitle'], '1+1');
+
+      // The episode's own stream ref resolved playback, not the series page url.
+      expect(provider.streamRequests, contains('ref-e2'));
+    },
+  );
 
   testWidgets(
     'DetailsPage shows error UI and allows retry when provider fails',
