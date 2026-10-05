@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/email"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/ws"
+	"github.com/edhases/kadrbox-server/internal/email"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/ws"
 )
 
 // Маршрути verify-email / resend-verification (додані в router.go):

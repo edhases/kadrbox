@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/logging"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/logging"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // captureRequestLogs перенаправляє логгер у буфер і повертає його.

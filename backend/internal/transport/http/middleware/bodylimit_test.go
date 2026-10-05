@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // TestBodyLimitRejectsOversizedContentLength перевіряє 413 для відомого розміру.

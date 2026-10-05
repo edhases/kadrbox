@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // stubPing будує probe-заглушку: повертає err після опційної затримки.
@@ -40,7 +40,7 @@ func decodeJSONBody(t *testing.T, rr *httptest.ResponseRecorder) map[string]stri
 
 // TestLivezAlwaysOK перевіряє, що liveness не залежить від залежностей.
 func TestLivezAlwaysOK(t *testing.T) {
-	h := middleware.New(stubPing(errors.New("redis down"), 0), "oxide-server").
+	h := middleware.New(stubPing(errors.New("redis down"), 0), "kadrbox-server").
 		WithPostgresPing(stubPing(errors.New("pg down"), 0))
 
 	rr := httptest.NewRecorder()
@@ -50,14 +50,14 @@ func TestLivezAlwaysOK(t *testing.T) {
 		t.Fatalf("очікувався 200, отримано %d", rr.Code)
 	}
 	body := decodeJSONBody(t, rr)
-	if body["status"] != "ok" || body["service"] != "oxide-server" {
+	if body["status"] != "ok" || body["service"] != "kadrbox-server" {
 		t.Errorf("очікувався {ok, oxide-server}, отримано %v", body)
 	}
 }
 
 // TestReadyzReady перевіряє 200, коли обидві залежності живі.
 func TestReadyzReady(t *testing.T) {
-	h := middleware.New(stubPing(nil, 0), "oxide-server").
+	h := middleware.New(stubPing(nil, 0), "kadrbox-server").
 		WithPostgresPing(stubPing(nil, 0))
 
 	rr := httptest.NewRecorder()
@@ -87,7 +87,7 @@ func TestReadyzDegraded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := middleware.New(stubPing(tt.redisErr, 0), "oxide-server").
+			h := middleware.New(stubPing(tt.redisErr, 0), "kadrbox-server").
 				WithPostgresPing(stubPing(tt.pgErr, 0))
 
 			rr := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestReadyzDegraded(t *testing.T) {
 // сервіс ніколи не повідомляє про готовність.
 func TestReadyzFailsClosedWithoutProbes(t *testing.T) {
 	rr := httptest.NewRecorder()
-	middleware.New(nil, "oxide-server").Readyz(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	middleware.New(nil, "kadrbox-server").Readyz(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("очікувався 503, отримано %d", rr.Code)
@@ -125,7 +125,7 @@ func TestReadyzTimesOutSlowDependency(t *testing.T) {
 		t.Fatalf("очікувався таймаут 2s, отримано %s", middleware.ReadinessTimeout)
 	}
 
-	h := middleware.New(stubPing(nil, 0), "oxide-server").
+	h := middleware.New(stubPing(nil, 0), "kadrbox-server").
 		WithPostgresPing(stubPing(nil, 3*time.Second))
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -143,7 +143,7 @@ func TestReadyzTimesOutSlowDependency(t *testing.T) {
 
 // TestHealthServeHTTPDispatch перевіряє диспетчеризацію за шляхом (для r.Mount).
 func TestHealthServeHTTPDispatch(t *testing.T) {
-	h := middleware.New(stubPing(nil, 0), "oxide-server").WithPostgresPing(stubPing(nil, 0))
+	h := middleware.New(stubPing(nil, 0), "kadrbox-server").WithPostgresPing(stubPing(nil, 0))
 
 	tests := []struct {
 		path string
@@ -189,7 +189,7 @@ func TestSetProbesAreProcessWide(t *testing.T) {
 
 	// New підхоплює процесні пінги, тож main.go достатньо викликати сеттери.
 	rr := httptest.NewRecorder()
-	middleware.New(middleware.RedisPing(), "oxide-server").
+	middleware.New(middleware.RedisPing(), "kadrbox-server").
 		Readyz(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 
 	if rr.Code != http.StatusOK {
@@ -204,7 +204,7 @@ func (p pgxPoolStub) Ping(ctx context.Context) error { return p.err }
 
 func TestPingerInterfaceIsSatisfiedBySingleMethod(t *testing.T) {
 	var p middleware.Pinger = pgxPoolStub{}
-	h := middleware.New(stubPing(nil, 0), "oxide-server").
+	h := middleware.New(stubPing(nil, 0), "kadrbox-server").
 		WithPostgresPing(p.Ping)
 
 	rr := httptest.NewRecorder()

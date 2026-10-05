@@ -10,7 +10,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // TestRequestContextSetsHeaderAndTraceID перевіряє, що trace id генерується,
@@ -166,7 +166,7 @@ func TestRequestContextTraceIDInLogRecord(t *testing.T) {
 // TestHealthHandlerImplementsHTTPHandler гарантує, що HealthHandler можна
 // використати як звичайний http.Handler (r.Mount).
 func TestHealthHandlerImplementsHTTPHandler(t *testing.T) {
-	var h http.Handler = middleware.New(nil, "oxide-server")
+	var h http.Handler = middleware.New(nil, "kadrbox-server")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 

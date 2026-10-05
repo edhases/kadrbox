@@ -19,7 +19,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/domain"
 )
 
 // UserStore covers every `userRepo` call made by AuthHandler.

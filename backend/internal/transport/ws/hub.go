@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/domain"
 	"github.com/gorilla/websocket"
 	goredis "github.com/redis/go-redis/v9"
 )

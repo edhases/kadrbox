@@ -118,8 +118,13 @@ __pycache__/
 /logoapp.png
 /icon.svg
 
-# Scripts
-/scripts/
+# Scratch scripts and local tooling are ignored, but scripts/ci/ is real
+# infrastructure: the forbidden-terms gate lives there and the workflow calls
+# it, so an untracked gate would mean CI silently stops checking.
+# /scripts/*  rather than  /scripts/  so the negations below can work at all.
+/scripts/*
+!/scripts/ci/
+!/scripts/ci/**
 
 # Graphify Knowledge Graph output & cache
 graphify-out/
@@ -156,3 +161,5 @@ ehthumbs.db
 *.tmp
 *.orig
 *~
+frontend/build/
+frontend/.dart_tool/

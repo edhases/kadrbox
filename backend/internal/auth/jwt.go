@@ -22,7 +22,7 @@ var (
 // (a different service, a staging key reuse, a mis-issued link token) is
 // rejected before any application logic runs.
 const (
-	Issuer   = "oxide-server"
+	Issuer   = "kadrbox-server"
 	Audience = "oxide-api"
 )
 

@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/domain"
-	"github.com/edhases/oxide-server/internal/email"
-	"github.com/edhases/oxide-server/internal/repository/postgres"
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/ws"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/email"
+	"github.com/edhases/kadrbox-server/internal/repository/postgres"
+	redisRepo "github.com/edhases/kadrbox-server/internal/repository/redis"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/ws"
 )
 
 type covFlowRig struct {

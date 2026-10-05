@@ -9,9 +9,9 @@ package http_test
 // rather than surfacing as a runtime nil dereference in production.
 
 import (
-	"github.com/edhases/oxide-server/internal/repository/postgres"
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/repository/postgres"
+	redisRepo "github.com/edhases/kadrbox-server/internal/repository/redis"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 var (

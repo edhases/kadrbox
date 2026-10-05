@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 	"github.com/google/uuid"
 )
 

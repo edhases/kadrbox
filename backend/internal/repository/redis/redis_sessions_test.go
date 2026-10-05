@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
+	redisRepo "github.com/edhases/kadrbox-server/internal/repository/redis"
 	"github.com/google/uuid"
 )
 

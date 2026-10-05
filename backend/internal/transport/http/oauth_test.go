@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 // generateValidTelegramHash рахує валідний HMAC-SHA256 хеш за специфікацією Telegram

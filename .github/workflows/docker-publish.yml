@@ -1,4 +1,4 @@
-name: Build & Push Oxide Server Docker Image
+name: Build & Push Kadrbox Server Docker Image
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/oxide-server
+  IMAGE_NAME: ${{ github.repository_owner }}/kadrbox-server
 
 # Р‘РµР· С†С–С”С— РіСЂСѓРїРё РїР°СЂР°Р»РµР»СЊРЅС– РїСѓС€С– РІ dev/main Р·Р°РїСѓСЃРєР°Р»Рё Р± РѕРґРЅРѕС‡Р°СЃРЅС– Р·Р±С–СЂРєРё Р·
 # РѕРґРЅР°РєРѕРІРёРј С‚РµРіРѕРј latest вЂ” РїРµСЂРµРєСЂРёРІР°СЋС‡РёР№ С‚РµРі С– РІРёС‚СЂР°С‡РµРЅРёР№ cache.

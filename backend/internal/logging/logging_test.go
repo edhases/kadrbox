@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/logging"
+	"github.com/edhases/kadrbox-server/internal/logging"
 )
 
 // TestNewFormats перевіряє, що format=json дає JSON, а решта — текст.

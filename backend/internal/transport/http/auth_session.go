@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/auth"
-	"github.com/edhases/oxide-server/internal/domain"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 	"github.com/google/uuid"
 )
 

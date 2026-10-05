@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/domain"
 	"github.com/gorilla/websocket"
 )
 

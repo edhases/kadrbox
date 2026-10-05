@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/auth"
 )
 
 // covPasswordMutateSegment повертає валідний хеш із заміненим $-сегментом idx (0..5).

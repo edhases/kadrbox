@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/auth"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -126,7 +126,7 @@ func TestValidateAccessTokenRejectsForeignIssuerAndAudience(t *testing.T) {
 		// The same secret used by a second service must not produce tokens this
 		// one accepts.
 		claims := validClaims(t)
-		claims.Issuer = "oxide-server"
+		claims.Issuer = "kadrbox-server"
 		claims.Audience = jwt.ClaimStrings{"oxide-web"}
 		token := signWith(t, jwt.SigningMethodHS256, claims, hardenSecret)
 

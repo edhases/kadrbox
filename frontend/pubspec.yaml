@@ -1,4 +1,4 @@
-name: oxide_film
+name: kadrbox
 description: "Cross-platform media parser for movies, series, cartoons & anime"
 publish_to: 'none'
 version: 2026.9.30+2

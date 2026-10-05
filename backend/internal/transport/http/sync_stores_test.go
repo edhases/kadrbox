@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/edhases/oxide-server/internal/domain"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 type memFavoritesStore struct {

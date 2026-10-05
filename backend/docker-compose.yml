@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   app:
-    image: ghcr.io/edhases/oxide-server:latest
+    image: ghcr.io/edhases/kadrbox-server:latest
     restart: unless-stopped
     stop_grace_period: 30s
     ports:

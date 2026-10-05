@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 // covAuthHandler будує AuthHandler з nil-залежностями.

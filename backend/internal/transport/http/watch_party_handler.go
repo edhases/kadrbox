@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
-	"github.com/edhases/oxide-server/internal/transport/ws"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/transport/ws"
 )
 
 // roomCodePattern дзеркалить перевірку всередині ws-хаба. Тут вона потрібна,

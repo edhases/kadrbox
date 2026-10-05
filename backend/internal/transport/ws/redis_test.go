@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/edhases/oxide-server/internal/domain"
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	redisRepo "github.com/edhases/kadrbox-server/internal/repository/redis"
 	"github.com/gorilla/websocket"
 )
 

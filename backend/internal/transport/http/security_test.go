@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	transportHttp "github.com/edhases/oxide-server/internal/transport/http"
+	transportHttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 // ---- мінімальний DNS-сервер для детермінованого тесту resolve-then-check ----

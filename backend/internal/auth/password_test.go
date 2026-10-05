@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/auth"
 )
 
 func TestArgon2idPasswordHashing(t *testing.T) {

@@ -20,9 +20,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/edhases/oxide-server/internal/domain"
-	"github.com/edhases/oxide-server/internal/repository/postgres"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/repository/postgres"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 // ErrNotFound mirrors the repository's sentinel for a missing row.

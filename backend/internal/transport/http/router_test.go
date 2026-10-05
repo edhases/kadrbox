@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/ws"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/ws"
 )
 
 // testAppURL використовується всіма NewRouter-тестами: allow-list джерел
@@ -35,7 +35,7 @@ func TestRouterHealthEndpoint(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp["status"] != "ok" || resp["service"] != "oxide-server" {
+	if resp["status"] != "ok" || resp["service"] != "kadrbox-server" {
 		t.Errorf("unexpected body content: %v", resp)
 	}
 }

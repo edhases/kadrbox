@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
-	"github.com/edhases/oxide-server/internal/transport/ws"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/transport/ws"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -58,7 +58,7 @@ func NewRouter(
 	// Healthcheck: liveness не торкається залежностей, readiness — так.
 	// Пінги передаються з main.go через middleware.SetPostgresPing/SetRedisPing;
 	// без них /readyz навмисно відповідає 503 (fail-closed).
-	healthH := middleware.New(middleware.RedisPing(), "oxide-server")
+	healthH := middleware.New(middleware.RedisPing(), "kadrbox-server")
 
 	// /health — історичний шлях, збережений як alias до /healthz
 	r.Get("/health", healthH.Livez)

@@ -26,9 +26,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/edhases/oxide-server/internal/domain"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // scJSONError asserts the response is the JSON error envelope, not a

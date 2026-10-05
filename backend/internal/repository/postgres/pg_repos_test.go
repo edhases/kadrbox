@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/domain"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -294,7 +294,7 @@ func TestPgApplyPoolLimits(t *testing.T) {
 	if config.AfterConnect == nil {
 		t.Fatal("AfterConnect must be set so statement_timeout applies to every connection")
 	}
-	if got := config.ConnConfig.RuntimeParams["application_name"]; got != "oxide-server" {
+	if got := config.ConnConfig.RuntimeParams["application_name"]; got != "kadrbox-server" {
 		t.Errorf("application_name = %q, want oxide-server", got)
 	}
 }

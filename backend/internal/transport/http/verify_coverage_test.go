@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/email"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/email"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 )
 
 // NOTE: ці тести покривають код паралельного агента (email-верифікація

@@ -14,10 +14,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/domain"
-	"github.com/edhases/oxide-server/internal/email"
-	"github.com/edhases/oxide-server/internal/repository/postgres"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/email"
+	"github.com/edhases/kadrbox-server/internal/repository/postgres"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 	"github.com/google/uuid"
 )
 

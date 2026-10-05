@@ -1,4 +1,4 @@
-module github.com/edhases/oxide-server
+module github.com/edhases/kadrbox-server
 
 go 1.26.8
 

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/domain"
 )
 
 // Wire actions. Everything a client may originate is listed in clientActions;

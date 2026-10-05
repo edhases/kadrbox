@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
+	redisRepo "github.com/edhases/kadrbox-server/internal/repository/redis"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
 	"github.com/google/uuid"
 )
 

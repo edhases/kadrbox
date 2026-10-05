@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
+	redisRepo "github.com/edhases/kadrbox-server/internal/repository/redis"
 	"github.com/testcontainers/testcontainers-go"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"

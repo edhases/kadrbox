@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/auth"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )

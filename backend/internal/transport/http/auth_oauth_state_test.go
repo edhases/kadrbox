@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/auth"
-	"github.com/edhases/oxide-server/internal/email"
+	"github.com/edhases/kadrbox-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/email"
 	"github.com/google/uuid"
 )
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // resetTrustedProxies повертає глобальний стан довірених проксі у fail-closed

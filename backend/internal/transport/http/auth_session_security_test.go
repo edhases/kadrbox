@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/auth"
-	"github.com/edhases/oxide-server/internal/email"
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/email"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 	"github.com/google/uuid"
 )
 

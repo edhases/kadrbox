@@ -1,0 +1,22 @@
+name: Forbidden terms
+
+# Gate for the single rule that cannot be left to review discipline: the app
+# must not name pirate sources anywhere in shipped code. MS Store and Google
+# Play both read the code, so a name left in a constant, a Drift migration or a
+# test fixture is grounds for rejection.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: No pirate sources in shipped code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for forbidden terms
+        run: bash scripts/ci/check_forbidden.sh

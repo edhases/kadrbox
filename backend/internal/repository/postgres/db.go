@@ -122,7 +122,7 @@ func applyPoolLimits(config *pgxpool.Config) {
 	if config.ConnConfig.RuntimeParams == nil {
 		config.ConnConfig.RuntimeParams = map[string]string{}
 	}
-	config.ConnConfig.RuntimeParams["application_name"] = "oxide-server"
+	config.ConnConfig.RuntimeParams["application_name"] = "kadrbox-server"
 
 	timeout := envDuration("DB_STATEMENT_TIMEOUT", defaultStatementTimeout)
 	// Applied via AfterConnect (not RuntimeParams) so the limit is set on every

@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/edhases/oxide-server/config"
-	"github.com/edhases/oxide-server/internal/auth"
-	"github.com/edhases/oxide-server/internal/repository/postgres"
+	"github.com/edhases/kadrbox-server/config"
+	"github.com/edhases/kadrbox-server/internal/auth"
+	"github.com/edhases/kadrbox-server/internal/repository/postgres"
 )
 
 type PBUserRecord struct {

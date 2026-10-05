@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/logging"
+	"github.com/edhases/kadrbox-server/internal/logging"
 )
 
 // ReadinessTimeout bounds the total duration of the dependency probes.
@@ -39,7 +39,7 @@ type HealthHandler struct {
 // both dependencies without widening NewRouter's signature.
 func New(redisPing func(ctx context.Context) error, service string) *HealthHandler {
 	if service == "" {
-		service = "oxide-server"
+		service = "kadrbox-server"
 	}
 	return &HealthHandler{service: service, redisPing: redisPing, pgPing: PostgresPing()}
 }

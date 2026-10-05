@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/edhases/oxide-server/internal/logging"
+	"github.com/edhases/kadrbox-server/internal/logging"
 )
 
 // statusWriter captures the status code and the number of response bytes.

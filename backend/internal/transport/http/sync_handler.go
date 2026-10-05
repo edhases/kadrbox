@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/edhases/oxide-server/internal/domain"
-	"github.com/edhases/oxide-server/internal/transport/http/middleware"
+	"github.com/edhases/kadrbox-server/internal/domain"
+	"github.com/edhases/kadrbox-server/internal/transport/http/middleware"
 )
 
 // AtomicFavoritesStore is the capability that makes the favourite write a

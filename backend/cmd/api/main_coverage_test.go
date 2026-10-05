@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edhases/oxide-server/config"
+	"github.com/edhases/kadrbox-server/config"
 )
 
 func TestCovSplitCSV(t *testing.T) {

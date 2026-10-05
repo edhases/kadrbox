@@ -57,8 +57,8 @@ func TestCovApplyPoolLimitsTakesEveryKnobFromTheEnvironment(t *testing.T) {
 	if cfg.AfterConnect == nil {
 		t.Fatal("AfterConnect is nil: a statement timeout would not be applied to every connection")
 	}
-	if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != "oxide-server" {
-		t.Errorf("application_name = %q, want %q", got, "oxide-server")
+	if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != "kadrbox-server" {
+		t.Errorf("application_name = %q, want %q", got, "kadrbox-server")
 	}
 }
 
@@ -112,8 +112,8 @@ func TestCovApplyPoolLimitsAllocatesRuntimeParamsWhenAbsent(t *testing.T) {
 	if cfg.ConnConfig.RuntimeParams == nil {
 		t.Fatal("RuntimeParams left nil; the assignment below would panic")
 	}
-	if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != "oxide-server" {
-		t.Errorf("application_name = %q, want %q", got, "oxide-server")
+	if got := cfg.ConnConfig.RuntimeParams["application_name"]; got != "kadrbox-server" {
+		t.Errorf("application_name = %q, want %q", got, "kadrbox-server")
 	}
 }
 

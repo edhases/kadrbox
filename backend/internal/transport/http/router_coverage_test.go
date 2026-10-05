@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
-	"github.com/edhases/oxide-server/internal/transport/ws"
+	transporthttp "github.com/edhases/kadrbox-server/internal/transport/http"
+	"github.com/edhases/kadrbox-server/internal/transport/ws"
 )
 
 // covTestRouter будує роутер з nil-залежностями хендлерів.
