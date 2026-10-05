@@ -81,18 +81,42 @@ void main() {
       );
     });
 
-    test('catalog_id is required, because stored items are scoped by it',
+    test('a server that omits catalog_id is accepted and gets a derived id',
         () async {
+      // The normative contract (contracts/openapi.yaml) does not require
+      // catalog_id. Requiring it anyway rejected conforming servers, which is
+      // the same failure the contract warns about from the other side: a server
+      // we cannot update must never be able to break a deployed client.
       await serve((_) async =>
           (200, jsonEncode({'protocol_version': 1, 'app': 'Example'})));
 
-      await expectLater(
-        client.handshake(),
-        throwsA(
-          isA<CatalogException>()
-              .having((e) => e.message, 'message', contains('catalog_id')),
-        ),
-      );
+      final status = await client.handshake();
+
+      expect(status.protocolVersion, 1);
+      expect(status.catalogId, isNotEmpty);
+      // The derived id must be usable as a storage namespace component.
+      expect(status.catalogId, matches(RegExp(r'^[A-Za-z0-9._:-]+$')));
+    });
+
+    test('a blank or whitespace catalog_id falls back to the derived id',
+        () async {
+      for (final declared in ['', '   ', 42, null, <String>[]]) {
+        await serve((_) async => ok({'catalog_id': declared}));
+
+        final status = await client.handshake();
+
+        expect(status.catalogId, isNotEmpty, reason: 'declared=$declared');
+        expect(status.catalogId, isNot('   '));
+      }
+    });
+
+    test('a declared catalog_id always wins over the derived one', () async {
+      await serve((_) async => ok({'catalog_id': '  cat-a  '}));
+
+      final status = await client.handshake();
+
+      // Trimmed, and not replaced by anything the client made up.
+      expect(status.catalogId, 'cat-a');
     });
 
     test('a newer protocol warns but is not refused', () async {

@@ -80,6 +80,16 @@ paths:
                     protocol_version: 1
                     app: "Example Provider"
                     capabilities: []
+                withCatalogId:
+                  summary: Declaring an explicit storage namespace
+                  description: |
+                    Optional. A server that declares catalog_id is otherwise
+                    indistinguishable from one that does not, and both are valid.
+                  value:
+                    protocol_version: 1
+                    app: "Example Provider"
+                    catalog_id: "example-media"
+                    capabilities: []
         "404":
           description: |
             Not a catalog server. The client shows a clear "not a catalog server"
@@ -400,9 +410,9 @@ components:
     Status:
       type: object
       description: |
-        The handshake response. Kept to three members on purpose: it is the one
-        response a client reads before it knows how strict to be about anything
-        else.
+        The handshake response. Kept to a small fixed set on purpose: it is the
+        one response a client reads before it knows how strict to be about
+        anything else.
       required: [protocol_version, app, capabilities]
       properties:
         protocol_version:
@@ -420,6 +430,28 @@ components:
             two configured servers apart. Not validated, not interpreted.
           maxLength: 128
           example: "Example Provider"
+        catalog_id:
+          type: string
+          description: |
+            OPTIONAL. A stable identifier for this catalogue, used by the client
+            as the storage namespace: every stored reference is scoped
+            `<catalog_id>:<item_id>`.
+
+            Omitting it is fully conforming. A client that requires this field
+            rejects servers the contract allows, so a client MUST accept its
+            absence and derive an identity from the configured base URL instead
+            -- stable across restarts, distinct per URL.
+
+            Send it only if you have a reason to. It MUST be stable for the life
+            of the catalogue: a value that changes between restarts orphans every
+            item the user has already stored. Sending the same id from two
+            different servers merges their storage, which is worse than not
+            sending one at all. Treat it as a namespace name, not a display
+            string: it is persisted and compared, never shown to the user.
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+          example: "example-media"
         capabilities:
           type: array
           description: |
