@@ -331,6 +331,23 @@ func (r *Registry) Details(ctx context.Context, id, itemURL string) (*domain.Med
 }
 
 // Streams повертає стріми через провайдер з трекінгом здоров'я та kill-switch.
+// Streams віддає потоки для елемента.
+//
+// itemURL може бути трьома речами:
+//
+//  1. Звичайним URL сторінки (старий шлях, так надсилають DLE-пошук
+//     і закладки).
+//  2. Конвертом вибору, який кладемо в Episode.URL: JSON з item_url,
+//     season, episode, voice. Саме так працює новий шлях — клієнт
+//     клацає серію в дереві озвучок і повертає нам готовий ref.
+//  3. Компактним «v:сезон:серія:озвучка» — без адреси сторінки.
+//
+// Розшифровка робиться тут, у реєстрі, а не в кожному провайдері:
+// інакше кожен новий провайдер мусив би про неї пам'ятати, а
+// забуде хтось — і користувач отримає 503.
+//
+// Явні параметри запиту (season, episode, voice) мають пріоритет
+// над ref: так клієнт може перевизначити серію, не змінюючи ref.
 func (r *Registry) Streams(ctx context.Context, id, itemURL string, season, episode int, voiceID string) (*domain.ContentStreamsResponse, error) {
 	p, ok := r.Get(id)
 	if !ok {
@@ -339,6 +356,9 @@ func (r *Registry) Streams(ctx context.Context, id, itemURL string, season, epis
 	if !r.IsEnabled(id) {
 		return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
 	}
+
+	itemURL, season, episode, voiceID = ApplySelectionRef(itemURL, season, episode, voiceID)
+
 	resp, err := safeGetStreams(p, ctx, itemURL, season, episode, voiceID)
 	if err != nil {
 		r.recordError(id, err)

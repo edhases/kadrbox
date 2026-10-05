@@ -59,12 +59,20 @@ func ClusterAndDeduplicate(candidates []ScoredSearchItem) []ScoredSearchItem {
 		return nil
 	}
 
-	clusters := make(map[string][]ScoredSearchItem)
-
+	// Phase 1: group by title + type, ignoring the year.
+	byBase := make(map[string][]ScoredSearchItem)
 	for _, item := range candidates {
-		cKey := GenerateClusterKey(item.Title, item.Year, item.Type)
-		item.ClusterKey = cKey
-		clusters[cKey] = append(clusters[cKey], item)
+		bk := baseClusterKey(item.Title, item.Type)
+		byBase[bk] = append(byBase[bk], item)
+	}
+
+	// Phase 2: split each group by year.
+	clusters := make(map[string][]ScoredSearchItem)
+	for _, group := range byBase {
+		for year, items := range splitByYear(group) {
+			key := clusterKeyForYear(group[0].Title, group[0].Type, year)
+			clusters[key] = append(clusters[key], items...)
+		}
 	}
 
 	var result []ScoredSearchItem
@@ -139,6 +147,100 @@ func ClusterAndDeduplicate(candidates []ScoredSearchItem) []ScoredSearchItem {
 	})
 
 	return result
+}
+
+// normaliseYearType приводить тип медіа до канонічного вигляду.
+// Порожній тип вважаємо фільмом — так само, як у GenerateClusterKey.
+func normaliseYearType(itemType string) string {
+	t := strings.ToLower(itemType)
+	if t == "" {
+		return "movie"
+	}
+	return t
+}
+
+// validClusterYear повертає рік, якщо він придатний для ключа,
+// або 0 якщо рік невідомий/некоректний.
+//
+// GenerateClusterKey вже робить саме це (y<1900 || y>2100 -> 0),
+// але нам потрібно знати ДО ключа, щоб вирішити, чи прилипає
+// елемент до відомого року чи ні.
+func validClusterYear(year int) int {
+	if year < 1900 || year > 2100 {
+		return 0
+	}
+	return year
+}
+
+// baseClusterKey — ключ БЕЗ року: foldedTitle|type.
+//
+// Це основа дворядної кластеризації. Рік свідомо винесено з
+// базового ключа, бо саме через нього один і той самий серіал
+// розпадався на дублі: lavakino знав рік 2011, uakino — ні.
+func baseClusterKey(title, itemType string) string {
+	clean := NormalizeTitleForMatch(title)
+	folded := FoldConfusables(clean)
+	return fmt.Sprintf("%s|%s", folded, normaliseYearType(itemType))
+}
+
+// clusterKeyForYear збирає повний ключ кластера для конкретного року.
+// Формат той самий, що в GenerateClusterKey, тож зовнішні тести
+// й клієнт не ламаються.
+func clusterKeyForYear(title, itemType string, year int) string {
+	clean := NormalizeTitleForMatch(title)
+	folded := FoldConfusables(clean)
+	return fmt.Sprintf("%s|%d|%s", folded, validClusterYear(year), normaliseYearType(itemType))
+}
+
+// splitByYear розподіляє групу елементів за роком.
+//
+// Правила — навмисно лагідні:
+//
+//   - Елементи з однаковим відомим роком лишаються разом.
+//   - Елементи з РІЗНИМИ відомими роками ніколи не зливаються:
+//     це захист від склейки ремейків («Форрест Гамп» 1994 і 2022).
+//   - Елементи без року (0) прилипають до кластера з відомим роком,
+//     якщо такий є. Якщо відомих років кілька, вони йдуть до
+//     НАЙБІЛЬШОГО за розміром кластера: це компроміс на користь
+//     відсутності дублів на головній.
+//
+// Повертає map[year][]item. Рік 0 у ключі означає «рік невідомий
+// і зливатися було з чим».
+func splitByYear(group []ScoredSearchItem) map[int][]ScoredSearchItem {
+	out := make(map[int][]ScoredSearchItem)
+
+	var yearless []ScoredSearchItem
+	knownCount := make(map[int]int)
+
+	for _, item := range group {
+		y := validClusterYear(item.Year)
+		if y == 0 {
+			yearless = append(yearless, item)
+			continue
+		}
+		out[y] = append(out[y], item)
+		knownCount[y]++
+	}
+
+	if len(yearless) == 0 {
+		return out
+	}
+
+	if len(knownCount) == 0 {
+		// Жодного відомого року — нема з ким зливати, окремий кластер.
+		out[0] = yearless
+		return out
+	}
+
+	// Обираємо найбільший кластер за відомим роком.
+	target, best := 0, -1
+	for y, c := range knownCount {
+		if c > best || (c == best && y < target) {
+			target, best = y, c
+		}
+	}
+	out[target] = append(out[target], yearless...)
+	return out
 }
 
 // GenerateClusterKey формує ключ кластера у форматі canonicalTitle|year|type
