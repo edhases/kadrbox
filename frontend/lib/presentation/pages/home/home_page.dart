@@ -1101,7 +1101,7 @@ class _HomePageState extends State<HomePage> {
     return CustomScrollView(
       slivers: [
         // App bar skeleton
-        const SliverAppBar(floating: true, title: Text('Oxide Film')),
+        const SliverAppBar(floating: true, title: Text('Kadrbox')),
 
         // Categories pill bar skeleton
         SliverToBoxAdapter(

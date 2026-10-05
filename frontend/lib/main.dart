@@ -56,7 +56,7 @@ void main() async {
             backgroundColor: Color(0xFF0F172A),
             skipTaskbar: false,
             titleBarStyle: TitleBarStyle.hidden,
-            title: 'Oxide Film',
+            title: 'Kadrbox',
           );
 
           await windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -113,7 +113,7 @@ void main() async {
       // Resolve provider URLs in background (detects domain changes)
       _resolveProviderUrls();
 
-      runApp(const OxideFilmApp());
+      runApp(const KadrboxApp());
     },
     (error, stack) {
       Logger.e('Zone error', tag: 'Main', error: error, stackTrace: stack);

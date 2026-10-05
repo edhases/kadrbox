@@ -70,10 +70,10 @@ class SessionUser {
   String toString() => 'SessionUser(id: $id, email: $email)';
 }
 
-/// Service for communication with Oxide Go Backend
+/// Service for communication with Kadrbox Go Backend
 /// (Go Chi + PostgreSQL 16 + Redis Pub/Sub WebSocket)
-class OxideServerService {
-  static const _tag = 'OxideServerService';
+class KadrboxServerService {
+  static const _tag = 'KadrboxServerService';
   static const _tokenKey = 'oxide_jwt_access_token';
   static const _refreshKey = 'oxide_jwt_refresh_token';
   static const _userKey = 'oxide_user_json';
@@ -93,7 +93,7 @@ class OxideServerService {
   VoidCallback? onAuthExpired;
   Future<bool>? _refreshFuture;
 
-  OxideServerService(this._prefs, this._apiClient) {
+  KadrboxServerService(this._prefs, this._apiClient) {
     _loadState();
     // The DI container creates ApiClient first, so the 401 refresh/replay
     // interceptor and the proactive refresh timer are attached here.
@@ -377,7 +377,7 @@ class OxideServerService {
     final safeTitle = htmlEscape.convert(title);
     final safeMessage = htmlEscape.convert(message);
     final actionHtml = success
-        ? '<p class="hint" id="hint-text">Тепер ви можете повернутися до програми Oxide Film.</p>\n'
+        ? '<p class="hint" id="hint-text">Тепер ви можете повернутися до програми Kadrbox.</p>\n'
               '    <button class="btn" id="close-btn" onclick="attemptClose()">Закрити вкладку</button>\n'
               '    <script>\n'
               '      function attemptClose() {\n'
@@ -407,7 +407,7 @@ class OxideServerService {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>$safeTitle — Oxide Film</title>
+  <title>$safeTitle — Kadrbox</title>
   <style>
     * { box-sizing: border-box; }
     body {

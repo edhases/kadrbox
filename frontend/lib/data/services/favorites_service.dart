@@ -5,13 +5,13 @@ import '../../core/utils/logger.dart';
 import '../../domain/entities/entities.dart';
 import '../database/app_database.dart';
 import '../database/dao/favorites_dao.dart';
-import 'oxide_server_service.dart';
+import 'kadrbox_server_service.dart';
 import 'auth_service.dart';
 
 /// Service for managing favorites with cloud sync
 class FavoritesService extends ChangeNotifier {
   final FavoritesDao _dao;
-  final OxideServerService _server;
+  final KadrboxServerService _server;
   final AuthService _authService;
 
   List<Favorite> _favorites = [];
@@ -31,7 +31,7 @@ class FavoritesService extends ChangeNotifier {
 
   FavoritesService({
     required AppDatabase database,
-    required OxideServerService server,
+    required KadrboxServerService server,
     required AuthService authService,
   }) : _dao = FavoritesDao(database),
        _server = server,
@@ -167,7 +167,7 @@ class FavoritesService extends ChangeNotifier {
       if (_server.isAuthenticated) {
         final records = await _server.getFavorites();
         debugPrint(
-          '[Favorites] Found ${records.length} cloud favorites from Oxide Server',
+          '[Favorites] Found ${records.length} cloud favorites from Kadrbox Server',
         );
 
         for (final cloudData in records) {

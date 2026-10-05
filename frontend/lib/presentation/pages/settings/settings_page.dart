@@ -860,7 +860,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _openGitHub() async {
-    const url = 'https://github.com/edhases/oxide_film';
+    const url = 'https://github.com/edhases/kadrbox';
     final uri = Uri.parse(url);
     try {
       if (await canLaunchUrl(uri)) {

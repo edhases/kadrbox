@@ -41,7 +41,7 @@ class DataTransferService {
       }
     } else {
       // Mobile: Share sheet
-      await Share.shareXFiles([XFile(file.path)], text: 'Oxide Backup');
+      await Share.shareXFiles([XFile(file.path)], text: 'Kadrbox Backup');
     }
   }
 
@@ -66,7 +66,7 @@ class DataTransferService {
       throw Exception('Збереження скасовано');
     }
 
-    await Share.shareXFiles([XFile(file.path)], text: 'Oxide Backup');
+    await Share.shareXFiles([XFile(file.path)], text: 'Kadrbox Backup');
     return file.path;
   }
 

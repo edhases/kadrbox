@@ -3,7 +3,7 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../data/services/oxide_server_service.dart';
+import '../../data/services/kadrbox_server_service.dart';
 import '../../domain/entities/entities.dart';
 import '../pages/home/home_page.dart';
 import '../pages/details/details_page.dart';
@@ -31,7 +31,7 @@ class AppRouter {
   static bool _isFirstLaunch() {
     try {
       // Already signed in вЂ” onboarding is irrelevant.
-      if (GetIt.instance<OxideServerService>().isAuthenticated) return false;
+      if (GetIt.instance<KadrboxServerService>().isAuthenticated) return false;
       final prefs = GetIt.instance<SharedPreferences>();
       return !OnboardingPage.isSeen(prefs);
     } catch (_) {

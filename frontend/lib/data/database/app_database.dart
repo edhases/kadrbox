@@ -223,7 +223,7 @@ class AppDatabase extends _$AppDatabase {
 
   static QueryExecutor _openConnection() {
     return driftDatabase(
-      name: 'oxide_film',
+      name: 'kadrbox',
       native: const DriftNativeOptions(
         databaseDirectory: getApplicationDocumentsDirectory,
       ),

@@ -13,7 +13,7 @@ import '../../data/services/stats_service.dart';
 import '../../data/services/episode_update_service.dart';
 import '../../data/services/video_player_service.dart';
 import '../../data/services/watch_party_service.dart';
-import '../../data/services/oxide_server_service.dart';
+import '../../data/services/kadrbox_server_service.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/url_resolver_service.dart';
 import '../../data/services/recommendation_service.dart';
@@ -47,9 +47,9 @@ Future<void> configureDependencies() async {
   final apiClient = ApiClient(uaService: uaService);
   getIt.registerSingleton<ApiClient>(apiClient);
 
-  // Oxide Go Server backend service (Chi + PostgreSQL 16 + Redis)
-  final serverService = OxideServerService(prefs, apiClient);
-  getIt.registerSingleton<OxideServerService>(serverService);
+  // Kadrbox Go Server backend service (Chi + PostgreSQL 16 + Redis)
+  final serverService = KadrboxServerService(prefs, apiClient);
+  getIt.registerSingleton<KadrboxServerService>(serverService);
 
   // Database (must be early)
   final database = AppDatabase();
@@ -60,9 +60,9 @@ Future<void> configureDependencies() async {
     () => UrlResolverService(getIt<SharedPreferences>()),
   );
 
-  // Auth service (Oxide Server)
+  // Auth service (Kadrbox Server)
   getIt.registerLazySingleton<AuthService>(
-    () => AuthService(getIt<OxideServerService>()),
+    () => AuthService(getIt<KadrboxServerService>()),
   );
 
   // Services
@@ -73,14 +73,14 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<FavoritesService>(
     () => FavoritesService(
       database: database,
-      server: getIt<OxideServerService>(),
+      server: getIt<KadrboxServerService>(),
       authService: getIt<AuthService>(),
     ),
   );
   getIt.registerLazySingleton<HistoryService>(
     () => HistoryService(
       database: database,
-      server: getIt<OxideServerService>(),
+      server: getIt<KadrboxServerService>(),
       authService: getIt<AuthService>(),
     ),
   );
@@ -93,7 +93,7 @@ Future<void> configureDependencies() async {
   getIt.registerLazySingleton<StatsService>(() => StatsService(database));
   getIt.registerLazySingleton<WatchPartyService>(
     () => WatchPartyService(
-      server: getIt<OxideServerService>(),
+      server: getIt<KadrboxServerService>(),
       settings: getIt<SettingsService>(),
     ),
   );

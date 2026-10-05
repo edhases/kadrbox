@@ -226,7 +226,7 @@ class PlaybackError {
   /// Contains everything needed to reproduce the failure from a bug report.
   String toDiagnosticString({String? logTail}) {
     final b = StringBuffer()
-      ..writeln('=== OxideFilm playback error ===')
+      ..writeln('=== Kadrbox playback error ===')
       ..writeln('kind: ${kind.name}')
       ..writeln('title: $title')
       ..writeln('provider: ${providerId ?? '<none>'}')

@@ -42,7 +42,7 @@ class AppStrings {
   // GENERAL
   // ============================================================================
 
-  String get appName => 'Oxide Film';
+  String get appName => 'Kadrbox';
   String get loading => _t('Завантаження...', 'Loading...');
   String get error => _t('Помилка', 'Error');
   String get retry => _t('Спробувати знову', 'Try again');

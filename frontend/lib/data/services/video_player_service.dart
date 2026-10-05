@@ -4,16 +4,16 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/presentation/pages/player/player_controller.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/presentation/pages/player/player_controller.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
 
 enum MiniPlayerState { hidden, minimized, fullscreen }
 
 class VideoPlayerService extends ChangeNotifier {
-  static const _platform = MethodChannel('com.oxidefilm.oxide_film/pip');
+  static const _platform = MethodChannel('com.kadrbox.kadrbox/pip');
 
   PlayerController? _controller;
   MiniPlayerState _miniPlayerState = MiniPlayerState.hidden;

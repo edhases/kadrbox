@@ -3,20 +3,20 @@ import 'package:flutter/foundation.dart';
 import '../../core/error/exceptions.dart';
 import '../database/app_database.dart';
 import '../database/dao/history_dao.dart';
-import 'oxide_server_service.dart';
+import 'kadrbox_server_service.dart';
 import 'auth_service.dart';
 
 /// Service for managing watch history with cloud sync
 ///
 /// **Offline-first strategy:**
 /// - Local Drift database is the PRIMARY source of truth
-/// - Cloud (Oxide Server) is used for backup and cross-device sync
+/// - Cloud (Kadrbox Server) is used for backup and cross-device sync
 /// - All reads come from local DB (fast)
 /// - Writes go to local DB first, then sync to cloud in background
 /// - On startup, pull latest from cloud and merge with local
 class HistoryService extends ChangeNotifier {
   final HistoryDao _dao;
-  final OxideServerService _server;
+  final KadrboxServerService _server;
   final AuthService _authService;
 
   List<WatchHistoryData> _history = [];
@@ -55,7 +55,7 @@ class HistoryService extends ChangeNotifier {
 
   HistoryService({
     required AppDatabase database,
-    required OxideServerService server,
+    required KadrboxServerService server,
     required AuthService authService,
   }) : _dao = HistoryDao(database),
        _server = server,
@@ -317,7 +317,7 @@ class HistoryService extends ChangeNotifier {
             );
           }
         }
-        debugPrint('✅ Synced ${serverRecords.length} items from Oxide Server');
+        debugPrint('✅ Synced ${serverRecords.length} items from Kadrbox Server');
       } catch (e) {
         if (_isAuthError(e)) {
           _cloudSyncDisabled = true;

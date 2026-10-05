@@ -225,7 +225,7 @@ class ApiClient {
   }
 
   Future<void> _forceSignOut() async {
-    // `OxideServerService.signOut` is the single place that clears the session;
+    // `KadrboxServerService.signOut` is the single place that clears the session;
     // reaching it through a callback keeps this file unaware of the pref store.
     try {
       await _onSignOut?.call();
@@ -247,7 +247,7 @@ class ApiClient {
 
   /// Wires the session callbacks after construction.
   ///
-  /// The DI container builds `ApiClient` before `OxideServerService` (which owns
+  /// The DI container builds `ApiClient` before `KadrboxServerService` (which owns
   /// the tokens), so the service attaches itself once it exists. Safe to call
   /// more than once.
   void attachAuthCallbacks({

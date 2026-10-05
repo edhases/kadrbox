@@ -53,7 +53,7 @@ class SyncService extends ChangeNotifier {
       final data = <String, dynamic>{
         'version': 1,
         'exportedAt': DateTime.now().toIso8601String(),
-        'app': 'OxideFilm',
+        'app': 'Kadrbox',
       };
 
       if (includeFavorites) {
@@ -75,7 +75,7 @@ class SyncService extends ChangeNotifier {
 
       // Save to file
       final fileName =
-          'oxide_film_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+          'kadrbox_backup_${DateTime.now().millisecondsSinceEpoch}.json';
       String filePath;
 
       if (kIsWeb) {
@@ -106,7 +106,7 @@ class SyncService extends ChangeNotifier {
     if (filePath == null) return;
 
     if (!kIsWeb) {
-      await Share.shareXFiles([XFile(filePath)], subject: 'Oxide Film Backup');
+      await Share.shareXFiles([XFile(filePath)], subject: 'Kadrbox Backup');
     }
   }
 
@@ -145,7 +145,7 @@ class SyncService extends ChangeNotifier {
               as Map<String, dynamic>;
 
       // Validate format
-      if (data['app'] != 'OxideFilm') {
+      if (data['app'] != 'Kadrbox') {
         throw Exception('Invalid backup file format');
       }
 
@@ -195,7 +195,7 @@ class SyncService extends ChangeNotifier {
           await Isolate.run(() => jsonDecode(jsonString))
               as Map<String, dynamic>;
 
-      if (data['app'] != 'OxideFilm') {
+      if (data['app'] != 'Kadrbox') {
         throw Exception('Invalid backup format');
       }
 
@@ -236,7 +236,7 @@ class SyncService extends ChangeNotifier {
     final favorites = await _favoritesDao.getAll();
 
     final data = {
-      'app': 'OxideFilm',
+      'app': 'Kadrbox',
       'v': 1,
       'f': favorites
           .map((f) => {'i': f.mediaId, 'p': f.providerId, 't': f.title})

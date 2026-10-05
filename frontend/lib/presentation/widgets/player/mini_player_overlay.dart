@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:oxide_film/data/services/video_player_service.dart';
+import 'package:kadrbox/data/services/video_player_service.dart';
 
 class MiniPlayerOverlay extends StatefulWidget {
   final Widget child;

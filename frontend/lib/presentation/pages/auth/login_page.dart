@@ -158,7 +158,7 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           const SizedBox(height: 16),
                           const Text(
-                            'Oxide Film',
+                            'Kadrbox',
                             style: TextStyle(
                               fontSize: 32,
                               fontWeight: FontWeight.bold,

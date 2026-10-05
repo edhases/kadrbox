@@ -18,7 +18,7 @@ import 'package:path_provider/path_provider.dart';
 /// controller turns into dozens of blocking disk flushes per second while
 /// scrubbing a seek bar.
 class Logger {
-  static const String _tag = 'OxideFilm';
+  static const String _tag = 'Kadrbox';
 
   /// Enable console logs for CLI debugging (only works in debug mode)
   static bool useConsoleLogs = true;
@@ -207,7 +207,7 @@ class Logger {
       if (!dir.existsSync()) {
         await dir.create(recursive: true);
       }
-      final f = File('${dir.path}${Platform.pathSeparator}oxide_film.log');
+      final f = File('${dir.path}${Platform.pathSeparator}kadrbox.log');
       _fileSink = f;
       // A file left over from an earlier run may already be oversized.
       if (f.existsSync() && await f.length() > maxFileBytes) {

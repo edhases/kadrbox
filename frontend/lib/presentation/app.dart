@@ -14,14 +14,14 @@ export '../data/services/settings_service.dart' show AppThemeMode;
 export '../core/l10n/app_strings.dart' show AppLocale, AppStrings;
 
 /// Main application widget
-class OxideFilmApp extends StatefulWidget {
-  const OxideFilmApp({super.key});
+class KadrboxApp extends StatefulWidget {
+  const KadrboxApp({super.key});
 
   @override
-  State<OxideFilmApp> createState() => _OxideFilmAppState();
+  State<KadrboxApp> createState() => _KadrboxAppState();
 }
 
-class _OxideFilmAppState extends State<OxideFilmApp> {
+class _KadrboxAppState extends State<KadrboxApp> {
   final _settings = GetIt.instance<SettingsService>();
 
   @override
@@ -48,7 +48,7 @@ class _OxideFilmAppState extends State<OxideFilmApp> {
     final locale = _settings.state.locale;
 
     return MaterialApp.router(
-      title: 'Oxide Film',
+      title: 'Kadrbox',
       debugShowCheckedModeBanner: false,
       routerConfig: AppRouter.router,
       scrollBehavior: const _AppScrollBehavior(),

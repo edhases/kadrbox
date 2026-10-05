@@ -5,7 +5,7 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../data/services/auth_service.dart';
-import '../../../data/services/oxide_server_service.dart';
+import '../../../data/services/kadrbox_server_service.dart';
 import '../../theme/app_theme.dart';
 
 /// Screen shown when the account email is not verified yet.
@@ -21,7 +21,7 @@ class VerifyEmailPage extends StatefulWidget {
 
 class _VerifyEmailPageState extends State<VerifyEmailPage> {
   final _authService = GetIt.instance<AuthService>();
-  final _server = GetIt.instance<OxideServerService>();
+  final _server = GetIt.instance<KadrboxServerService>();
 
   bool _isResending = false;
   bool _isChecking = false;

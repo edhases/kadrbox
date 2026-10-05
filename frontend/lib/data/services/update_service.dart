@@ -46,7 +46,7 @@ class UpdateService {
   /// downloaded bytes and mandatory. Real protection needs signed root metadata
   /// (TUF) with key rotation.
   static const String _updateJsonUrl =
-      'https://raw.githubusercontent.com/edhases/oxide_film/dev/update.json';
+      'https://raw.githubusercontent.com/edhases/kadrbox/dev/update.json';
 
   /// Per-platform escape hatch for the download digest check.
   ///

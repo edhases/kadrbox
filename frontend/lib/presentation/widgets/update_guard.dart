@@ -119,7 +119,7 @@ class _UpdateGuardState extends State<UpdateGuard> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'This version is no longer supported. Please update to continue using Oxide Film.',
+                'This version is no longer supported. Please update to continue using Kadrbox.',
                 style: TextStyle(color: Colors.white70, fontSize: 16),
                 textAlign: TextAlign.center,
               ),

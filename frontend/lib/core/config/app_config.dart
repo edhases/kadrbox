@@ -4,9 +4,9 @@ import 'dart:math';
 class AppConfig {
   AppConfig._();
 
-  static const String appName = 'Oxide Film';
+  static const String appName = 'Kadrbox';
 
-  // Oxide Go Server backend (high-performance lightweight Go + PostgreSQL + Redis via Cloudflare Tunnel)
+  // Kadrbox Go Server backend (high-performance lightweight Go + PostgreSQL + Redis via Cloudflare Tunnel)
   static const String defaultServerUrl = 'https://film.oxideteam.pp.ua';
   static String serverBaseUrl = defaultServerUrl;
   static String get serverApiUrl => '$serverBaseUrl/api/v1';

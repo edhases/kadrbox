@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:peerdart/peerdart.dart';
 import 'package:get_it/get_it.dart';
-import 'oxide_server_service.dart';
+import 'kadrbox_server_service.dart';
 import 'settings_service.dart';
 import '../../core/utils/logger.dart';
 
@@ -138,17 +138,17 @@ abstract class WatchPartyBackend {
   void sendMessage(String targetId, WatchPartyMessage message);
 }
 
-/// Oxide Go Server WebSocket Backend Implementation
-class _OxideServerBackend implements WatchPartyBackend {
-  final OxideServerService _server;
+/// Kadrbox Go Server WebSocket Backend Implementation
+class _KadrboxServerBackend implements WatchPartyBackend {
+  final KadrboxServerService _server;
   WebSocket? _ws;
   StreamSubscription? _sub;
   String? _roomCode;
-  final String _tag = 'WatchParty_OxideServer';
+  final String _tag = 'WatchParty_KadrboxServer';
 
   bool _isDisconnecting = false;
 
-  _OxideServerBackend(this._server);
+  _KadrboxServerBackend(this._server);
 
   @override
   Future<void> connect({
@@ -196,7 +196,7 @@ class _OxideServerBackend implements WatchPartyBackend {
       );
     } catch (e) {
       Logger.e(
-        'Failed to connect to Oxide Server WebSocket',
+        'Failed to connect to Kadrbox Server WebSocket',
         tag: _tag,
         error: e,
       );
@@ -461,11 +461,11 @@ class WatchPartyService extends ChangeNotifier {
   bool get isSynced => _correctionMode == SyncCorrectionMode.none;
 
   // Dependency Injection for testing & backend selection
-  final OxideServerService _server;
+  final KadrboxServerService _server;
   final WatchPartyBackend Function(WatchPartyBackendType)? _backendFactory;
 
   WatchPartyService({
-    required OxideServerService server,
+    required KadrboxServerService server,
     required SettingsService settings,
     WatchPartyBackend Function(WatchPartyBackendType)? backendFactory,
   }) : _server = server,
@@ -514,13 +514,13 @@ class WatchPartyService extends ChangeNotifier {
     _currentMediaTitle = mediaTitle;
     _isHost = true;
 
-    // 1. Try Oxide Server WebSocket
+    // 1. Try Kadrbox Server WebSocket
     try {
-      Logger.i('Hosting with Oxide Server: $roomCode', tag: _tag);
+      Logger.i('Hosting with Kadrbox Server: $roomCode', tag: _tag);
       await _initBackend(WatchPartyBackendType.server, roomCode);
     } catch (e) {
       Logger.w(
-        'Oxide Server hosting failed ($e), falling back to PeerDart',
+        'Kadrbox Server hosting failed ($e), falling back to PeerDart',
         tag: _tag,
       );
 
@@ -591,13 +591,13 @@ class WatchPartyService extends ChangeNotifier {
     _isHost = false;
     _currentRoomCode = roomCode.toUpperCase();
 
-    // 1. Try Oxide Server WebSocket
+    // 1. Try Kadrbox Server WebSocket
     try {
-      Logger.i('Joining with Oxide Server: $_currentRoomCode', tag: _tag);
+      Logger.i('Joining with Kadrbox Server: $_currentRoomCode', tag: _tag);
       await _initBackend(WatchPartyBackendType.server, _currentRoomCode!);
     } catch (e) {
       Logger.w(
-        'Oxide Server join failed ($e), falling back to PeerDart',
+        'Kadrbox Server join failed ($e), falling back to PeerDart',
         tag: _tag,
       );
 
@@ -656,7 +656,7 @@ class WatchPartyService extends ChangeNotifier {
     if (_backendFactory != null) {
       _backend = _backendFactory(type);
     } else if (type == WatchPartyBackendType.server) {
-      _backend = _OxideServerBackend(_server);
+      _backend = _KadrboxServerBackend(_server);
     } else {
       _backend = _PeerDartBackend();
     }

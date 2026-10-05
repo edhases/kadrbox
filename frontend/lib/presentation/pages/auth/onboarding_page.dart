@@ -68,7 +68,7 @@ class OnboardingPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 24),
                         const Text(
-                          'Oxide Film',
+                          'Kadrbox',
                           style: TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.w800,

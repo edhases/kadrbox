@@ -1,16 +1,16 @@
 import 'package:flutter/foundation.dart';
 import '../../core/utils/logger.dart';
-import 'oxide_server_service.dart';
+import 'kadrbox_server_service.dart';
 
-/// Authentication service supporting Oxide Go Server (Chi/PostgreSQL)
+/// Authentication service supporting Kadrbox Go Server (Chi/PostgreSQL)
 ///
 /// Note: Cloud sync functionality (watch history, favorites) is managed by
 /// HistoryService and FavoritesService with offline-first approach.
-/// This service handles authentication and user profiles via Oxide Server.
+/// This service handles authentication and user profiles via Kadrbox Server.
 class AuthService extends ChangeNotifier {
   static const _tag = 'AuthService';
 
-  final OxideServerService _server;
+  final KadrboxServerService _server;
 
   // Cached state
   bool _isLoading = false;
@@ -68,7 +68,7 @@ class AuthService extends ChangeNotifier {
 
   void _onAuthExpired() {
     Logger.w(
-      'Auth expired notification received from OxideServerService',
+      'Auth expired notification received from KadrboxServerService',
       tag: _tag,
     );
     _linkedProviders = [];
@@ -123,7 +123,7 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Sign in with social provider (Google, Discord, Telegram) via Oxide Server loopback
+  /// Sign in with social provider (Google, Discord, Telegram) via Kadrbox Server loopback
   Future<void> socialSignIn(String provider) async {
     Logger.i('Attempting social sign in for provider: $provider', tag: _tag);
     _setLoading(true);
@@ -149,9 +149,9 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Sign in with Google ID token directly (Oxide Server)
+  /// Sign in with Google ID token directly (Kadrbox Server)
   Future<void> signInWithGoogle(String idToken) async {
-    Logger.i('Attempting Google sign in via Oxide Server', tag: _tag);
+    Logger.i('Attempting Google sign in via Kadrbox Server', tag: _tag);
     _setLoading(true);
     _error = null;
 
@@ -201,7 +201,7 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Unlink social provider via Oxide Server (keeps at least one login method).
+  /// Unlink social provider via Kadrbox Server (keeps at least one login method).
   Future<void> unlinkSocialAccount(String provider) async {
     if (!isAuthenticated) throw Exception('Потрібно авторизуватися');
     Logger.i('Attempting to unlink provider: $provider', tag: _tag);
@@ -220,7 +220,7 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Fetch list of linked providers from Oxide Server
+  /// Fetch list of linked providers from Kadrbox Server
   Future<void> fetchLinkedProviders() async {
     if (!isAuthenticated) return;
     try {
@@ -304,7 +304,7 @@ class AuthService extends ChangeNotifier {
 
     try {
       await _server.resendVerification(email);
-      Logger.i('Verification email sent via Oxide Server: $email', tag: _tag);
+      Logger.i('Verification email sent via Kadrbox Server: $email', tag: _tag);
     } catch (e) {
       Logger.e('Email verification request failed', tag: _tag, error: e);
       _error = _translateError(e.toString());
