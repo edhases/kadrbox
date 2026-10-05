@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -23,6 +25,7 @@ import 'package:oxide_film/data/services/smart_search/smart_search_service.dart'
 import 'package:oxide_film/domain/entities/entities.dart';
 import 'package:oxide_film/domain/repositories/content_provider.dart';
 import 'package:oxide_film/presentation/pages/search/search_page.dart';
+import 'package:oxide_film/presentation/widgets/common/skeleton.dart';
 
 import '../../../helpers/in_memory_db.dart';
 
@@ -52,6 +55,11 @@ class _FakeBanderaProvider extends ServerBackedProvider {
   /// re-issues the request instead of replaying a cached failure.
   int searchCalls = 0;
 
+  /// Never resolves, which keeps the page in its loading state. The search goes
+  /// to this provider alone (SmartSearchService only ever queries the
+  /// aggregator), so a separate hanging provider would not keep the skeleton up.
+  bool hang = false;
+
   @override
   Future<SearchEnvelope> searchEnvelope(
     String query, {
@@ -59,6 +67,9 @@ class _FakeBanderaProvider extends ServerBackedProvider {
     int page = 1,
   }) async {
     searchCalls++;
+    if (hang) {
+      return Completer<SearchEnvelope>().future;
+    }
     if (throwError) {
       throw Exception('Мережева помилка пошуку');
     }
@@ -267,6 +278,105 @@ void main() {
 
     return MaterialApp.router(routerConfig: router, theme: ThemeData.dark());
   }
+
+  // The loading placeholder used to delegate to SkeletonWrappers.grid, which
+  // hardcoded Colors.white cards, ignored the user's poster size and grid
+  // spacing, and rendered a fixed 6 items with NeverScrollableScrollPhysics —
+  // so on a wide desktop window it drew one short row of white rectangles at
+  // the top of an otherwise empty page, and the layout then jumped when the
+  // real results arrived.
+  group('SearchPage loading skeleton', () {
+    Future<void> pumpLoadingSearch(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // The aggregator is the only provider the search path queries, so hanging
+      // it is what keeps the page in its loading state for the test's duration.
+      banderaProvider.hang = true;
+
+      await tester.pumpWidget(buildTestWidget(initialQuery: 'Дюна'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    testWidgets('renders shimmer placeholders, not white cards', (
+      tester,
+    ) async {
+      await pumpLoadingSearch(tester);
+
+      expect(
+        find.byType(Skeleton),
+        findsWidgets,
+        reason: 'the loading state must use the themed Shimmer-based Skeleton',
+      );
+    });
+
+    testWidgets('no pure-white Containers in the loading state', (
+      tester,
+    ) async {
+      await pumpLoadingSearch(tester);
+
+      // The old wrapper painted `color: Colors.white` on every card, which is
+      // unreadable on the dark theme and is what made the placeholder look
+      // broken rather than like a loading state.
+      final whiteContainers = tester
+          .widgetList<Container>(find.byType(Container))
+          .where(
+            (c) =>
+                c.decoration is BoxDecoration &&
+                (c.decoration! as BoxDecoration).color == Colors.white,
+          );
+      expect(
+        whiteContainers,
+        isEmpty,
+        reason:
+            'a hardcoded white card is invisible-as-a-placeholder in dark mode',
+      );
+    });
+
+    testWidgets('fills the viewport instead of one short row', (tester) async {
+      await pumpLoadingSearch(tester);
+
+      final skeletons = tester.widgetList<Skeleton>(find.byType(Skeleton));
+      // 1920 wide at the default max extent gives many columns; a single row of
+      // 6 was the old fixed count. Filling the viewport needs columns*rows.
+      expect(
+        skeletons.length,
+        greaterThan(6),
+        reason: 'the placeholder must cover the results area, not one row',
+      );
+
+      // And the grid must actually reach down the page rather than stop after
+      // the first row of boxes.
+      final gridRect = tester.getRect(find.byType(GridView).last);
+      expect(
+        gridRect.bottom,
+        greaterThan(1080 * 0.5),
+        reason: 'the placeholder grid stops halfway down the viewport',
+      );
+    });
+
+    testWidgets('uses the same poster aspect ratio as the results grid', (
+      tester,
+    ) async {
+      await pumpLoadingSearch(tester);
+
+      final grid = tester.widget<GridView>(find.byType(GridView).last);
+      final actual = switch (grid.gridDelegate) {
+        final SliverGridDelegateWithMaxCrossAxisExtent d => d.childAspectRatio,
+        final SliverGridDelegateWithFixedCrossAxisCount d => d.childAspectRatio,
+        final d => fail('unexpected grid delegate: $d'),
+      };
+      expect(
+        actual,
+        settingsService.uiSettings.posterSize.aspectRatio,
+        reason:
+            'a mismatched aspect ratio makes the page jump when results land',
+      );
+    });
+  });
 
   testWidgets('SearchPage renders empty search bar and placeholder initially', (
     tester,

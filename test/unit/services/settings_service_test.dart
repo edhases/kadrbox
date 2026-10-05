@@ -238,4 +238,107 @@ void main() {
       expect(PlayerType.fromString(null), PlayerType.internal);
     });
   });
+
+  // The login screen used to offer "merge your local data into the account" on
+  // every single sign-in, because its only condition was "the local tables are
+  // non-empty". After a successful merge those rows ARE the account's data, so
+  // the condition stayed true forever and the user was repeatedly asked to merge
+  // their own history with their own account.
+  group('Local data reconciliation marker', () {
+    const me = 'user-a';
+    const other = 'user-b';
+
+    test('is unset on a fresh device', () async {
+      expect(await settingsService.localDataReconciledWith, isNull);
+    });
+
+    test(
+      'offers the merge when local data has never been reconciled',
+      () async {
+        expect(
+          await settingsService.shouldOfferLocalDataMerge(
+            userId: me,
+            historyCount: 82,
+            favoritesCount: 1,
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    test('does NOT offer it again for the same account', () async {
+      await settingsService.markLocalDataReconciled(me);
+
+      expect(
+        await settingsService.shouldOfferLocalDataMerge(
+          userId: me,
+          historyCount: 82,
+          favoritesCount: 1,
+        ),
+        isFalse,
+        reason:
+            'the same account must not be asked to merge its own data twice',
+      );
+    });
+
+    test('still offers it for a different account', () async {
+      await settingsService.markLocalDataReconciled(me);
+
+      // Device-local data has not been attributed to this account, so this is a
+      // real decision rather than a repeat of the previous one.
+      expect(
+        await settingsService.shouldOfferLocalDataMerge(
+          userId: other,
+          historyCount: 82,
+          favoritesCount: 1,
+        ),
+        isTrue,
+      );
+    });
+
+    test('never offers it when there is nothing to merge', () async {
+      expect(
+        await settingsService.shouldOfferLocalDataMerge(
+          userId: me,
+          historyCount: 0,
+          favoritesCount: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('favorites alone are enough to trigger the offer', () async {
+      expect(
+        await settingsService.shouldOfferLocalDataMerge(
+          userId: me,
+          historyCount: 0,
+          favoritesCount: 3,
+        ),
+        isTrue,
+      );
+    });
+
+    test('the marker survives an unrelated settings change', () async {
+      await settingsService.markLocalDataReconciled(me);
+      await settingsService.setTheme(AppThemeMode.light);
+
+      expect(await settingsService.localDataReconciledWith, me);
+    });
+
+    test('resetAllSettings clears the marker, so the offer returns', () async {
+      await settingsService.markLocalDataReconciled(me);
+      await settingsService.resetAllSettings();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(await settingsService.localDataReconciledWith, isNull);
+      expect(
+        await settingsService.shouldOfferLocalDataMerge(
+          userId: me,
+          historyCount: 82,
+          favoritesCount: 1,
+        ),
+        isTrue,
+      );
+    });
+  });
 }

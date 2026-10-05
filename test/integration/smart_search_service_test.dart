@@ -86,25 +86,28 @@ SearchEnvelope envelopeWith({
   int filteredOut = 0,
   bool withFailure = false,
 }) {
+  final sources = <String, SearchSourceStatus>{
+    'uakino': SearchSourceStatus(
+      key: 'uakino',
+      status: SourceStatus.ok,
+      count: items.isEmpty ? 0 : 1,
+      elapsedMs: 12,
+    ),
+  };
+  if (withFailure) {
+    sources['eneyida'] = SearchSourceStatus(
+      key: 'eneyida',
+      status: SourceStatus.timeout,
+      count: 0,
+      elapsedMs: 3000,
+    );
+  }
+
   final segment = SearchSegment(
     id: 'main',
     status: 'ok',
     count: items.length,
-    sources: {
-      'uakino': SearchSourceStatus(
-        key: 'uakino',
-        status: SourceStatus.ok,
-        count: items.isEmpty ? 0 : 1,
-        elapsedMs: 12,
-      ),
-      if (withFailure)
-        'eneyida': SearchSourceStatus(
-          key: 'eneyida',
-          status: SourceStatus.timeout,
-          count: 0,
-          elapsedMs: 3000,
-        ),
-    },
+    sources: sources,
   );
 
   return SearchEnvelope(
@@ -140,9 +143,7 @@ void main() {
       expect(
         provider.searchCount,
         1,
-        reason:
-            'one user search must produce one request — no variant fan-out, '
-            'no per-provider fan-out',
+        reason: 'one search, one request — no variant or provider fan-out',
       );
       expect(provider.queries, ['Matrix']);
     });
@@ -155,9 +156,7 @@ void main() {
       expect(
         provider.queries,
         ['Матриця'],
-        reason:
-            'query normalisation is a server-side concern; the client sends '
-            'the text the user actually typed',
+        reason: 'normalisation is server-side; the client sends what was typed',
       );
     });
 

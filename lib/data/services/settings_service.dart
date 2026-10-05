@@ -499,6 +499,46 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ============================================================================
+  // ACCOUNT-LOCAL DATA RECONCILIATION
+  // ============================================================================
+
+  /// Key under which the id of the account the on-device history/favorites were
+  /// last reconciled with is stored.
+  ///
+  /// The login screen offers to merge local data into the account. Without this
+  /// marker the offer is repeated on every single sign-in, forever, because the
+  /// local rows are still there after a successful merge — they ARE the account's
+  /// data now, not orphaned local data. Keying by account id rather than a
+  /// boolean means a genuinely different account still gets asked, which is the
+  /// case where merging is a real decision.
+  static const String localDataReconciledKey = 'local_data_reconciled_with';
+
+  /// The account id whose data this device has already merged, or null if the
+  /// local data has never been reconciled.
+  Future<String?> get localDataReconciledWith async =>
+      _settingsDao.getSetting(localDataReconciledKey);
+
+  /// Record that local data has been reconciled with [userId], so the login
+  /// screen does not ask again for the same account.
+  Future<void> markLocalDataReconciled(String userId) async {
+    await _settingsDao.setSetting(localDataReconciledKey, userId);
+  }
+
+  /// Whether the login screen should offer to merge local data into [userId].
+  ///
+  /// True only when there is something to merge AND it has not already been
+  /// merged into this specific account. An empty device, or one already
+  /// reconciled with this account, is not asked.
+  Future<bool> shouldOfferLocalDataMerge({
+    required String userId,
+    required int historyCount,
+    required int favoritesCount,
+  }) async {
+    if (historyCount <= 0 && favoritesCount <= 0) return false;
+    return await localDataReconciledWith != userId;
+  }
+
   /// Reset all settings to defaults
   Future<void> resetAllSettings() async {
     await _settingsDao.clearAllSettings();

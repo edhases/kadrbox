@@ -17,8 +17,6 @@ import '../../widgets/media_card.dart';
 import '../../widgets/custom_titlebar.dart';
 import '../../widgets/tv/focusable_card.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:skeletonizer/skeletonizer.dart' hide Skeleton;
-import '../../widgets/common/skeleton_wrappers.dart';
 import '../../widgets/common/skeleton.dart';
 import '../../widgets/common/app_error_widget.dart';
 
@@ -732,7 +730,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _buildResults() {
     if (_isLoading && _results.isEmpty) {
-      return Skeletonizer(enabled: true, child: _buildSkeletonResults());
+      return _buildSkeletonResults();
     }
 
     if (_error != null) {
@@ -890,12 +888,58 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  /// Placeholder grid shown while the first search is in flight.
+  ///
+  /// It uses the SAME grid delegate as the real results, because a skeleton that
+  /// does not match the layout it stands in for makes the page jump when results
+  /// arrive. The previous version delegated to `SkeletonWrappers.grid`, which
+  /// hardcoded `Colors.white` cards, ignored the user's poster size and spacing
+  /// settings, and used a fixed count of 6 with `NeverScrollableScrollPhysics`,
+  /// which rendered a single short row floating at the top of an otherwise
+  /// empty page.
   Widget _buildSkeletonResults() {
-    return SkeletonWrappers.grid(
-      maxExtent: _getMaxCrossAxisExtent(),
-      spacing: _ui.gridSpacing.padding,
-      crossAxisCount: _ui.gridColumns,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Enough rows to fill the viewport, so the page does not visibly
+        // "grow" into itself when the real results replace the placeholders.
+        final columns = _columnsFor(constraints.biggest.width);
+        final rowHeight =
+            constraints.maxWidth / columns / _ui.posterSize.aspectRatio +
+            _ui.gridSpacing.mainAxisSpacing;
+        final rows = (constraints.maxHeight / rowHeight).ceil().clamp(2, 6);
+
+        return GridView.builder(
+          padding: EdgeInsets.all(_ui.gridSpacing.padding),
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: _ui.gridColumns > 0
+              ? SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: _ui.gridColumns,
+                  childAspectRatio: _ui.posterSize.aspectRatio,
+                  crossAxisSpacing: _ui.gridSpacing.crossAxisSpacing,
+                  mainAxisSpacing: _ui.gridSpacing.mainAxisSpacing,
+                )
+              : SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: _getMaxCrossAxisExtent(),
+                  childAspectRatio: _ui.posterSize.aspectRatio,
+                  crossAxisSpacing: _ui.gridSpacing.crossAxisSpacing,
+                  mainAxisSpacing: _ui.gridSpacing.mainAxisSpacing,
+                ),
+          itemCount: columns * rows,
+          itemBuilder: (context, index) =>
+              Skeleton(borderRadius: _ui.posterSize.borderRadius),
+        );
+      },
     );
+  }
+
+  /// Column count for [width], mirroring what the results grid will lay out.
+  int _columnsFor(double width) {
+    if (_ui.gridColumns > 0) return _ui.gridColumns;
+    final maxExtent = _getMaxCrossAxisExtent();
+    if (width <= 0) return 1;
+    return (width / (maxExtent + _ui.gridSpacing.crossAxisSpacing))
+        .floor()
+        .clamp(1, 20);
   }
 }
 

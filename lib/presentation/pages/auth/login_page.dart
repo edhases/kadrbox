@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/history_service.dart';
 import '../../../data/services/favorites_service.dart';
+import '../../../data/services/settings_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/dialogs/import_data_dialog.dart';
 
@@ -77,37 +78,54 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _checkLocalDataAndSync() async {
     final historyService = GetIt.instance<HistoryService>();
     final favoritesService = GetIt.instance<FavoritesService>();
+    final settingsService = GetIt.instance<SettingsService>();
+    final userId = _authService.userId;
+    if (userId == null) return;
 
     final historyCount = await historyService.count;
     final favoritesCount = await favoritesService.count;
 
-    if (historyCount > 0 || favoritesCount > 0) {
-      if (!mounted) return;
+    // Ask only when there is unaccounted-for local data for THIS account.
+    // Offering it on every sign-in was the bug: after a successful merge those
+    // rows are the account's own history, so the condition stayed true forever
+    // and the user was asked to merge their data with their own account on
+    // every login.
+    final shouldOffer = await settingsService.shouldOfferLocalDataMerge(
+      userId: userId,
+      historyCount: historyCount,
+      favoritesCount: favoritesCount,
+    );
+    if (!shouldOffer || !mounted) return;
 
-      final shouldMerge = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => ImportDataDialog(
-          historyCount: historyCount,
-          favoritesCount: favoritesCount,
-        ),
-      );
+    final shouldMerge = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ImportDataDialog(
+        historyCount: historyCount,
+        favoritesCount: favoritesCount,
+      ),
+    );
+    if (!mounted) return;
 
-      if (shouldMerge == true) {
-        // Merge: Sync local to cloud
-        await historyService.syncNow();
-        await favoritesService.syncNow();
-      } else {
-        // Delete: Clear local data (cloud data will be pulled on next sync/startup)
-        // Actually, we want to replace local with cloud.
-        // Clearing local data is enough, as the service will pull from cloud.
-        await historyService.clearAll();
-        await favoritesService.clearAll();
-        // Force pull to populate with cloud data
-        await historyService.syncNow();
-        await favoritesService.syncNow();
-      }
+    if (shouldMerge == true) {
+      // Merge: push local to cloud, then pull so the local table reflects the
+      // union rather than only what was on the device.
+      await historyService.syncNow();
+      await favoritesService.syncNow();
+    } else {
+      // Discard local and repopulate from the account. Ordering matters:
+      // clearAll on both services first, then pull. Doing it per-service
+      // interleaved syncNow() calls would let one service's push run against
+      // the other's freshly-cleared table.
+      await historyService.clearAll();
+      await favoritesService.clearAll();
+      await historyService.syncNow();
+      await favoritesService.syncNow();
     }
+
+    // Recorded after the work, and only if it did not throw: marking first
+    // would suppress the prompt on the next login even though nothing merged.
+    await settingsService.markLocalDataReconciled(userId);
   }
 
   @override
