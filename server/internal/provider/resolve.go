@@ -94,8 +94,27 @@ var (
 	reBareMediaURL     = regexp.MustCompile(`["'(](https?://[^"'()\s<>]+\.(?:m3u8|mpd|mp4)(?:\?[^"'()\s<>]*)?)["')]`)
 	rePlayerPagePath   = regexp.MustCompile(`(?i)/(?:embed|player|iframe|watch)`)
 	reMediaExt         = regexp.MustCompile(`(?i)\.(?:m3u8|mpd|mp4)$`)
-	reQualityToken     = regexp.MustCompile(`(?i)\b(4k|2160|1080|720|480|360)p?\b`)
+	// reQualityToken шукає роздільність у URL.
+//
+// Роздільником вважаємо будь-який неалфавітно-нецифровий символ,
+// включно з ПІДКРЕСЛЕННЯМ. Старий \b не працював: \b — це межа
+// між \w і не-\w, а _ входить у \w. Тобто найпоширеніший формат
+// назви релізу на DLE-сайтах
+//
+//	the_shawshank_redemption_1994_bdrip_1080p_h.265_3xukr_eng_1141
+//
+// ніколи не давав Quality — стояло «Auto» попри наявне 1080p у
+// назві. Перевірено на живому uakino.
+reQualityToken     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(4k|2160|1080|720|480|360)p?(?:[^a-z0-9]|$)`)
 	rePlayerJSSubtitle = regexp.MustCompile(`["']?subtitle(?:s)?["']?\s*:\s*["']([^"']+)["']`)
+	// rePlayerJSSubtitleList ловить список доріжок БЕЗ ключа
+	// subtitle: — тобто значення поля subtitle вузла плейлиста.
+	//
+	// URL не має права містити лапки: значення часто лежить усередині
+	// JS-рядка, і без їх виключення ми б дістали ".../en.vtt"" —
+	// з хвостими, який не збігається з URL із гілки 1 і не
+	// дедуплюється, тобто одна доріжка приходить двічі.
+	rePlayerJSSubtitleList = regexp.MustCompile(`\[([^\]\r\n]{2,30})\]\s*(https?://[^\s,\]"'\\]+)`)
 	reTrackTag         = regexp.MustCompile(`(?i)<track[^>]+>`)
 	reSrcAttr          = regexp.MustCompile(`(?i)\bsrc\s*=\s*["']([^"']+)["']`)
 	reLabelAttr        = regexp.MustCompile(`(?i)\blabel\s*=\s*["']([^"']+)["']`)
@@ -153,9 +172,11 @@ func resolvePlayerHTML(ctx context.Context, client *TLSClient, playerURL, siteBa
 
 	if raw, strategy, ok := extractPlayableURL(page); ok {
 		src := newStreamSource(raw, playerURL)
-		balancer := detectPlayerBalancer(playerURL)
-		src.Player = balancer
-		src.Voiceover = balancer
+		// Player — це CDN («HDVB», «Ashdi»). Voiceover — це студія
+		// озвучення («1+1», «Postmodern»), і її ми дізнаємося лише з
+		// дерева плейлиста. Тут дерева немає, тому Voiceover лишається
+		// порожнім: краще порожнє поле, ніж брехливе «HDVB».
+		src.Player = detectPlayerBalancer(playerURL)
 		return src, strategy, nil
 	}
 
@@ -314,6 +335,32 @@ func qualityFromURL(mediaURL string) string {
 		return "4K"
 	}
 	return m[1] + "p"
+}
+
+// canonicalSubtitleLang приводить мітку субтитрів до канонічного
+// коду мови.
+//
+// Раніше мітка і код мови були одним і тим же рядком, тобто
+// SubtitleSource.Language міг дорівнювати «Українські». Клієнт
+// порівнює мову з «uk»/«en», тому така відповідь не збігалася ні з
+// чим. Живий доказ: 18 субтитрів Ashdi з language="Українські".
+func canonicalSubtitleLang(label string) string {
+	l := strings.ToLower(strings.TrimSpace(label))
+	switch l {
+	case "", "uk", "ua", "ukr", "укр", "українська", "українські", "украинская", "українська мова":
+		if l == "" {
+			return ""
+		}
+		return "uk"
+	case "en", "eng", "english", "английская", "англ":
+		return "en"
+	case "ru", "rus", "russian", "русский":
+		return "ru"
+	case "pl", "pol", "polski":
+		return "pl"
+	default:
+		return label
+	}
 }
 
 // qualityResolutionTokens is checked in this exact order (highest first), so
@@ -823,7 +870,7 @@ func extractStreamsFromPlaylistTree(items []playerJSPlaylistItem, playerURL, pla
 		for _, it := range items {
 			var fileStr string
 			if err := json.Unmarshal(it.File, &fileStr); err == nil && fileStr != "" {
-				st := parseMultiQualityString(fileStr, playerURL, playerLabel)
+				st := parseMultiQualityString(fileStr, playerURL, "")
 				for i := range st {
 					if it.Title != "" {
 						st[i].Quality = normalizeQualityLabel(it.Title)
@@ -944,14 +991,36 @@ func parseSubtitlesFromPlayerHTML(text string) []domain.SubtitleSource {
 		for _, part := range strings.Split(raw, ",") {
 			part = strings.TrimSpace(part)
 			if bm := reQualityBracket.FindStringSubmatch(part); len(bm) == 3 {
-				add(bm[2], bm[1], bm[1])
+				add(bm[2], bm[1], canonicalSubtitleLang(bm[1]))
 			} else if strings.HasPrefix(part, "http") {
 				add(part, "Субтитри", "uk")
 			}
 		}
 	}
 
-	// 2. <track kind="subtitles" src="..." label="..." srclang="...">
+	// 2. Голий список PlayerJS без ключа subtitle:
+	//    "[Українські]https://…vtt,[English]https://…vtt".
+	//
+	//    Таке значення лежить у полі subtitle вузла плейлиста, тобто
+	//    ключа subtitle: перед ним немає. Раніше гілка 1 вимагала саме
+	//    ключ, тому на шляху дерева плейлиста субтитри зникали
+	//    повністю — на Ashdi такі є у 18 з 46 листків.
+	//
+	//    Мітку відсікаємо за reQualityTitle, бо той самий шаблон
+	//    «[1080p]url» використовується для якості, і без фільтра ми
+	//    додали б у субтитри кожне джерело.
+	for _, m := range rePlayerJSSubtitleList.FindAllStringSubmatch(text, -1) {
+		if len(m) < 3 {
+			continue
+		}
+		label := strings.TrimSpace(m[1])
+		if label == "" || reQualityTitle.MatchString(label) {
+			continue
+		}
+		add(m[2], label, canonicalSubtitleLang(label))
+	}
+
+	// 3. <track kind="subtitles" src="..." label="..." srclang="...">
 	for _, trackTag := range reTrackTag.FindAllString(text, -1) {
 		srcMatch := reSrcAttr.FindStringSubmatch(trackTag)
 		if len(srcMatch) < 2 {
@@ -1048,7 +1117,7 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 				}
 				// Also check PlayerJS file & sources in decoded text
 				if fm := rePlayerJSFile.FindStringSubmatch(decoded); len(fm) >= 2 {
-					st := parseMultiQualityString(fm[1], playerURL, playerLabel)
+					st := parseMultiQualityString(fm[1], playerURL, "")
 					addStreams(st)
 				}
 				// Also check subtitles in decoded text
@@ -1061,7 +1130,7 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 	if len(allStreams) == 0 {
 		for _, fm := range rePlayerJSFile.FindAllStringSubmatch(page, -1) {
 			if len(fm) >= 2 {
-				st := parseMultiQualityString(fm[1], playerURL, playerLabel)
+				st := parseMultiQualityString(fm[1], playerURL, "")
 				addStreams(st)
 			}
 		}
@@ -1076,7 +1145,7 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 			if len(sm) >= 2 && isPlayableMediaURL(sm[1]) {
 				src := newStreamSource(sm[1], playerURL)
 				src.Player = playerLabel
-				src.Voiceover = playerLabel
+
 				if lm := reSourcesLabel.FindStringSubmatch(block[1]); len(lm) >= 2 {
 					src.Quality = normalizeQualityLabel(lm[1])
 				}
@@ -1090,7 +1159,8 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 		if hlsSrc, ok := firstCaptured(reHlsLoadSource, page); ok && isPlayableMediaURL(hlsSrc) {
 			src := newStreamSource(hlsSrc, playerURL)
 			src.Player = playerLabel
-			src.Voiceover = playerLabel
+			// Voiceover не заповнюємо: playerLabel — це CDN, не студія.
+			// Студія приходить із контексту дерева плейлиста.
 			addStreams([]domain.StreamSource{src})
 		}
 	}
@@ -1100,7 +1170,8 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 		if bareSrc, ok := firstCaptured(reBareMediaURL, page); ok && isPlayableMediaURL(bareSrc) {
 			src := newStreamSource(bareSrc, playerURL)
 			src.Player = playerLabel
-			src.Voiceover = playerLabel
+			// Voiceover не заповнюємо: playerLabel — це CDN, не студія.
+			// Студія приходить із контексту дерева плейлиста.
 			addStreams([]domain.StreamSource{src})
 		}
 	}

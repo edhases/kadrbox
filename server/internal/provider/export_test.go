@@ -15,6 +15,13 @@ var (
 	IsBalancedJSON       = isBalancedJSON
 	ClassifyPlaylistNode = classifyPlaylistNode
 	CleanStudioName      = cleanStudioName
+	// Перевірка контрактів Quality/Voiceover: ці функції є внутрішніми,
+	// але саме на них тримається UI, тому тести мають діставатися
+	// безпосередньо.
+	QualityFromURL          = qualityFromURL
+	NormalizeQualityLabel   = normalizeQualityLabel
+	CanonicalSubtitleLang   = canonicalSubtitleLang
+	ParseSubtitlesFromHTML  = parseSubtitlesFromPlayerHTML
 )
 
 // Ролі вузлів — експортуємо константи, щоб тест міг їх порівняти.

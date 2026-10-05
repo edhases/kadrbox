@@ -397,13 +397,16 @@ func TestCharsetOf(t *testing.T) {
 	}
 }
 
+// Третій аргумент — назва СТУДІЇ озвучення, а не ім'я CDN.
+// Раніше тут передавалося "Ashdi", і тест цим закриплював баг:
+// Voiceover не має права містити ім'я балансера.
 func TestParseMultiQualityString(t *testing.T) {
 	raw := "[1080p]https://cdn.example/video_1080.m3u8,[720p]https://cdn.example/video_720.m3u8,[480p]https://cdn.example/video_480.m3u8"
-	streams := parseMultiQualityString(raw, "https://ashdi.vip/vod/123", "Ashdi")
+	streams := parseMultiQualityString(raw, "https://ashdi.vip/vod/123", "1+1")
 	if len(streams) != 3 {
 		t.Fatalf("expected 3 streams, got %d", len(streams))
 	}
-	if streams[0].Quality != "1080p" || streams[0].Player != "Ashdi" || streams[0].Voiceover != "Ashdi" {
+	if streams[0].Quality != "1080p" || streams[0].Player != "Ashdi" || streams[0].Voiceover != "1+1" {
 		t.Errorf("stream 0 mismatch: %+v", streams[0])
 	}
 	if streams[1].Quality != "720p" {
@@ -443,6 +446,12 @@ func TestParseSubtitlesFromPlayerHTML(t *testing.T) {
 	}
 	if subs[0].Label != "Українська" || subs[0].URL != "https://cdn.example/subs/uk.vtt" {
 		t.Errorf("sub 0 mismatch: %+v", subs[0])
+	}
+	// Мова має бути канонічним кодом, а не тією ж міткою. Раніше
+	// Label і Language були одним рядком, тобто Language дорівнював
+	// «Українська», і клієнт не міг її порівняти з «uk».
+	if subs[0].Language != "uk" {
+		t.Errorf("sub 0 Language = %q, want uk", subs[0].Language)
 	}
 	if subs[1].Label != "English" || subs[1].URL != "https://cdn.example/subs/en.vtt" {
 		t.Errorf("sub 1 mismatch: %+v", subs[1])

@@ -597,9 +597,9 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 						continue
 					}
 					cleanURL, parsedQuality := ParsePackedStreamURL(sItem.URL.String())
-					quality := sItem.Quality.String()
-					if quality == "" || quality == "auto" {
-						quality = parsedQuality
+					quality := normalizeQualityLabel(sItem.Quality.String())
+					if quality == defaultStreamQuality || quality == "" {
+						quality = normalizeQualityLabel(parsedQuality)
 					}
 					vName := sItem.Title.String()
 					if vName == "" {
@@ -672,10 +672,22 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 
 	// 6. Формуємо стріми з урахуванням правил proxy та заголовків
 	var streams []domain.StreamSource
-	streamVoiceover := targetSource
-	if voiceID != "" {
-		streamVoiceover = voiceID
-	}
+
+	// Voiceover — це студія озвучення.
+	//
+	// Раніше тут стояло streamVoiceover := targetSource, тобто в
+	// Voiceover потрапляло "uaflix", "mikai", "filmix" — це ключі
+	// джерел агрегатора, а не студії.
+	//
+	// А voiceID сюди поставити теж не можна: на цьому шляху voiceID
+	// — це ЧИСЛОВИЙ ІНДЕКС джерела ("0", "1"), а не назва озвучки
+	// (перевірка нижче відкидає нечислове значення з помилкою).
+	//
+	// Відповідь /stream у BanderaStreamEntry взагалі не має поля
+	// title, тобто назви студії тут немає фізично. Тому Voiceover
+	// лишається порожнім: краще порожнє поле, ніж «mikai» в
+	// переліку озвучки чи «0».
+	streamVoiceover := ""
 	for _, s := range streamResp.Streams {
 		rawURL := s.URL.String()
 		if rawURL == "" {
@@ -683,9 +695,9 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 		}
 
 		cleanURL, parsedQuality := ParsePackedStreamURL(rawURL)
-		quality := s.Quality.String()
-		if quality == "" || quality == "auto" {
-			quality = parsedQuality
+		quality := normalizeQualityLabel(s.Quality.String())
+		if quality == defaultStreamQuality || quality == "" {
+			quality = normalizeQualityLabel(parsedQuality)
 		}
 
 		playableURL, directURL, requiresProxy := WrapStreamURL(targetSource, "inner", cleanURL)
