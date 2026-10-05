@@ -72,6 +72,8 @@ server/server
 server/main
 *.test
 coverage.out
+# Go coverage profile written by some agents as bare 'cov' — 180KB of noise
+cov
 coverage.txt
 coverage.html
 profile.cov
