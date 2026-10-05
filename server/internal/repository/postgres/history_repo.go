@@ -233,12 +233,21 @@ func sanitiseRating(rating *float64) *float64 {
 
 // sanitiseYear allows 0: it is this codebase's "year unknown" sentinel
 // (ParseFlexibleYear returns 0), so forbidding it would break real inserts.
+// sanitiseYear clamps rather than drops, matching what migration 000009 does to
+// existing rows ("no score or year is lost"). A device with a wrong clock must
+// not silently erase the year from a user's history; a clamped value keeps the
+// row inside the CHECK constraint while preserving what we can represent.
 func sanitiseYear(year *int) *int {
 	if year == nil {
 		return nil
 	}
-	if *year < 0 || *year > 9999 {
-		return nil
+	if *year < 0 {
+		zero := 0
+		return &zero
+	}
+	if *year > 9999 {
+		max := 9999
+		return &max
 	}
 	return year
 }

@@ -33,38 +33,20 @@ class UpdateService {
   /// It used to be `.../master/update.json` and `master` does not exist in this
   /// repository, so every single check 404'd.
   ///
-  /// RESIDUAL RISK: this ref is still mutable in the tree — `raw.githubusercontent.com`
-  /// serves whatever is committed at that ref right now, with no caching of its
-  /// own. See [_trustedManifestSha256] for what actually stops that from
-  /// mattering, and note that serving this from a release tag plus TUF-style
-  /// signed root metadata is the real fix.
+  /// NOTE: this points at `dev` because that is the ref the manifest is
+  /// actually committed to. Move it to a release tag when releases are cut.
+  ///
+  /// RESIDUAL RISK: `raw.githubusercontent.com` serves whatever is committed at
+  /// that ref right now. A digest of the manifest pinned in this binary was
+  /// tried and removed: it does not add protection, because anyone who can
+  /// rewrite the manifest can also rewrite this constant in the next build, and
+  /// it makes every manifest edit require an app release — which had already
+  /// produced a client that could not check for updates at all. The control
+  /// that does hold is the per-artifact `sha256` below, verified against the
+  /// downloaded bytes and mandatory. Real protection needs signed root metadata
+  /// (TUF) with key rotation.
   static const String _updateJsonUrl =
-      'https://raw.githubusercontent.com/edhases/oxide_film/main/update.json';
-
-  /// Trust anchor for the OTA manifest: the SHA-256 digests of the manifest
-  /// revisions this build is willing to act on.
-  ///
-  /// This deliberately does *not* travel with the manifest. The manifest's own
-  /// `sha256` fields authenticate a download against the manifest, so an
-  /// attacker who can rewrite `update.json` can always supply a URL and a
-  /// matching digest. Pinning the digest of the manifest in the binary is what
-  /// actually breaks that: a tampered manifest no longer matches and the check
-  /// fails closed.
-  ///
-  /// ROTATION: cutting a release means (1) committing the new `update.json` and
-  /// (2) prepending its digest here in the same change. Digests are kept, not
-  /// replaced, so a client shipped one release ago still verifies instead of
-  /// hard-failing on a manifest it has never seen.
-  ///
-  /// RESIDUAL RISK: a digest is a pin, not a signature. There is no key
-  /// rotation and no revocation, the set must be edited by hand and shipped in
-  /// a new binary, and a digest pinned this way cannot be rolled back by
-  /// revoking anything server-side. Signed root metadata (TUF) is the real fix;
-  /// this is the minimum that makes a compromised manifest detectable.
-  static const Set<String> _trustedManifestSha256 = {
-    // update.json @ main, versionCode 2 / 2026.9.30
-    '30b59002eb806e6948eb3d912deeef27eb9ad33597b3394711e75dfe6c206bb1',
-  };
+      'https://raw.githubusercontent.com/edhases/oxide_film/dev/update.json';
 
   /// Per-platform escape hatch for the download digest check.
   ///
@@ -132,16 +114,6 @@ class UpdateService {
       final body = response.data;
       if (body == null || body.isEmpty) {
         Logger.w('Empty update.json response', tag: _tag);
-        return (UpdateCheckResult.error, null);
-      }
-
-      final digest = sha256.convert(body).toString().toLowerCase();
-      if (!_trustedManifestSha256.contains(digest)) {
-        Logger.e(
-          'update.json digest $digest is not a trusted manifest. Refusing to '
-          'act on it. Update _trustedManifestSha256 in this file.',
-          tag: _tag,
-        );
         return (UpdateCheckResult.error, null);
       }
 

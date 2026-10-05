@@ -109,6 +109,11 @@ type Hub struct {
 	stopOnce sync.Once
 	done     chan struct{}
 	wg       sync.WaitGroup
+	// stopping is set before WaitPumps starts waiting, and is what makes
+	// wg.Add safe against a concurrent wg.Wait: sync.WaitGroup only forbids
+	// Add racing Wait when the counter is at zero, which is exactly the state
+	// during shutdown. Reading or writing it requires mu.
+	stopping bool
 
 	opts        Options
 	upgrader    websocket.Upgrader
@@ -235,9 +240,19 @@ func (h *Hub) Stats() HubStats {
 func (h *Hub) Done() <-chan struct{} { return h.done }
 
 // WaitPumps blocks until every readPump/writePump has returned, or ctx expires.
-// Call it only after the HTTP listener has stopped accepting, because a new
-// upgrade would otherwise race wg.Add against w.Wait.
+//
+// Safe to call while the listener is still up: once this starts, new upgrades
+// are refused instead of racing the wait, so there is no window in which
+// wg.Add(2) runs concurrently with wg.Wait().
 func (h *Hub) WaitPumps(ctx context.Context) error {
+	// Refuse new pumps before waiting. Without this, an upgrade accepted a
+	// moment earlier could Add to the WaitGroup after Wait had already observed
+	// a zero counter, which the race detector flags and which can make Wait
+	// return before those pumps finish.
+	h.mu.Lock()
+	h.stopping = true
+	h.mu.Unlock()
+
 	drained := make(chan struct{})
 	go func() {
 		h.wg.Wait()
@@ -664,7 +679,18 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case h.register <- client:
+		// Claiming the pump slots has to be serialised against WaitPumps, and
+		// refused once shutdown has begun: adding to the WaitGroup after Wait
+		// started is exactly the race the detector reports.
+		h.mu.Lock()
+		if h.stopping {
+			h.mu.Unlock()
+			h.release(roomCode)
+			_ = conn.Close()
+			return
+		}
 		h.wg.Add(2)
+		h.mu.Unlock()
 		go client.writePump()
 		go client.readPump()
 	case <-h.stopChan:

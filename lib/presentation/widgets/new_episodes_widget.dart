@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../core/utils/image_headers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../data/services/episode_update_service.dart';
@@ -91,7 +93,9 @@ class _NewEpisodesButtonState extends State<NewEpisodesButton> {
         ),
       ),
       onPressed: () => _showNewEpisodesSheet(context),
-      tooltip: hasNew ? 'Нові серії' : 'Оновлення',
+      tooltip: hasNew
+          ? 'Р СњР С•Р Р†РЎвЂ“ РЎРѓР ВµРЎР‚РЎвЂ“РЎвЂ”'
+          : 'Р С›Р Р…Р С•Р Р†Р В»Р ВµР Р…Р Р…РЎРЏ',
     );
   }
 
@@ -167,7 +171,7 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
-                    'Нові серії',
+                    'Р СњР С•Р Р†РЎвЂ“ РЎРѓР ВµРЎР‚РЎвЂ“РЎвЂ”',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -182,7 +186,8 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
                     icon: const Icon(Icons.refresh),
                     onPressed: () =>
                         _updateService.checkForUpdates(force: true),
-                    tooltip: 'Перевірити оновлення',
+                    tooltip:
+                        'Р СџР ВµРЎР‚Р ВµР Р†РЎвЂ“РЎР‚Р С‘РЎвЂљР С‘ Р С•Р Р…Р С•Р Р†Р В»Р ВµР Р…Р Р…РЎРЏ',
                   ),
               ],
             ),
@@ -196,7 +201,7 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
                 Icon(Icons.schedule, size: 14, color: AppTheme.textMuted),
                 const SizedBox(width: 6),
                 Text(
-                  'Остання перевірка: ${_updateService.lastCheckFormatted}',
+                  'Р С›РЎРѓРЎвЂљР В°Р Р…Р Р…РЎРЏ Р С—Р ВµРЎР‚Р ВµР Р†РЎвЂ“РЎР‚Р С”Р В°: ${_updateService.lastCheckFormatted}',
                   style: const TextStyle(
                     fontSize: 12,
                     color: AppTheme.textMuted,
@@ -228,7 +233,7 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Помилка перевірки',
+              'Р СџР С•Р СР С‘Р В»Р С”Р В° Р С—Р ВµРЎР‚Р ВµР Р†РЎвЂ“РЎР‚Р С”Р С‘',
               style: TextStyle(color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 4),
@@ -241,7 +246,9 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
             ElevatedButton.icon(
               onPressed: () => _updateService.checkForUpdates(force: true),
               icon: const Icon(Icons.refresh),
-              label: const Text('Спробувати знову'),
+              label: const Text(
+                'Р РЋР С—РЎР‚Р С•Р В±РЎС“Р Р†Р В°РЎвЂљР С‘ Р В·Р Р…Р С•Р Р†РЎС“',
+              ),
             ),
           ],
         ),
@@ -258,19 +265,21 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
             Icon(Icons.check_circle_outline, size: 64, color: _accentColor),
             const SizedBox(height: 16),
             const Text(
-              'Все переглянуто!',
+              'Р вЂ™РЎРѓР Вµ Р С—Р ВµРЎР‚Р ВµР С–Р В»РЎРЏР Р…РЎС“РЎвЂљР С•!',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Немає нових серій у ваших улюблених',
+              'Р СњР ВµР СР В°РЎвЂќ Р Р…Р С•Р Р†Р С‘РЎвЂ¦ РЎРѓР ВµРЎР‚РЎвЂ“Р в„– РЎС“ Р Р†Р В°РЎв‚¬Р С‘РЎвЂ¦ РЎС“Р В»РЎР‹Р В±Р В»Р ВµР Р…Р С‘РЎвЂ¦',
               style: TextStyle(color: AppTheme.textMuted),
             ),
             const SizedBox(height: 24),
             OutlinedButton.icon(
               onPressed: () => _updateService.checkForUpdates(force: true),
               icon: const Icon(Icons.refresh),
-              label: const Text('Перевірити зараз'),
+              label: const Text(
+                'Р СџР ВµРЎР‚Р ВµР Р†РЎвЂ“РЎР‚Р С‘РЎвЂљР С‘ Р В·Р В°РЎР‚Р В°Р В·',
+              ),
             ),
           ],
         ),
@@ -292,7 +301,9 @@ class _NewEpisodesSheetState extends State<_NewEpisodesSheet> {
                     Navigator.pop(context);
                   },
                   icon: const Icon(Icons.clear_all, size: 18),
-                  label: const Text('Очистити все'),
+                  label: const Text(
+                    'Р С›РЎвЂЎР С‘РЎРѓРЎвЂљР С‘РЎвЂљР С‘ Р Р†РЎРѓР Вµ',
+                  ),
                 ),
               ],
             ),
@@ -374,6 +385,7 @@ class _EpisodeCard extends StatelessWidget {
                   child: episode.posterUrl != null
                       ? CachedNetworkImage(
                           imageUrl: episode.posterUrl!,
+                          cacheManager: posterCacheManager,
                           width: 60,
                           height: 90,
                           fit: BoxFit.cover,

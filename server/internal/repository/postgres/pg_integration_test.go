@@ -505,7 +505,20 @@ func TestPgMarkEmailVerifiedClearsTokens(t *testing.T) {
 	if _, err := repo.GetUserByVerificationToken(ctx, "pg-verify"); !errors.Is(err, postgres.ErrTokenNotFound) {
 		t.Errorf("expected the token to be consumed, got %v", err)
 	}
-	if err := repo.MarkEmailVerified(ctx, user.ID); !errors.Is(err, postgres.ErrUserNotFound) {
+
+	// Re-verifying an existing user is a no-op, not an error: the UPDATE still
+	// matches the row, so the call must succeed. That idempotency is what lets
+	// the register auto-verify path retry safely.
+	if err := repo.MarkEmailVerified(ctx, user.ID); err != nil {
+		t.Errorf("expected a repeat call to be a no-op, got %v", err)
+	}
+
+	// A user that is genuinely gone must be reported, not silently accepted.
+	deleted := pgUser(t, pool)
+	if err := repo.DeleteUser(ctx, deleted.ID); err != nil {
+		t.Fatalf("DeleteUser failed: %v", err)
+	}
+	if err := repo.MarkEmailVerified(ctx, deleted.ID); !errors.Is(err, postgres.ErrUserNotFound) {
 		t.Errorf("expected ErrUserNotFound for a deleted user, got %v", err)
 	}
 }

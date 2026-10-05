@@ -985,8 +985,8 @@ func TestCtRepositorySanitisesRatherThanRejects(t *testing.T) {
 	if h.PositionMs != h.DurationMs {
 		t.Errorf("position beyond duration must be clamped to %d, got %d", h.DurationMs, h.PositionMs)
 	}
-	if h.Year != nil {
-		t.Errorf("an out-of-range year must be dropped, got %v", *h.Year)
+	if h.Year == nil || *h.Year != 9999 {
+		t.Errorf("an out-of-range year must be clamped to 9999, got %v", h.Year)
 	}
 	if h.Rating != nil {
 		t.Errorf("an out-of-range rating must be dropped, got %v", *h.Rating)

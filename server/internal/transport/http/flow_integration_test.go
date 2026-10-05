@@ -1,9 +1,9 @@
 package http_test
 
-// Наскрізний flow проти справжніх Postgres + Redis.
-// Локально без TEST_POSTGRES_DSN / TEST_REDIS_ADDR — пропуск (t.Skip).
-// У CI виконується job із services. Email-сервіс неналаштований
-// (RESEND_API="") → реєстрація йде гілкою auto-verify.
+// Р СњР В°РЎРѓР С”РЎР‚РЎвЂ“Р В·Р Р…Р С‘Р в„– flow Р С—РЎР‚Р С•РЎвЂљР С‘ РЎРѓР С—РЎР‚Р В°Р Р†Р В¶Р Р…РЎвЂ“РЎвЂ¦ Postgres + Redis.
+// Р вЂєР С•Р С”Р В°Р В»РЎРЉР Р…Р С• Р В±Р ВµР В· TEST_POSTGRES_DSN / TEST_REDIS_ADDR РІР‚вЂќ Р С—РЎР‚Р С•Р С—РЎС“РЎРѓР С” (t.Skip).
+// Р Р€ CI Р Р†Р С‘Р С”Р С•Р Р…РЎС“РЎвЂќРЎвЂљРЎРЉРЎРѓРЎРЏ job РЎвЂ“Р В· services. Email-РЎРѓР ВµРЎР‚Р Р†РЎвЂ“РЎРѓ Р Р…Р ВµР Р…Р В°Р В»Р В°РЎв‚¬РЎвЂљР С•Р Р†Р В°Р Р…Р С‘Р в„–
+// (RESEND_API="") РІвЂ вЂ™ РЎР‚Р ВµРЎвЂќРЎРѓРЎвЂљРЎР‚Р В°РЎвЂ РЎвЂ“РЎРЏ Р в„–Р Т‘Р Вµ Р С–РЎвЂ“Р В»Р С”Р С•РЎР‹ auto-verify.
 
 import (
 	"bytes"
@@ -32,9 +32,9 @@ type covFlowRig struct {
 func covFlowRigSetup(t *testing.T) *covFlowRig {
 	t.Helper()
 	if os.Getenv("TEST_POSTGRES_DSN") == "" || os.Getenv("TEST_REDIS_ADDR") == "" {
-		t.Skip("TEST_POSTGRES_DSN/TEST_REDIS_ADDR not set — integration test skipped")
+		t.Skip("TEST_POSTGRES_DSN/TEST_REDIS_ADDR not set РІР‚вЂќ integration test skipped")
 	}
-	// Детерміновано: auto-verify гілка реєстрації.
+	// Р вЂќР ВµРЎвЂљР ВµРЎР‚Р СРЎвЂ“Р Р…Р С•Р Р†Р В°Р Р…Р С•: auto-verify Р С–РЎвЂ“Р В»Р С”Р В° РЎР‚Р ВµРЎвЂќРЎРѓРЎвЂљРЎР‚Р В°РЎвЂ РЎвЂ“РЎвЂ”.
 	t.Setenv("RESEND_API", "")
 
 	pool, err := postgres.InitDB(context.Background(), os.Getenv("TEST_POSTGRES_DSN"))
@@ -96,11 +96,37 @@ func covFlowDecode[T any](t *testing.T, rr *httptest.ResponseRecorder) T {
 	return v
 }
 
+// covFlowDecodeEnvelope decodes the `{"data": ..., "meta": ...}` envelope the
+// list endpoints return. The bare decoder above is kept for the endpoints that
+// still answer with a plain object or array.
+func covFlowDecodeEnvelope[T any](t *testing.T, rr *httptest.ResponseRecorder) T {
+	t.Helper()
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope failed (status %d): %v", rr.Code, err)
+	}
+	var v T
+	if err := json.Unmarshal(env.Data, &v); err != nil {
+		t.Fatalf("decode envelope data failed (status %d): %v", rr.Code, err)
+	}
+	return v
+}
+
+// toggleEnvelope mirrors the favourites toggle payload, which also carries the
+// identifiers, so it cannot be decoded into map[string]bool.
+type toggleEnvelope struct {
+	IsFavorite bool   `json:"is_favorite"`
+	MediaID    string `json:"media_id"`
+	ProviderID string `json:"provider_id"`
+}
+
 func TestCovHttpFlowRegisterLoginRefresh(t *testing.T) {
 	rig := covFlowRigSetup(t)
 	mail := fmt.Sprintf("flow_%d@x.com", time.Now().UnixNano())
 
-	// 1. Register → 200, auto-verified (email не налаштовано).
+	// 1. Register РІвЂ вЂ™ 200, auto-verified (email Р Р…Р Вµ Р Р…Р В°Р В»Р В°РЎв‚¬РЎвЂљР С•Р Р†Р В°Р Р…Р С•).
 	rr := rig.do(t, http.MethodPost, "/api/v1/auth/register", map[string]string{
 		"email": mail, "password": "secret123", "username": "flowuser",
 	}, "")
@@ -115,7 +141,7 @@ func TestCovHttpFlowRegisterLoginRefresh(t *testing.T) {
 		t.Error("register: expected auto-verified user")
 	}
 
-	// 2. Дублікат → 409.
+	// 2. Р вЂќРЎС“Р В±Р В»РЎвЂ“Р С”Р В°РЎвЂљ РІвЂ вЂ™ 409.
 	rr = rig.do(t, http.MethodPost, "/api/v1/auth/register", map[string]string{
 		"email": mail, "password": "secret123", "username": "flowuser",
 	}, "")
@@ -123,7 +149,7 @@ func TestCovHttpFlowRegisterLoginRefresh(t *testing.T) {
 		t.Errorf("duplicate register: expected 409, got %d", rr.Code)
 	}
 
-	// 3. Me з токеном → 200.
+	// 3. Me Р В· РЎвЂљР С•Р С”Р ВµР Р…Р С•Р С РІвЂ вЂ™ 200.
 	rr = rig.do(t, http.MethodGet, "/api/v1/auth/me", nil, reg.AccessToken)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("me: expected 200, got %d", rr.Code)
@@ -133,7 +159,7 @@ func TestCovHttpFlowRegisterLoginRefresh(t *testing.T) {
 		t.Errorf("me: unexpected user %+v", me)
 	}
 
-	// 4. Login з неправильним паролем → 401; з правильним → 200.
+	// 4. Login Р В· Р Р…Р ВµР С—РЎР‚Р В°Р Р†Р С‘Р В»РЎРЉР Р…Р С‘Р С Р С—Р В°РЎР‚Р С•Р В»Р ВµР С РІвЂ вЂ™ 401; Р В· Р С—РЎР‚Р В°Р Р†Р С‘Р В»РЎРЉР Р…Р С‘Р С РІвЂ вЂ™ 200.
 	rr = rig.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
 		"email": mail, "password": "wrong",
 	}, "")
@@ -148,7 +174,7 @@ func TestCovHttpFlowRegisterLoginRefresh(t *testing.T) {
 	}
 	login := covFlowDecode[transporthttp.AuthResponse](t, rr)
 
-	// 5. Refresh ротація: новий токен працює, старий — 401.
+	// 5. Refresh РЎР‚Р С•РЎвЂљР В°РЎвЂ РЎвЂ“РЎРЏ: Р Р…Р С•Р Р†Р С‘Р в„– РЎвЂљР С•Р С”Р ВµР Р… Р С—РЎР‚Р В°РЎвЂ РЎР‹РЎвЂќ, РЎРѓРЎвЂљР В°РЎР‚Р С‘Р в„– РІР‚вЂќ 401.
 	rr = rig.do(t, http.MethodPost, "/api/v1/auth/refresh", map[string]string{
 		"refresh_token": login.RefreshToken,
 	}, "")
@@ -166,7 +192,7 @@ func TestCovHttpFlowRegisterLoginRefresh(t *testing.T) {
 		t.Errorf("reused refresh: expected 401, got %d", rr.Code)
 	}
 
-	// 6. VerifyEmail з лівим токеном → 400 (гілка БД).
+	// 6. VerifyEmail Р В· Р В»РЎвЂ“Р Р†Р С‘Р С РЎвЂљР С•Р С”Р ВµР Р…Р С•Р С РІвЂ вЂ™ 400 (Р С–РЎвЂ“Р В»Р С”Р В° Р вЂР вЂќ).
 	rr = rig.do(t, http.MethodPost, "/api/v1/auth/verify-email", map[string]string{
 		"token": "nope",
 	}, "")
@@ -187,9 +213,9 @@ func TestCovHttpFlowSync(t *testing.T) {
 	}
 	token := covFlowDecode[transporthttp.AuthResponse](t, rr).AccessToken
 
-	// SaveProgress → історія.
+	// SaveProgress РІвЂ вЂ™ РЎвЂ“РЎРѓРЎвЂљР С•РЎР‚РЎвЂ“РЎРЏ.
 	rr = rig.do(t, http.MethodPost, "/api/v1/sync/history", map[string]any{
-		"media_id": "m1", "provider_id": "uakino", "title": "Матриця",
+		"media_id": "m1", "provider_id": "uakino", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
 		"position_ms": 50, "duration_ms": 100,
 	}, token)
 	if rr.Code != http.StatusOK {
@@ -197,35 +223,35 @@ func TestCovHttpFlowSync(t *testing.T) {
 	}
 
 	rr = rig.do(t, http.MethodGet, "/api/v1/sync/history?limit=10", nil, token)
-	hist := covFlowDecode[[]domain.WatchHistory](t, rr)
-	if len(hist) != 1 || hist[0].Title != "Матриця" || hist[0].PositionMs != 50 {
+	hist := covFlowDecodeEnvelope[[]domain.WatchHistory](t, rr)
+	if len(hist) != 1 || hist[0].Title != "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ" || hist[0].PositionMs != 50 {
 		t.Fatalf("unexpected history: %+v", hist)
 	}
 
 	rr = rig.do(t, http.MethodGet, "/api/v1/sync/continue-watching", nil, token)
-	cont := covFlowDecode[[]domain.WatchHistory](t, rr)
+	cont := covFlowDecodeEnvelope[[]domain.WatchHistory](t, rr)
 	if len(cont) != 1 || cont[0].MediaID != "m1" {
 		t.Errorf("unexpected continue-watching: %+v", cont)
 	}
 
-	// Toggle on → favorites містить; toggle off → порожньо.
+	// Toggle on РІвЂ вЂ™ favorites Р СРЎвЂ“РЎРѓРЎвЂљР С‘РЎвЂљРЎРЉ; toggle off РІвЂ вЂ™ Р С—Р С•РЎР‚Р С•Р В¶Р Р…РЎРЉР С•.
 	rr = rig.do(t, http.MethodPost, "/api/v1/sync/favorites/toggle", map[string]string{
-		"media_id": "m1", "provider_id": "uakino", "title": "Матриця",
+		"media_id": "m1", "provider_id": "uakino", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
 	}, token)
-	on := covFlowDecode[map[string]bool](t, rr)
-	if !on["is_favorite"] {
-		t.Fatalf("toggle on failed: %v", on)
+	on := covFlowDecodeEnvelope[toggleEnvelope](t, rr)
+	if !on.IsFavorite {
+		t.Fatalf("toggle on failed: %+v", on)
 	}
 	rr = rig.do(t, http.MethodGet, "/api/v1/sync/favorites", nil, token)
-	favs := covFlowDecode[[]domain.Favorite](t, rr)
+	favs := covFlowDecodeEnvelope[[]domain.Favorite](t, rr)
 	if len(favs) != 1 {
 		t.Fatalf("expected 1 favorite, got %+v", favs)
 	}
 	rr = rig.do(t, http.MethodPost, "/api/v1/sync/favorites/toggle", map[string]string{
-		"media_id": "m1", "provider_id": "uakino", "title": "Матриця",
+		"media_id": "m1", "provider_id": "uakino", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
 	}, token)
-	off := covFlowDecode[map[string]bool](t, rr)
-	if off["is_favorite"] {
-		t.Fatalf("toggle off failed: %v", off)
+	off := covFlowDecodeEnvelope[toggleEnvelope](t, rr)
+	if off.IsFavorite {
+		t.Fatalf("toggle off failed: %+v", off)
 	}
 }

@@ -335,7 +335,13 @@ class ApiClient {
         options: Options(headers: headers),
       );
       if (response.data is Map) {
-        return Map<String, dynamic>.from(response.data as Map);
+        // The server wraps object payloads in {"data": ...}. Unwrap here so
+        // every caller sees the bare object; without this the provider catalog
+        // parsed to zero entries and the home screen rendered empty.
+        final unwrapped = _unwrapEnvelope(response.data);
+        if (unwrapped is Map) {
+          return Map<String, dynamic>.from(unwrapped);
+        }
       }
       return {};
     } on DioException catch (e) {
@@ -375,6 +381,13 @@ class ApiClient {
       );
       if (response.data is List) {
         return List<dynamic>.from(response.data as List);
+      }
+      // The server wraps list payloads in {"data": [...], "meta": {...}}.
+      // Without this every list endpoint silently decoded to an empty list,
+      // which surfaced as an empty home screen rather than as an error.
+      final unwrapped = _unwrapEnvelope(response.data);
+      if (unwrapped is List) {
+        return List<dynamic>.from(unwrapped);
       }
       return [];
     } on DioException catch (e) {

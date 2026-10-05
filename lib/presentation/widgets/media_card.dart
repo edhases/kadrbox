@@ -6,6 +6,7 @@ import 'package:get_it/get_it.dart';
 
 import 'package:flutter/services.dart';
 import '../../data/services/settings_service.dart';
+import '../../core/utils/image_headers.dart';
 import '../../data/services/download_service.dart';
 import '../../domain/entities/entities.dart';
 import 'common/skeleton.dart';
@@ -15,8 +16,8 @@ class MediaCard extends StatefulWidget {
   final MediaItem item;
   final VoidCallback? onTap;
   final bool isFocused; // Deprecated but kept for compatibility
-  /// Namespace для Hero тегу — дозволяє мати один item у різних місцях UI
-  /// без конфлікту Hero анімацій (напр. 'grid', 'recommendations', 'banner')
+  /// Namespace Р Т‘Р В»РЎРЏ Hero РЎвЂљР ВµР С–РЎС“ РІР‚вЂќ Р Т‘Р С•Р В·Р Р†Р С•Р В»РЎРЏРЎвЂќ Р СР В°РЎвЂљР С‘ Р С•Р Т‘Р С‘Р Р… item РЎС“ РЎР‚РЎвЂ“Р В·Р Р…Р С‘РЎвЂ¦ Р СРЎвЂ“РЎРѓРЎвЂ РЎРЏРЎвЂ¦ UI
+  /// Р В±Р ВµР В· Р С”Р С•Р Р…РЎвЂћР В»РЎвЂ“Р С”РЎвЂљРЎС“ Hero Р В°Р Р…РЎвЂ“Р СР В°РЎвЂ РЎвЂ“Р в„– (Р Р…Р В°Р С—РЎР‚. 'grid', 'recommendations', 'banner')
   final String heroNamespace;
 
   const MediaCard({
@@ -115,7 +116,7 @@ class _MediaCardState extends State<MediaCard> {
                   // Gradient overlay (always on bottom for readability)
                   _buildGradientOverlay(),
 
-                  // Content info (title + year • genre / rating)
+                  // Content info (title + year РІР‚Сћ genre / rating)
                   _buildInfoOverlay(),
 
                   // Provider badge (top-left)
@@ -165,6 +166,7 @@ class _MediaCardState extends State<MediaCard> {
           : widget.item.posterUrl != null
           ? CachedNetworkImage(
               imageUrl: widget.item.posterUrl!,
+              cacheManager: posterCacheManager,
               fit: BoxFit.cover,
               memCacheHeight: 400,
               maxWidthDiskCache: 400,
@@ -266,7 +268,7 @@ class _MediaCardState extends State<MediaCard> {
       parts.add(widget.item.type.displayName);
     }
 
-    final subtitle = parts.join(' • ');
+    final subtitle = parts.join(' РІР‚Сћ ');
 
     return Positioned(
       left: 8,
@@ -290,7 +292,7 @@ class _MediaCardState extends State<MediaCard> {
           ),
           if (subtitle.isNotEmpty) ...[
             const SizedBox(height: 2),
-            // 2nd line: Year • Genre
+            // 2nd line: Year РІР‚Сћ Genre
             Text(
               subtitle,
               maxLines: 1,

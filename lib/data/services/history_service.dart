@@ -347,6 +347,7 @@ class HistoryService extends ChangeNotifier {
 
         final localHistory = await _dao.getAll(limit: 500);
         int synced = 0;
+        int failed = 0;
 
         for (final item in localHistory) {
           if (_cloudSyncDisabled || !_server.isAuthenticated) break;
@@ -367,12 +368,19 @@ class HistoryService extends ChangeNotifier {
               _cloudSyncDisabled = true;
               break;
             } else {
+              failed++;
               debugPrint('Failed to sync ${item.mediaId}: $e');
             }
           }
         }
 
-        debugPrint('✅ Synced $synced/${localHistory.length} items to cloud');
+        if (failed > 0) {
+          debugPrint(
+            '⚠️ Synced $synced/${localHistory.length} items to cloud, $failed failed',
+          );
+        } else {
+          debugPrint('✅ Synced $synced/${localHistory.length} items to cloud');
+        }
       } catch (e) {
         debugPrint('⚠️ Failed to sync to cloud: $e');
       } finally {
@@ -437,6 +445,10 @@ class HistoryService extends ChangeNotifier {
         _cloudSyncDisabled = true;
         rethrow;
       }
+      // Re-throw so the batch loop can count the failure. Swallowing it here
+      // made every batch report "Synced N/N" no matter how many items the
+      // server had rejected, which hid a real 500 from the sync report.
+      rethrow;
     }
   }
 

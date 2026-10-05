@@ -443,6 +443,7 @@ func TestPgSanitiseRating(t *testing.T) {
 
 func TestPgSanitiseYear(t *testing.T) {
 	ok, zero, negative, absurd := 1999, 0, -3, 99999
+	clampLow, clampHigh := 0, 9999
 	cases := []struct {
 		name string
 		in   *int
@@ -451,8 +452,11 @@ func TestPgSanitiseYear(t *testing.T) {
 		{"nil", nil, nil},
 		{"normal", &ok, &ok},
 		{"zeroIsUnknownYearSentinel", &zero, &zero},
-		{"negativeDropped", &negative, nil},
-		{"absurdDropped", &absurd, nil},
+		// Out-of-range values are clamped, not dropped: migration 000009 also
+		// clamps ("no score or year is lost"), and a device with a wrong clock
+		// should not silently erase the year from a user's history.
+		{"negativeClamped", &negative, &clampLow},
+		{"absurdClamped", &absurd, &clampHigh},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
