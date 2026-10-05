@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
+	"github.com/edhases/oxide-server/internal/search"
 )
 
 // BanderaProvider є агрегатором українського контенту (Lampa/Bandera Online API).
@@ -61,16 +63,33 @@ func (p *BanderaProvider) Describe() domain.ProviderInfo {
 	}
 }
 
+func canonicalizeRef(raw json.RawMessage) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return trimmed
+	}
+	canonical, err := json.Marshal(v)
+	if err != nil {
+		return trimmed
+	}
+	return canonical
+}
+
 func GenerateStableContentID(source, title string, year int, ref json.RawMessage) string {
 	h := sha1.New()
 	h.Write([]byte(source))
 	h.Write([]byte(":"))
-	h.Write([]byte(title))
+	h.Write([]byte(search.NormalizeTitleForMatch(title)))
 	h.Write([]byte(":"))
 	h.Write([]byte(strconv.Itoa(year)))
-	if len(ref) > 0 {
+	canonRef := canonicalizeRef(ref)
+	if len(canonRef) > 0 {
 		h.Write([]byte(":"))
-		h.Write(ref)
+		h.Write(canonRef)
 	}
 	return "bo_" + source + "_" + hex.EncodeToString(h.Sum(nil))[:10]
 }
@@ -221,7 +240,11 @@ func (p *BanderaProvider) GetPopular(ctx context.Context, contentType string, pa
 		queries = []string{"фільм", "серіал", "мультфільм", "2024", "2023"}
 	}
 
-	q := queries[(page-1)%len(queries)]
+	if page > len(queries) {
+		return []domain.MediaItem{}, nil
+	}
+
+	q := queries[page-1]
 	var items []domain.MediaItem
 	var err error
 
@@ -250,7 +273,10 @@ func (p *BanderaProvider) GetNew(ctx context.Context, contentType string, page i
 	}
 	currentYear := time.Now().Year()
 	years := []int{currentYear, currentYear - 1, currentYear - 2}
-	year := years[(page-1)%len(years)]
+	if page > len(years) {
+		return []domain.MediaItem{}, nil
+	}
+	year := years[page-1]
 
 	var serial int
 	if contentType == "series" {
@@ -268,6 +294,12 @@ func (p *BanderaProvider) GetNew(ctx context.Context, contentType string, page i
 
 // GetByCategory виконує пошук за назвою категорії із сортуванням
 func (p *BanderaProvider) GetByCategory(ctx context.Context, category, contentType string, page int) ([]domain.MediaItem, error) {
+	if page < 1 {
+		page = 1
+	}
+	if page > 1 {
+		return []domain.MediaItem{}, nil
+	}
 	if category == "" {
 		return p.GetPopular(ctx, contentType, page)
 	}

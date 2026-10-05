@@ -73,6 +73,7 @@ class MediaItem extends Equatable {
   final String? description;
   final List<String>? genres;
   final String? country;
+  final String? url;
 
   const MediaItem({
     required this.id,
@@ -87,6 +88,7 @@ class MediaItem extends Equatable {
     this.description,
     this.genres,
     this.country,
+    this.url,
   });
 
   @override
@@ -103,6 +105,7 @@ class MediaItem extends Equatable {
     description,
     genres,
     country,
+    url,
   ];
 
   /// Unique identifier combining provider and media ID
@@ -121,6 +124,7 @@ class MediaItem extends Equatable {
     String? description,
     List<String>? genres,
     String? country,
+    String? url,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -135,6 +139,7 @@ class MediaItem extends Equatable {
       description: description ?? this.description,
       genres: genres ?? this.genres,
       country: country ?? this.country,
+      url: url ?? this.url,
     );
   }
 }

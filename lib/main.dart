@@ -129,6 +129,7 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    if (!getIt.isRegistered<ApiClient>()) return;
     try {
       getIt<ApiClient>().onAppResumed();
     } catch (e) {

@@ -262,8 +262,8 @@ type BanderaContentResponse struct {
 	Info     *BanderaContentInfo `json:"info"`
 	Streams  []BanderaStreamItem `json:"streams"`
 	Voices   []BanderaVoice      `json:"voices"`
-	Seasons  []BanderaSeason     `json:"seasons,omitempty"`
-	Episodes []BanderaEpisode    `json:"episodes,omitempty"`
+	Seasons  FlexibleSeasons     `json:"seasons,omitempty"`
+	Episodes FlexibleEpisodes    `json:"episodes,omitempty"`
 }
 
 type FlexibleGenres []string
@@ -348,13 +348,100 @@ type BanderaStreamItem struct {
 type BanderaVoice struct {
 	ID          FlexibleString   `json:"id"`
 	DisplayName FlexibleString   `json:"display_name"`
-	Seasons     []BanderaSeason  `json:"seasons"`
-	Episodes    []BanderaEpisode `json:"episodes"`
+	Seasons     FlexibleSeasons  `json:"seasons"`
+	Episodes    FlexibleEpisodes `json:"episodes"`
 }
 
 type BanderaSeason struct {
 	Title    json.RawMessage  `json:"title"` // Може бути int або string ("1" або 1)
-	Episodes []BanderaEpisode `json:"episodes"`
+	Episodes FlexibleEpisodes `json:"episodes"`
+}
+
+type FlexibleSeasons []BanderaSeason
+
+func (f *FlexibleSeasons) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*f = nil
+		return nil
+	}
+	// 1. Звичайний масив об'єктів []BanderaSeason
+	var seasons []BanderaSeason
+	if err := json.Unmarshal(b, &seasons); err == nil {
+		*f = seasons
+		return nil
+	}
+	// 2. Число (наприклад 0 або кількість сезонів від агрегатора)
+	var num float64
+	if err := json.Unmarshal(b, &num); err == nil {
+		*f = nil
+		return nil
+	}
+	// 3. Рядок
+	var str string
+	if err := json.Unmarshal(b, &str); err == nil {
+		*f = nil
+		return nil
+	}
+	// 4. Масив чисел [1, 2, 3]
+	var nums []int
+	if err := json.Unmarshal(b, &nums); err == nil {
+		var res []BanderaSeason
+		for _, n := range nums {
+			titleBytes, _ := json.Marshal(n)
+			res = append(res, BanderaSeason{
+				Title: titleBytes,
+			})
+		}
+		*f = res
+		return nil
+	}
+	// 5. Об'єкт (map) замість масиву
+	var seasonMap map[string]BanderaSeason
+	if err := json.Unmarshal(b, &seasonMap); err == nil {
+		var res []BanderaSeason
+		for _, s := range seasonMap {
+			res = append(res, s)
+		}
+		*f = res
+		return nil
+	}
+	*f = nil
+	return nil
+}
+
+type FlexibleEpisodes []BanderaEpisode
+
+func (f *FlexibleEpisodes) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*f = nil
+		return nil
+	}
+	var episodes []BanderaEpisode
+	if err := json.Unmarshal(b, &episodes); err == nil {
+		*f = episodes
+		return nil
+	}
+	var num float64
+	if err := json.Unmarshal(b, &num); err == nil {
+		*f = nil
+		return nil
+	}
+	var str string
+	if err := json.Unmarshal(b, &str); err == nil {
+		*f = nil
+		return nil
+	}
+	var epMap map[string]BanderaEpisode
+	if err := json.Unmarshal(b, &epMap); err == nil {
+		var res []BanderaEpisode
+		for _, ep := range epMap {
+			res = append(res, ep)
+		}
+		*f = res
+		return nil
+	}
+	*f = nil
+	return nil
 }
 
 type BanderaEpisode struct {

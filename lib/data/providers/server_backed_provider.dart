@@ -467,17 +467,29 @@ class ServerBackedProvider extends ContentProvider {
   @visibleForTesting
   StreamSource mapStreamForTest(Map<String, dynamic> json) => _mapStream(json);
 
+  /// Test seam for [_mapItem].
+  @visibleForTesting
+  MediaItem mapItemForTest(Map<String, dynamic> json) => _mapItem(json);
+
   /// Test seam for [_mapDetails].
   @visibleForTesting
   MediaDetails mapDetailsForTest(Map<String, dynamic> json) =>
       _mapDetails(json);
 
-  /// Server item URL is used as the app-side id (details/streams need the URL).
+  /// Server item URL or ID is mapped to MediaItem.
   MediaItem _mapItem(Map<String, dynamic> json) {
     final url = json['url'] as String? ?? '';
+    final idVal = json['id'] as String? ?? '';
+    // The unified search response embeds the real provider_id in each item
+    // (e.g. "uakino", "lavakino"). Falling back to this.id ensures the
+    // provider-specific catalogue views still work when provider_id is absent.
+    final providerIdFromJson = json['provider_id'] as String?;
     return MediaItem(
-      id: url.isNotEmpty ? url : (json['id'] as String? ?? ''),
-      providerId: id,
+      id: url.isNotEmpty ? url : idVal,
+      providerId:
+          (providerIdFromJson != null && providerIdFromJson.isNotEmpty)
+              ? providerIdFromJson
+              : id,
       title: json['title'] as String? ?? '',
       originalTitle: json['original_title'] as String?,
       posterUrl: json['poster_url'] as String?,
@@ -485,6 +497,7 @@ class ServerBackedProvider extends ContentProvider {
       rating: (json['rating'] as num?)?.toDouble(),
       ratingSource: 'Site',
       type: _mapType(json['type'] as String?),
+      url: url.isNotEmpty ? url : null,
     );
   }
 
