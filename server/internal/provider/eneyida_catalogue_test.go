@@ -694,6 +694,16 @@ func TestEneyidaGetDetailsFillsSeasonsAndVoiceovers(t *testing.T) {
 	if seasonsPer["HDrezka Studio"] != 1 {
 		t.Errorf("«HDrezka Studio» carries %d seasons, want 1", seasonsPer["HDrezka Studio"])
 	}
+
+	// Перевірка ref: кожна серія мусить нести адресу сторінки в конверті,
+	// щоб клієнт міг передати її в GetStreams без 400 invalid URL.
+	epURL := d.Seasons[0].Episodes[0].URL
+	decodedURL, s, ep, _, ok := DecodeSelectionRef(epURL)
+	wantURL := srv.URL + "/9516-temna-materiia-2024.html"
+	if !ok || decodedURL != wantURL || s != 1 || ep != 1 {
+		t.Errorf("episode URL = %q, want selection ref carrying %q (got %q, s=%d, ep=%d, ok=%v)",
+			epURL, wantURL, decodedURL, s, ep, ok)
+	}
 }
 
 // Значення без посилань (суцільний текст) теж мають розбиратися:

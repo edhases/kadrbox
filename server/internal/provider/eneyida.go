@@ -563,8 +563,8 @@ func applyPlaylistDetails(ctx context.Context, client *TLSClient, siteBaseURL st
 	if !ok {
 		return
 	}
-	details.Seasons = mergePlaylistSeasons(BuildSeasonsFromPlaylist(items))
-	details.Voiceovers = BuildVoiceoversFromPlaylist(items)
+	details.Seasons = mergePlaylistSeasons(BuildSeasonsForItem(items, itemURL))
+	details.Voiceovers = BuildVoiceoversForItem(items, itemURL)
 }
 
 // dlePlaylistProbeLimit — скільки iframe-кандидатів плеєра завантажує
