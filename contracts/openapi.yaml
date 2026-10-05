@@ -521,8 +521,9 @@ components:
 
     Segment:
       type: object
-      description: One catalog source represented in a result set.
-      required: [id, label, provider, item_count]
+      description: |
+        One catalog source represented in a result set.
+      required: [id, label, provider, status, item_count]
       properties:
         id:
           type: string
@@ -544,12 +545,35 @@ components:
             rebrand the visible label without changing stored references.
           maxLength: 64
           example: "example-provider"
+        status:
+          type: string
+          description: |
+            Outcome for this segment alone. Required, because a server usually
+            fans out to several sources and one of them being down is the
+            normal case, not the exception.
+
+            Without it the only honest options are to omit the segment
+            entirely or to return 200 with a silently short list -- and the
+            first makes the catalogue look empty while the second makes a
+            broken source look like a working one that found nothing. The
+            client shows the state per segment and keeps the others.
+          enum: [ok, empty, error]
+          example: "ok"
+        error:
+          type: string
+          description: |
+            Short machine-readable reason, present only when `status` is
+            `error`. Values are open-ended: the client renders them generically
+            and must never depend on a specific one.
+          maxLength: 128
+          example: "upstream_timeout"
         item_count:
           type: integer
           minimum: 0
           description: |
             How many entries of `items` belong to this segment. Lets the client
             show a per-source count without counting the flat list itself.
+            Must be 0 when `status` is not `ok`.
           example: 1
 
     Item:
