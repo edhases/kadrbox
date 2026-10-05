@@ -27,7 +27,7 @@ Map<String, String>? getPosterHeaders(String? url) {
   };
 }
 
-/// Normalises poster URLs (rewrites old uakino mirrors, validates http/https scheme).
+/// Validates that a poster URL is fetchable over http/https.
 /// Returns null for invalid or non-URL identifiers (e.g. raw UUIDs).
 String? sanitizePosterUrl(String? url) {
   if (url == null || url.trim().isEmpty) return null;
@@ -35,9 +35,7 @@ String? sanitizePosterUrl(String? url) {
   if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
     return null;
   }
-  return trimmed
-      .replaceAll('uakino.best', 'uakino.biz')
-      .replaceAll('uakino.me', 'uakino.biz');
+  return trimmed;
 }
 
 /// Shared cache manager for remote poster artwork.
@@ -58,22 +56,13 @@ class _PosterImageClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
-    var effectiveRequest = request;
-    if (request.url.host == 'uakino.best' || request.url.host == 'uakino.me') {
-      final newUri = request.url.replace(host: 'uakino.biz');
-      final newReq = http.Request(request.method, newUri);
-      newReq.headers.addAll(request.headers);
-      effectiveRequest = newReq;
-    }
-
-    effectiveRequest.headers['User-Agent'] = _browserUserAgent;
-    effectiveRequest.headers['Accept'] =
+    request.headers['User-Agent'] = _browserUserAgent;
+    request.headers['Accept'] =
         'image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
-    if (effectiveRequest.url.host.isNotEmpty) {
-      effectiveRequest.headers['Referer'] =
-          'https://${effectiveRequest.url.host}/';
+    if (request.url.host.isNotEmpty) {
+      request.headers['Referer'] = 'https://${request.url.host}/';
     }
-    return _inner.send(effectiveRequest);
+    return _inner.send(request);
   }
 
   @override

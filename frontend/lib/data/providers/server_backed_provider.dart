@@ -68,7 +68,7 @@ class StreamProbe {
       'StreamProbe(${result.name}, status=$httpStatus, type=$contentType)';
 }
 
-/// Content provider backed by the Oxide backend (server-side parsing).
+/// Content provider backed by the Kadrbox backend (server-side parsing).
 ///
 /// Created automatically for every catalog entry that has no local
 /// implementation — so a provider added in backend Go code appears
@@ -509,8 +509,8 @@ class ServerBackedProvider extends ContentProvider {
     final url = json['url'] as String? ?? '';
     final idVal = json['id'] as String? ?? '';
     // The unified search response embeds the real provider_id in each item
-    // (e.g. "uakino", "lavakino"). Falling back to this.id ensures the
-    // provider-specific catalogue views still work when provider_id is absent.
+    // (e.g. "example-provider"). Falling back to this.id ensures the
+    // per-source catalogue views still work when provider_id is absent.
     final providerIdFromJson = json['provider_id'] as String?;
     return MediaItem(
       id: url.isNotEmpty ? url : idVal,

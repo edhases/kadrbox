@@ -955,7 +955,7 @@ class _SourceChip {
     required this.count,
   });
 
-  /// The backend's source key, e.g. `uakino`.
+  /// The backend's source key, e.g. `example-provider`.
   final String key;
 
   /// Human-readable name resolved from the provider registry.

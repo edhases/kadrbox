@@ -151,30 +151,23 @@ class ContentCountries {
 class ProviderGenreMappings {
   ProviderGenreMappings._();
 
-  /// UAKino-specific genre slugs
-  static const Map<String, String> uakino = {
-    'Бойовик': 'boyovyky',
-    'Комедія': 'komedii',
-    'Драма': 'dramy',
-    'Жахи': 'zhahy',
-    'Трилер': 'trylery',
-    'Фантастика': 'fantastyka',
-    'Фентезі': 'fentezi',
-    'Мелодрама': 'melodramy',
-    'Пригоди': 'pryhody',
-    'Детектив': 'detektyvy',
-  };
+  /// Slug overrides registered by source id.
+  ///
+  /// Empty by default: the app must not know which catalogue servers exist, so
+  /// no server-specific genre table ships with it. A server that needs custom
+  /// slugs supplies them at runtime.
+  static const Map<String, Map<String, String>> overrides = {};
 
-  /// Get provider-specific slug for a genre
+  /// Get the slug for a genre as understood by [providerId].
+  ///
+  /// Prefers a registered override for that source, then the canonical
+  /// [ContentGenres.toSlug] table, then [fallback], then the lowercased genre.
   static String getSlugForProvider(
     String providerId,
     String genre, {
     String? fallback,
   }) {
-    final mapping = switch (providerId) {
-      'uakino' => uakino,
-      _ => ContentGenres.toSlug,
-    };
+    final mapping = overrides[providerId] ?? ContentGenres.toSlug;
     return mapping[genre] ?? fallback ?? ContentGenres.getSlug(genre);
   }
 }
