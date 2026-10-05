@@ -154,14 +154,18 @@ class _DetailsPageState extends State<DetailsPage> {
       List<StreamSource> streams = [];
       try {
         streams = await provider.getStreams(widget.mediaId);
-        debugPrint('Loaded ${streams.length} streams for ${details.item.title}');
+        debugPrint(
+          'Loaded ${streams.length} streams for ${details.item.title}',
+        );
         for (final s in streams) {
           debugPrint(
             '  Stream: ${s.quality.displayName} - ${s.voiceover ?? "default"}',
           );
         }
       } catch (e) {
-        debugPrint('Failed to load initial streams (media may require episode selection): $e');
+        debugPrint(
+          'Failed to load initial streams (media may require episode selection): $e',
+        );
       }
 
       if (mounted) {
