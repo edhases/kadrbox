@@ -1,12 +1,12 @@
 # 05. Управління станом та системні потоки взаємодії (State Management & System Workflows)
 
-Цей документ містить вичерпний технічний аналіз архітектури управління станом, життєвого циклу даних, реактивних потоків та наскрізних призначених для користувача сценаріїв (End-to-End User Journeys) застосунку **Oxide Film**.
+Цей документ містить вичерпний технічний аналіз архітектури управління станом, життєвого циклу даних, реактивних потоків та наскрізних призначених для користувача сценаріїв (End-to-End User Journeys) застосунку **Kadrbox**.
 
 ---
 
 ## 1. Архітектурний огляд управління станом
 
-Хоча у залежностях проекту [`pubspec.yaml`](file:///e:/Github/oxide_film/pubspec.yaml) присутня бібліотека `flutter_bloc` та `equatable`, кодова база Oxide Film використовує прагматичну гібридну реактивну архітектуру. Замість класичних формальних BLoC з подіями та селекторами, ядро стейт-менеджменту реалізовано через:
+Хоча у залежностях проекту [`pubspec.yaml`](../frontend/pubspec.yaml) присутня бібліотека `flutter_bloc` та `equatable`, кодова база Kadrbox використовує прагматичну гібридну реактивну архітектуру. Замість класичних формальних BLoC з подіями та селекторами, ядро стейт-менеджменту реалізовано через:
 1. **Domain/Application State Controllers (`ChangeNotifier` / Observable State Pattern)**:
    - Автономні контролери та сервіси (`PlayerController`, `VideoPlayerService`, `SettingsService`, `HistoryService`, `FavoritesService`, `WatchPartyService`, `AuthService`, `SyncService`, `DownloadService`, `EpisodeUpdateService`, `RecommendationService`).
    - Інкапсуляція бізнес-правил, зовнішніх API, локального кешу та бази даних.
@@ -55,11 +55,11 @@ flowchart TD
     subgraph DataLayer ["Шар даних (Data Layer)"]
         UCRI[UnifiedContentRepositoryImpl]
         PR[ProviderRegistry]
-        Providers["Провайдери: UakinoProvider, EneyidaProvider, UaflixProvider, UaserialsProvider, YouTubeProvider"]
-        Parsers["Парсери DOM / HTML / JSON"]
+        Providers["Джерело каталогу: ServerBackedProvider (URL від користувача)"]
+        Parsers["Розбір відповідей JSON"]
         DAOs["Drift DAOs: HistoryDao, FavoritesDao, MediaItemsDao, SettingsDao, DownloadsDao, SearchHistoryDao"]
         AppDB[(AppDatabase - Drift / SQLite)]
-        Network["ApiClient (Dio) / PocketBase SDK / WebRTC PeerDart / MediaKit"]
+        Network["ApiClient (Dio) / Go backend client / WebRTC PeerDart / MediaKit"]
     end
 
     UI_Pages --> ControllersServices
@@ -84,9 +84,9 @@ flowchart TD
 | **Presentation** | `HomePage`, `SearchPage`, `DetailsPage`, `PlayerPage`, `FavoritesPage` | Дії користувача (тапи, жести, введення) | Рендеринг віджетів, навігація GoRouter | Відображення інтерфейсу, перехоплення клавіатурних/D-Pad подій, Skeleton-завантаження |
 | **Controllers / Services** | `PlayerController`, `SmartSearchService`, `HistoryService`, `FavoritesService` | Виклики методів, параметри пошуку, позиція медіа | `ChangeNotifier` сповіщення, `Stream<T>`, оновлені моделі стану | Управління життєвим циклом фічі, синхронізація з сервером, дедуплікація, кешування |
 | **Domain** | `MediaItem`, `StreamSource`, `MediaDetails`, `UnifiedContentRepository` | Чисті доменні структури | Бізнес-моделі | Опис контрактів взаємодії, абстракція від джерел отримання даних |
-| **Data (Repository)** | `UnifiedContentRepositoryImpl`, `ProviderRegistry` | Запити до кількох джерел | Агреговані колекції `MediaItem` | Маршрутизація запитів між конкретними провайдерами, уніфікація ID |
-| **Data (Providers/Parsers)**| `UakinoProvider`, `EneyidaProvider`, тощо | URL сторінки, HTML/JSON | Парсинг стрімів, метаданих | Скрапінг, отримання прямих HLS/MP4 посилань |
-| **Data (Persistence & Net)** | `AppDatabase` (Drift), `PocketBaseService`, `ApiClient` (Dio) | SQL транзакції, HTTP запити, WebSocket | Реактивні `Stream` з БД, мережеві DTO | Збереження на диск, обхід блокувань, фонова синхронізація |
+| **Data (Repository)** | `UnifiedContentRepositoryImpl`, `ProviderRegistry` | Запити до джерела каталогу | Агреговані колекції `MediaItem` | Маршрутизація запитів, уніфікація ID |
+| **Data (Source Client)** | `ServerBackedProvider` | URL каталогового сервера, JSON | Розбір метаданих та потоків | Отримання готових HLS/MP4 посилань від сервера |
+| **Data (Persistence & Net)** | `AppDatabase` (Drift), `KadrboxServerService`, `ApiClient` (Dio) | SQL транзакції, HTTP запити, WebSocket | Реактивні `Stream` з БД, мережеві DTO | Збереження на диск, фонова синхронізація |
 
 ---
 
@@ -96,18 +96,18 @@ flowchart TD
 
 | Клас / Контролер | Файл | Тип реєстрації (DI) | Патерн стану | Зона відповідальності |
 | :--- | :--- | :--- | :--- | :--- |
-| [`PlayerController`](file:///e:/Github/oxide_film/lib/presentation/pages/player/player_controller.dart) | `lib/presentation/pages/player/player_controller.dart` | Factory / Instantiated on play | `ChangeNotifier` + `PlayerState` + `ValueNotifier<Duration>` | Відтворення медіа, перемикання аудіодоріжок/якості, повноекранний режим Desktop/Mobile, таймер автозбереження прогресу, синхронізація Watch Party, WakeLock |
-| [`VideoPlayerService`](file:///e:/Github/oxide_film/lib/data/services/video_player_service.dart) | `lib/data/services/video_player_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `MiniPlayerState` | Глобальне утримання інстансу `PlayerController`, керування плаваючим вікном PiP (Android Picture-in-Picture та кастомний Desktop PiP), згортання/розгортання плеєра |
-| [`SettingsService`](file:///e:/Github/oxide_film/lib/data/services/settings_service.dart) | `lib/data/services/settings_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `SettingsState` + `UISettings` | Налаштування теми (Dark/Light/Amoled), мови інтерфейсу, розміру сітки та карток, автооновлення, параметрів плеєра за замовчуванням |
-| [`HistoryService`](file:///e:/Github/oxide_film/lib/data/services/history_service.dart) | `lib/data/services/history_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Збереження та зчитування історії перегляду, фільтрація секції "Продовжити перегляд", дедуплікація, фонова двостороння синхронізація з PocketBase |
-| [`FavoritesService`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart) | `lib/data/services/favorites_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Додавання/видалення з обраного (offline-first), реактивний моніторинг змін у Drift, синхронізація з PocketBase Realtime |
-| [SmartSearchService](file:///e:/Github/oxide_film/lib/data/services/smart_search/smart_search_service.dart) | lib/data/services/smart_search/smart_search_service.dart | LazySingleton (getIt) | Stream<SmartSearchResult> | **Один** запит до /content/search на пошук. Нормалізація запиту, скоринг із relevance-cutoff і кластеризація дублікатів виконуються на сервері. Локально лише: історія пошуків, автодоповнення з локальних джерел, підказки про помилки (Levenshtein). |
-| [`WatchPartyService`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart) | `lib/data/services/watch_party_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + WebSockets / WebRTC P2P | Синхронний перегляд фільмів: створення кімнати, передача команд (play/pause/seek/speed), розрахунок часового дрифту (clock drift) та автокорекція затримки, груповий чат |
-| [`AuthService`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart) | `lib/data/services/auth_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `AsyncAuthStore` | Автентифікація користувачів у PocketBase (Email/Password, OAuth2), сесії, отримання профілю та аватарів |
-| [`DownloadService`](file:///e:/Github/oxide_film/lib/data/services/download_service.dart) | `lib/data/services/download_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Завантаження HLS/MP4 стрімів для офлайн-перегляду, керування чергою, пауза/відновлення, збереження у `DownloadsDao` |
-| [`EpisodeUpdateService`](file:///e:/Github/oxide_film/lib/data/services/episode_update_service.dart) | `lib/data/services/episode_update_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` | Фонова перевірка нових серій для збережених улюблених серіалів |
-| [`RecommendationService`](file:///e:/Github/oxide_film/lib/data/services/recommendation_service.dart) | `lib/data/services/recommendation_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` | Генерація персональних рекомендацій на основі переглянутих жанрів та історії |
-| [`SyncService`](file:///e:/Github/oxide_film/lib/data/services/sync_service.dart) | `lib/data/services/sync_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` | Ручний експорт та імпорт даних користувача (обране, історія, налаштування) у форматі JSON без обов'язкового бекенду |
+| [`PlayerController`](../frontend/lib/presentation/pages/player/player_controller.dart) | `lib/presentation/pages/player/player_controller.dart` | Factory / Instantiated on play | `ChangeNotifier` + `PlayerState` + `ValueNotifier<Duration>` | Відтворення медіа, перемикання аудіодоріжок/якості, повноекранний режим Desktop/Mobile, таймер автозбереження прогресу, синхронізація Watch Party, WakeLock |
+| [`VideoPlayerService`](../frontend/lib/data/services/video_player_service.dart) | `lib/data/services/video_player_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `MiniPlayerState` | Глобальне утримання інстансу `PlayerController`, керування плаваючим вікном PiP (Android Picture-in-Picture та кастомний Desktop PiP), згортання/розгортання плеєра |
+| [`SettingsService`](../frontend/lib/data/services/settings_service.dart) | `lib/data/services/settings_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `SettingsState` + `UISettings` | Налаштування теми (Dark/Light/Amoled), мови інтерфейсу, розміру сітки та карток, автооновлення, параметрів плеєра за замовчуванням |
+| [`HistoryService`](../frontend/lib/data/services/history_service.dart) | `lib/data/services/history_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Збереження та зчитування історії перегляду, фільтрація секції "Продовжити перегляд", дедуплікація, фонова двостороння синхронізація з Go-бекендом |
+| [`FavoritesService`](../frontend/lib/data/services/favorites_service.dart) | `lib/data/services/favorites_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Додавання/видалення з обраного (offline-first), реактивний моніторинг змін у Drift, синхронізація з Go-бекендом |
+| [SmartSearchService](../frontend/lib/data/services/smart_search/smart_search_service.dart) | lib/data/services/smart_search/smart_search_service.dart | LazySingleton (getIt) | Stream<SmartSearchResult> | **Один** запит до /content/search на пошук. Нормалізація запиту, скоринг із relevance-cutoff і кластеризація дублікатів виконуються на сервері. Локально лише: історія пошуків, автодоповнення з локальних джерел, підказки про помилки (Levenshtein). |
+| [`WatchPartyService`](../frontend/lib/data/services/watch_party_service.dart) | `lib/data/services/watch_party_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + WebSockets / WebRTC P2P | Синхронний перегляд фільмів: створення кімнати, передача команд (play/pause/seek/speed), розрахунок часового дрифту (clock drift) та автокорекція затримки, груповий чат |
+| [`AuthService`](../frontend/lib/data/services/auth_service.dart) | `lib/data/services/auth_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + `AsyncAuthStore` | Автентифікація користувачів на Go-бекенді (Email/Password, OAuth2), сесії, отримання профілю та аватарів |
+| [`DownloadService`](../frontend/lib/data/services/download_service.dart) | `lib/data/services/download_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` + Drift Stream Subscriptions | Завантаження HLS/MP4 стрімів для офлайн-перегляду, керування чергою, пауза/відновлення, збереження у `DownloadsDao` |
+| [`EpisodeUpdateService`](../frontend/lib/data/services/episode_update_service.dart) | `lib/data/services/episode_update_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` | Фонова перевірка нових серій для збережених улюблених серіалів |
+| [`RecommendationService`](../frontend/lib/data/services/recommendation_service.dart) | `lib/data/services/recommendation_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` | Генерація персональних рекомендацій на основі переглянутих жанрів та історії |
+| [`SyncService`](../frontend/lib/data/services/sync_service.dart) | `lib/data/services/sync_service.dart` | LazySingleton (`getIt`) | `ChangeNotifier` | Ручний експорт та імпорт даних користувача (обране, історія, налаштування) у форматі JSON без обов'язкового бекенду |
 
 ---
 
@@ -338,14 +338,14 @@ stateDiagram-v2
         }
         
         RankIsolate --> StreamEmitPartial: Новий пакет результатів
-        StreamEmitPartial --> StreamEmitComplete: Усі провайдери відповіли / 10с
+        StreamEmitPartial --> StreamEmitComplete: Джерело каталогу відповіло / 10с
     }
 
     Searching --> ResultsView: Отримано rankedItems > 0
     Searching --> SpellCorrection: rankedItems == 0 (suggestCorrection)
     Searching --> ErrorView: Критична мережева помилка
     
-    ResultsView --> Searching: Зміна фільтра провайдера
+    ResultsView --> Searching: Зміна фільтра джерела
     SpellCorrection --> Searching: Клік на запропоноване слово
 ```
 
@@ -368,7 +368,7 @@ stateDiagram-v2
     }
 
     Guest --> SubmittingAuth: signIn() / signUp() / OAuth2
-    SubmittingAuth --> Authenticated: Успішна відповідь PocketBase
+    SubmittingAuth --> Authenticated: Успішна відповідь Go-бекенду
     SubmittingAuth --> AuthError: Невірний пароль / Email зайнятий
     AuthError --> Guest: Показ SnackBar / повідомлення
     
@@ -384,7 +384,7 @@ stateDiagram-v2
 
 ### Сценарій 1: Від запуску додатку до вибору та перегляду фільму
 
-Цей сценарій охоплює холодний старт, перевірку мережі, паралельне завантаження контенту від увімкнених провайдерів, клієнтську фільтрацію та перехід до сторінки деталей.
+Цей сценарій охоплює холодний старт, перевірку мережі, завантаження каталогу, клієнтську фільтрацію та перехід до сторінки деталей.
 
 ```mermaid
 sequenceDiagram
@@ -394,35 +394,24 @@ sequenceDiagram
     participant UI as HomePage
     participant Net as Connectivity
     participant Registry as ProviderRegistry
-    participant Providers as Ukrainian Providers (Uakino, Eneyida, Uaflix, Uaserials)
+    participant Providers as Catalog Server (user-supplied URL)
     participant EUS as EpisodeUpdateService
     participant Router as GoRouter
     participant Details as DetailsPage
 
     User->>Main: Запуск застосунку
     Main->>Main: MediaKit.ensureInitialized(), configureDependencies()
-    Main->>Registry: resolveProviderUrls() (перевірка дзеркал у фоні)
-    Main->>UI: runApp(OxideFilmApp) -> HomePage
+    Main->>Registry: resolveSourceUrls() (перевірка адреси каталогу у фоні)
+    Main->>UI: runApp(KadrboxApp) -> HomePage
     
     UI->>Net: checkConnectivity() & listen()
     UI->>EUS: checkForUpdates() (перевірка нових серій)
     
     rect rgb(240, 248, 255)
-    note right of UI: Паралельний збір популярного контенту
-    UI->>Registry: homeProviders (uakino, eneyida, uaflix, uaserials)
-    par Запит до Uakino
-        UI->>Providers: Uakino.getPopular(page: 1)
-        Providers-->>UI: List~MediaItem~
-    and Запит до Eneyida
-        UI->>Providers: Eneyida.getPopular(page: 1)
-        Providers-->>UI: List~MediaItem~
-    and Запит до Uaflix
-        UI->>Providers: Uaflix.getPopular(page: 1)
-        Providers-->>UI: List~MediaItem~
-    and Запит до Uaserials
-        UI->>Providers: Uaserials.getPopular(page: 1)
-        Providers-->>UI: List~MediaItem~
-    end
+    note right of UI: Завантаження популярного контенту
+    UI->>Registry: homeSources (увімкнені джерела)
+    UI->>Providers: getPopular(page: 1)
+    Providers-->>UI: List~MediaItem~
     UI->>UI: Дедуплікація за uniqueId, збереження в _allItems
     UI->>UI: _applyFilter() -> рендеринг сітки або списку
     end
@@ -445,21 +434,21 @@ sequenceDiagram
     actor User as Користувач
     participant UI as SearchPage
     participant Smart as SmartSearchService
-    participant Provider as ServerBackedProvider (Bandera)
-    participant API as Go /content/search
+    participant Provider as ServerBackedProvider (catalog URL)
+    participant API as Catalog server /search
     participant DB as SearchHistoryDao (Drift)
 
     User->>UI: Введення та відправка запиту: "Матриця"
     UI->>Smart: search("Матриця")
 
-    note over Smart: Один HTTP-запит на весь пошук.<br/>Немає варіантів, fan-out по провайдерах та isolate-скорингу.
+    note over Smart: Один HTTP-запит на весь пошук.<br/>Немає варіантів, fan-out по джерелах та isolate-скорингу.
 
     Smart->>Provider: searchEnvelope("Матриця")
-    Provider->>API: GET /content/search?q=Матриця
+    Provider->>API: GET /search?q=Матриця
 
     rect rgb(245, 250, 255)
-    note over API: Серверний конвеєр (Go): нормалізація запиту,<br/>fan-out усередині Bandera, скоринг із relevance-cutoff,<br/>кластеризація дублікатів
-    API->>Provider: Bandera /search
+    note over API: Серверний конвеєр: нормалізація запиту,<br/>fan-out усередині каталогу, скоринг із relevance-cutoff,<br/>кластеризація дублікатів
+    API->>Provider: catalog /search
     Provider-->>API: items + meta.statuses
     API-->>Provider: SearchResponse -> SearchEnvelope
     end
@@ -488,7 +477,7 @@ sequenceDiagram
     autonumber
     actor User as Користувач
     participant Details as DetailsPage
-    participant Provider as ContentProvider (e.g. Uakino / Eneyida)
+    participant Provider as ContentProvider (catalog server)
     participant FavSvc as FavoritesService
     participant Router as GoRouter
     participant VPS as VideoPlayerService
@@ -496,7 +485,7 @@ sequenceDiagram
     participant MK as MediaKit Player
     participant HistSvc as HistoryService
     participant DAO as HistoryDao (Drift)
-    participant PB as PocketBaseService (Cloud)
+    participant PB as KadrboxServerService (Cloud)
 
     User->>Details: Перегляд сторінки фільму/серіалу
     Details->>Provider: getDetails(mediaId) & getStreams(mediaId)
@@ -565,9 +554,9 @@ sequenceDiagram
      notifyListeners(); // Сповіщає UI про зміни без повторних SQL-запитів
    });
    ```
-4. Віджет [`ContinueWatchingSection`](file:///e:/Github/oxide_film/lib/presentation/widgets/home/continue_watching_section.dart) слухає `HistoryService` і автоматично оновлює слайдер карток при поверненні користувача з перегляду.
+4. Віджет [`ContinueWatchingSection`](../frontend/lib/presentation/widgets/home/continue_watching_section.dart) слухає `HistoryService` і автоматично оновлює слайдер карток при поверненні користувача з перегляду.
 
-### 6.2. Синхронізація PocketBase: Offline-First + Realtime Event Loop
+### 6.2. Синхронізація з Go-бекендом: Offline-First + Event Loop
 
 ```mermaid
 sequenceDiagram
@@ -576,8 +565,8 @@ sequenceDiagram
     participant Svc as HistoryService / FavoritesService
     participant DAO as Drift DAO
     participant DB as SQLite (Local)
-    participant PB as PocketBase SDK
-    participant Cloud as Remote PocketBase Server
+    participant PB as Go backend client
+    participant Cloud as Remote Kadrbox Go server
 
     Note over UI,Cloud: Локальна мутація (Користувач натиснув "В обране")
     UI->>Svc: toggle(mediaItem)
@@ -605,7 +594,7 @@ sequenceDiagram
 
 ## 7. Спільний перегляд (Watch Party Workflow)
 
-`WatchPartyService` підтримує як серверний транспорт (PocketBase Realtime / Server-Sent Events), так і прямий одноранговий P2P WebRTC зв'язок через `PeerDart`.
+`WatchPartyService` підтримує як серверний транспорт (Go backend WebSocket), так і прямий одноранговий P2P WebRTC зв'язок через `PeerDart`.
 
 ### 7.1. Протокол команд та синхронізація часу
 
@@ -627,7 +616,7 @@ sequenceDiagram
     actor Host as Хост (Організатор)
     participant HP as PlayerController (Host)
     participant WPS_H as WatchPartyService (Host)
-    participant Channel as PocketBase SSE / WebRTC P2P
+    participant Channel as Go backend WebSocket / WebRTC P2P
     participant WPS_C as WatchPartyService (Client)
     participant CP as PlayerController (Client)
     actor Client as Гість (Учасник)
@@ -655,4 +644,4 @@ sequenceDiagram
 3. **Надійність (Resilience)**:
    - Відмова окремих джерел ізолюється **на сервері**: недоступні джерела потрапляють у `segments[].sources` зі статусом помилки, клієнт показує банер «Недоступні джерела», а решта результатів лишається видимою.
    - Offline-First підхід гарантує повну працездатність додатку без доступу до інтернету (для локальних та завантажених медіафайлів).
-   - Двостороння синхронізація з PocketBase реалізована за принципом фонової черги з захистом від зациклення через локальні перевірки.
+   - Двостороння синхронізація з Go-бекендом реалізована за принципом фонової черги з захистом від зациклення через локальні перевірки.

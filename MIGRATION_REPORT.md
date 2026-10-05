@@ -1,4 +1,4 @@
-# 📖 АРХІТЕКТУРНИЙ ТА МІГРАЦІЙНИЙ ПЛАН: KADRBOX / OXIDE FILM V2
+# 📖 АРХІТЕКТУРНИЙ ТА МІГРАЦІЙНИЙ ПЛАН: KADRBOX V2
 > **Технічна специфікація та посібник з реалізації для розробників та автономних AI-агентів**  
 > **Дата оновлення:** 2026-10-05  
 > **Гілка розробки:** `dev`  
@@ -23,11 +23,14 @@
 
 ## 1. СТРАТЕГІЧНА ВІЗІЯ ТА БІЗНЕС-ВИМОГИ
 
-### 1.1. Проблема v1 (Монолітний сервер зі скраперами)
-У першій версії всі запити на скрапінг піратських сайтів (UAKino, Eneyida, Lavakino, UASerials, Bandera) проходили через центральний Go-сервер (`server/`):
+### 1.1. Проблема v1 (Монолітний сервер із парсерами)
+У першій версії всі запити до зовнішніх сайтів з контентом проходили через центральний Go-сервер (`server/`):
 1. **Ризик масового блокування IP (Rate Limits / Cloudflare / DDoS-Guard):** Якщо 1000+ користувачів одночасно шукають контент, усі запити йдуть з однієї IP-адреси VPS. Сайти миттєво блокують сервер.
 2. **Неможливість потрапити в Microsoft Store:** Сервер, який хостить і проксує контент сірих онлайн-кінотеатрів, автоматично дискваліфікує клієнтський додаток під час модерації.
-3. **Вигорання від скрапінгу:** Одноосібна підтримка 5 парсерів, чий DOM постійно змінюється, забирає весь ресурс розробника.
+3. **Вигорання від підтримки парсерів:** одноосібна підтримка 5 парсерів, чий DOM постійно змінюється, забирає весь ресурс розробника.
+
+> Назви цих джерел у документі свідомо не наводяться: після міграції сама назва є проблемою,
+> бо обидва магазини переглядають код і скриншоти.
 
 ### 1.2. Рішення v2 (Повний поділ відповідальності)
 Система розділяється на три **абсолютно ізольовані** сутності:
@@ -60,7 +63,7 @@ sequenceDiagram
     participant UI as Frontend (Flutter)
     participant Back as Backend (Go Cloud)
     participant Side as Sidecar Plugin (127.0.0.1:8089)
-    participant Upstream as Онлайн-сайти (UAKino/Eneyida/CDN)
+    participant Upstream as Зовнішні джерела контенту
 
     Note over User,Back: Сценарій 1: Старт додатку та авторизація
     User->>UI: Запуск Kadrbox
@@ -107,8 +110,8 @@ sequenceDiagram
 
 ### 3.1. У каталозі `backend/`:
 1. **Зламані імпорти в `backend/cmd/api/main.go`**:
-   - `main.go:18` імпортує `"github.com/edhases/oxide-server/internal/provider"`. Папку `provider` винесено до плагінів. Цей імпорт ламає компіляцію.
-   - `main.go:180-250` створює `provider.NewRegistry()`, конфігурує клієнти UAKino/Eneyida та передає реєстр у `NewContentHandler`.
+   - `main.go:18` імпортує `"github.com/edhases/kadrbox-server/internal/provider"`. Папку `provider` винесено з бекенду повністю. Цей імпорт ламає компіляцію.
+   - `main.go:180-250` створює `provider.NewRegistry()`, конфігурує клієнти джерел контенту та передає реєстр у `NewContentHandler`.
 2. **Зламані імпорти та роутинг у `backend/internal/transport/http/router.go`**:
    - `router.go` очікує параметр `contentH *ContentHandler` у конструкторі.
    - `router.go:105-112` монтує роути `r.Route("/content", ...)`.
@@ -120,7 +123,7 @@ sequenceDiagram
 ### 3.2. У каталозі `plugins/sidecar-scrapers/`:
 1. **Відсутність `go.mod`**: Каталог не є самостійним Go-модулем.
 2. **Відсутність точки входу**: Немає `cmd/sidecar/main.go`. Парсери є бібліотекою без виконуваного файлу.
-3. **Залежність від пакетів `backend/internal/domain`**: Код у `plugins/sidecar-scrapers/internal/provider/` імпортує `"github.com/edhases/oxide-server/internal/domain"`. Плагін повинен або мати власні копії моделей домену, або посилатися на спільний контракт.
+3. **Залежність від пакетів `backend/internal/domain`**: Код у `plugins/sidecar-scrapers/internal/provider/` імпортує `"github.com/edhases/kadrbox-server/internal/domain"`. Плагін повинен або мати власні копії моделей домену, або посилатися на спільний контракт.
 
 ### 3.3. У каталозі `frontend/`:
 1. **Жорстка прив'язка до одного сервера**:
@@ -165,13 +168,13 @@ backend/
 │           └── hub.go               # Redis Pub/Sub координатор кімнат
 ├── docker-compose.yml               # Стек: Go App + Postgres + Redis
 ├── Dockerfile                       # Чистий мінімальний multistage build
-├── go.mod                           # Go 1.23+ модуль "github.com/edhases/oxide-server"
+├── go.mod                           # Go 1.23+ модуль "github.com/edhases/kadrbox-server"
 └── go.sum
 ```
 
 ### 4.3. Необхідні правки коду в `backend/`:
 1. **У `backend/cmd/api/main.go`**:
-   - Прибрати рядок `import "github.com/edhases/oxide-server/internal/provider"`.
+   - Прибрати рядок `import "github.com/edhases/kadrbox-server/internal/provider"`.
    - Прибрати створення змінної `contentH := transporthttp.NewContentHandler(...)`.
    - Видалити рядки конфігурації `UPSTREAM_HOST_ALLOWLIST` та провайдерів.
    - Оновити виклик `transporthttp.NewRouter(authH, syncH, watchH, hub, ...)`.
@@ -200,13 +203,13 @@ plugins/sidecar-scrapers/
 │       └── main.go                  # Точка входу: слухає 127.0.0.1:8089
 ├── internal/
 │   ├── domain/                      # Локальні моделі: MediaItem, Season, Episode, StreamSource
-│   ├── provider/                    # Скрапери: uakino, eneyida, uaserials, lavakino, bandera
+│   ├── provider/                    # Джерела контенту (винесені з цього репозиторію)
 │   ├── search/                      # Локальний пошуковий агрегатор
 │   └── transport/
 │       └── http/
 │           ├── handler.go           # Обробники /api/v1/content/*
 │           └── router.go            # Легкий роутер Chi для локального сервера
-├── go.mod                           # Go модуль "github.com/edhases/oxide-sidecar"
+├── go.mod                           # Go модуль "github.com/edhases/kadrbox-sidecar"
 ├── go.sum
 └── Makefile                         # Команди збірки під Windows (.exe), Linux, macOS
 ```
@@ -301,7 +304,7 @@ lib/
 {
   "status": "ok",
   "version": "2.0.0",
-  "active_providers": ["uakino", "eneyida", "uaserials", "lavakino", "bandera"]
+  "active_providers": ["source-1", "source-2"]
 }
 ```
 
@@ -312,8 +315,8 @@ lib/
 {
   "results": [
     {
-      "id": "https://uakino.biz/...",
-      "provider": "uakino",
+      "id": "https://catalog.example/...",
+      "provider": "source-1",
       "title": "Дюна: Частина друга",
       "original_title": "Dune: Part Two",
       "year": 2024,
@@ -331,11 +334,11 @@ lib/
 {
   "streams": [
     {
-      "url": "https://calypso.tortuga.tw/hls/.../index.m3u8",
+      "url": "https://cdn.example/hls/.../index.m3u8",
       "quality": "1080p",
       "voiceover": "Цікава Ідея",
       "headers": {
-        "Referer": "https://tortuga.tw/",
+        "Referer": "https://catalog.example/",
         "User-Agent": "Mozilla/5.0..."
       }
     }
@@ -373,7 +376,7 @@ lib/
 
 ### 🔹 Завдання для Агента 2 (Plugins & Sidecar Engineer):
 - [ ] Перейти в `plugins/sidecar-scrapers/`.
-- [ ] Виконати `go mod init github.com/edhases/oxide-sidecar`.
+- [ ] Виконати `go mod init github.com/edhases/kadrbox-sidecar`.
 - [ ] Скопіювати необхідні визначення з `domain` (MediaItem, Season, Episode, StreamSource) у локальний пакет `plugins/sidecar-scrapers/internal/domain/`.
 - [ ] Створити `plugins/sidecar-scrapers/cmd/sidecar/main.go` — HTTP-сервер на Chi/net/http (порт 8089).
 - [ ] Реалізувати роутер та обробники для `/status` та `/api/v1/content/*`.

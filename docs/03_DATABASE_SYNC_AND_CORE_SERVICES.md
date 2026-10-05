@@ -1,12 +1,12 @@
 # 03. Локальні дані, синхронізація та мережеві сервіси (Database, Sync & Core Services)
 
-Цей документ містить поглиблений технічний аналіз підсистеми управління даними, збереження стану, синхронізації та мережевих служб клієнтського застосунку **Oxide Film**.
+Цей документ містить поглиблений технічний аналіз підсистеми управління даними, збереження стану, синхронізації та мережевих служб клієнтського застосунку **Kadrbox**.
 
 ---
 
 ## 1. Архітектурний огляд підсистеми даних
 
-У застосунку Oxide Film реалізовано патерн **Offline-First**. Основним джерелом істини (Single Source of Truth) є локальна реляційна база даних **SQLite** під управлінням реактивного фреймворку **Drift**. Бекенд (хмарний сервіс **PocketBase**) виступає у ролі вторинного сховища для резервного копіювання, міжпристроєвої синхронізації профілю, обраного й історії перегляду, а також координації кімнат спільного перегляду (**Watch Party**).
+У застосунку Kadrbox реалізовано патерн **Offline-First**. Основним джерелом істини (Single Source of Truth) є локальна реляційна база даних **SQLite** під управлінням реактивного фреймворку **Drift**. Бекенд (хмарний сервіс **Go backend**) виступає у ролі вторинного сховища для резервного копіювання, міжпристроєвої синхронізації профілю, обраного й історії перегляду, а також координації кімнат спільного перегляду (**Watch Party**).
 
 ```mermaid
 flowchart TD
@@ -30,12 +30,12 @@ flowchart TD
     end
 
     subgraph CloudSyncLayer ["Шар синхронізації та мережі (Cloud & P2P)"]
-        FavoritesService -.->|Periodic sync & Realtime| PocketBaseService[PocketBaseService]
-        HistoryService -.->|Periodic sync & Realtime| PocketBaseService
-        AuthService[AuthService] --> PocketBaseService
-        PocketBaseService --> PB[(PocketBase Backend: oxide.skystreamua.space)]
+        FavoritesService -.->|Periodic sync & Realtime| KadrboxServerService[KadrboxServerService]
+        HistoryService -.->|Periodic sync & Realtime| KadrboxServerService
+        AuthService[AuthService] --> KadrboxServerService
+        KadrboxServerService --> PB[(Kadrbox Go backend (user-configured URL))]
         
-        WatchPartyService[WatchPartyService] --> PB_Backend[PocketBase Realtime Backend]
+        WatchPartyService[WatchPartyService] --> PB_Backend[Kadrbox WebSocket backend]
         WatchPartyService -.->|Fallback| PeerDart_Backend[PeerDart WebRTC Backend]
         
         TMDbService[TMDbService] --> TMDbAPI[(The Movie Database API)]
@@ -47,10 +47,10 @@ flowchart TD
 
 ## 2. Локальна база даних Drift (SQLite)
 
-Локальна база даних побудована з використанням бібліотек [`drift`](file:///e:/Github/oxide_film/pubspec.yaml) та [`drift_flutter`](file:///e:/Github/oxide_film/pubspec.yaml). Базовий клас конфігурації знаходиться у файлі [`lib/data/database/app_database.dart`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart).
+Локальна база даних побудована з використанням бібліотек [`drift`](../frontend/pubspec.yaml) та [`drift_flutter`](../frontend/pubspec.yaml). Базовий клас конфігурації знаходиться у файлі [`lib/data/database/app_database.dart`](../frontend/lib/data/database/app_database.dart).
 
 ### 2.1. Конфігурація та підключення
-- **Назва БД:** `oxide_film.sqlite` (за замовчуванням `oxide_film`).
+- **Назва БД:** `kadrbox.sqlite` (за замовчуванням `kadrbox`).
 - **Шлях розміщення:** директорія документів додатку, отримана через `getApplicationDocumentsDirectory()` з пакету `path_provider`.
 - **Драйвер:** `driftDatabase` з нативними опціями `DriftNativeOptions(databaseDirectory: getApplicationDocumentsDirectory)`.
 - **Поточна версія схеми (`schemaVersion`):** `9`.
@@ -168,7 +168,7 @@ erDiagram
 | Таблиця | Опис призначення | Ключі та обмеження (Unique / PK) | Специфічні конвертери / типи |
 | :--- | :--- | :--- | :--- |
 | `AppSettings` | Збереження налаштувань у форматі key-value (тема, плеєр, автоперехід) | PK: `id` (autoIncrement), UK: `key` | Звичайні тексти та дати |
-| `EnabledProviders` | Статуси активації провайдерів контенту та порядок їх пріоритету | PK: `id` (autoIncrement), UK: `providerId` | `priority` (int), `isEnabled` (bool) |
+| `EnabledProviders` | Статуси активації джерел каталогу та порядок їх пріоритету | PK: `id` (autoIncrement), UK: `providerId` | `priority` (int), `isEnabled` (bool) |
 | `Favorites` | Закладки / Обраний контент користувача | PK: `id` (autoIncrement), Composite UK: `{mediaId, providerId}` | `rating` (real), `mediaType` (text) |
 | `WatchHistory` | Історія перегляду, відтворення серій/фільмів та точний прогрес у мілісекундах | PK: `id` (autoIncrement), Composite UK: `{mediaId, providerId, season, episode}` | `positionMs` (int), `durationMs` (int) |
 | `Downloads` | Завантаження медіа для перегляду офлайн, статус прогресу та файлові шляхи | PK: `id` (autoIncrement), Composite UK: `{mediaId, providerId, season, episode}` | `status` мапиться через `DownloadStatusConverter` (enum `DownloadStatus`: `pending=0`, `downloading=1`, `paused=2`, `completed=3`, `failed=4`), `headers` як JSON string |
@@ -177,7 +177,7 @@ erDiagram
 
 ### 2.4. Еволюція схеми та міграції (`MigrationStrategy`)
 
-У [`AppDatabase.migration`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart#L244-L272) реалізовано:
+У [`AppDatabase.migration`](../frontend/lib/data/database/app_database.dart#L244-L272) реалізовано:
 1. **`onCreate`**:
    - Виклик `m.createAll()`.
    - Вставка базових параметрів за замовчуванням у `AppSettings`:
@@ -200,7 +200,7 @@ erDiagram
 
 Вся взаємодія з локальною базою даних інкапсульована у відповідних DAO з підтримкою реактивних потоків (`Stream` через `watch()`):
 
-### 3.1. `HistoryDao` ([`lib/data/database/dao/history_dao.dart`](file:///e:/Github/oxide_film/lib/data/database/dao/history_dao.dart))
+### 3.1. `HistoryDao` ([`lib/data/database/dao/history_dao.dart`](../frontend/lib/data/database/dao/history_dao.dart))
 - **`saveProgress(...)`**: Забезпечує збереження та оновлення позиції відтворення. Оскільки SQLite трактує значення `NULL` у складених унікальних ключах як відмінні одне від одного (для фільмів, де `season` та `episode` рівні `NULL`), у коді реалізовано явну перевірку:
   ```dart
   final existing = await (_db.select(_db.watchHistory)..where((t) =>
@@ -217,16 +217,16 @@ erDiagram
 - **`cleanupDuplicates()`**:
   - Алгоритм дедуплікації: сортує записи за спаданням дати (`watchedAt DESC`) та видаляє старіші дублікати для одного й того ж комбінованого ключа `mediaId_providerId_season_episode`.
 
-### 3.2. `FavoritesDao` ([`lib/data/database/dao/favorites_dao.dart`](file:///e:/Github/oxide_film/lib/data/database/dao/favorites_dao.dart))
+### 3.2. `FavoritesDao` ([`lib/data/database/dao/favorites_dao.dart`](../frontend/lib/data/database/dao/favorites_dao.dart))
 - **`toggle(...)`**: Атомарне перемикання стану. Перевіряє наявність сутності через `isFavorite()`, видаляє або створює новий запис.
 - **`watchAll()` / `watchIsFavorite(mediaId, providerId)`**: Реактивні стріми для оновлення кнопок у плеєрі та на картках каталогу.
 
-### 3.3. `DownloadsDao` ([`lib/data/database/dao/downloads_dao.dart`](file:///e:/Github/oxide_film/lib/data/database/dao/downloads_dao.dart))
+### 3.3. `DownloadsDao` ([`lib/data/database/dao/downloads_dao.dart`](../frontend/lib/data/database/dao/downloads_dao.dart))
 - **`add(...)`**: Використовує `mode: InsertMode.replace` для перевизначення завантажень із тим самим `mediaId` та епізодом.
 - **`updateProgress(id, progress, downloadedBytes, fileSizeBytes)`**: Оновлює статус завантаження файлу на диск.
 - **`watchActive()`**: Реактивний фільтр для завантажень у статусах `pending`, `downloading`, `paused`.
 
-### 3.4. `SearchHistoryDao` ([`lib/data/database/dao/search_history_dao.dart`](file:///e:/Github/oxide_film/lib/data/database/dao/search_history_dao.dart))
+### 3.4. `SearchHistoryDao` ([`lib/data/database/dao/search_history_dao.dart`](../frontend/lib/data/database/dao/search_history_dao.dart))
 - Реалізований як `@DriftAccessor(tables: [SearchHistoryTable])`.
 - Підтримує префіксний пошук (`searchByPrefix`) за `normalizedQuery.like('$normalizedPrefix%')` для автодоповнення.
 - Автоматично викликає очищення бази (`_cleanupOldEntries()`), обмежуючи історію 100 останніми записами.
@@ -234,19 +234,19 @@ erDiagram
 
 ---
 
-## 4. Бекенд-архітектура та хмарна синхронізація на базі PocketBase
+## 4. Бекенд-архітектура та хмарна синхронізація на базі Go backend
 
-Бекенд побудовано навколо **PocketBase** (хоститься за адресою `https://oxide.skystreamua.space`).
+Бекенд — це Go-сервіс Kadrbox (Go backend), адресу якого користувач задає у налаштуваннях. Він відповідає лише за авторизацію, синхронізацію та координацію кімнат спільного перегляду.
 
-### 4.1. Авторизація та керування токенами ([`PocketBaseService`](file:///e:/Github/oxide_film/lib/data/services/pocketbase_service.dart) & [`AuthService`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart))
-- **Збереження сесії:** Використовується `AsyncAuthStore` у парі з `SharedPreferences` під ключем `oxide_pb_auth`. При перезапуску додатку сесія відновлюється автоматично.
+### 4.1. Авторизація та керування токенами ([`KadrboxServerService`](../frontend/lib/data/services/kadrbox_server_service.dart) & [`AuthService`](../frontend/lib/data/services/auth_service.dart))
+- **Збереження сесії:** Використовується `AsyncAuthStore` у парі з `SharedPreferences` під ключем `kadrbox_auth`. При перезапуску додатку сесія відновлюється автоматично.
 - **Методи авторизації:**
   1. *Email & Password*: `authWithPassword(email, password)` та `signUp()`.
   2. *OAuth2*: `authWithOAuth2(provider, urlLauncher)` з підтримкою відкриття зовнішнього браузера (Google, Discord).
-  3. *Підключення/відключення зовнішніх провайдерів*: Виклики API PocketBase `/api/collections/users/records/{id}/external-auths`.
+  3. *Підключення/відключення зовнішніх способів входу*: виклики API Go backend для OAuth-акаунтів.
   4. *Автооновлення токена*: `authRefresh()` при старті чи помилках доступу.
 
-### 4.2. Схема хмарних колекцій PocketBase
+### 4.2. Схема хмарних колекцій Go backend
 
 | Колекція | Поля | Правила доступу (API Rules) | Призначення |
 | :--- | :--- | :--- | :--- |
@@ -257,14 +257,14 @@ erDiagram
 | `watch_party_messages` | `room_code`, `sender_id`, `sender_name`, `action`, `payload` (JSON) | Фільтр за `room_code` | Обмін подіями у кімнаті |
 
 ### 4.3. Алгоритм синхронізації та вирішення конфліктів
-Сервіси [`FavoritesService`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart) та [`HistoryService`](file:///e:/Github/oxide_film/lib/data/services/history_service.dart) реалізують трирівневу модель синхронізації:
+Сервіси [`FavoritesService`](../frontend/lib/data/services/favorites_service.dart) та [`HistoryService`](../frontend/lib/data/services/history_service.dart) реалізують трирівневу модель синхронізації:
 
 ```mermaid
 sequenceDiagram
     participant UI as Клієнт (UI / Плеєр)
     participant LocalDB as Drift (SQLite)
     participant Service as History/Favorites Service
-    participant PB as PocketBase Server
+    participant PB as Kadrbox Go backend
 
     Note over UI, PB: 1. Локальний запис (Offline-First)
     UI->>Service: saveProgress(item, position, duration)
@@ -294,28 +294,28 @@ sequenceDiagram
 1. **Миттєвий запис на диск:** Будь-яка зміна спочатку зберігається в SQLite, забезпечуючи нульову затримку інтерфейсу та працездатність без Інтернету.
 2. **Фоновий запис:** Метод `Future.microtask()` ініціює збереження на сервер.
 3. **Періодичний Pull / Push:** Кожні 5 хвилин спрацьовує `Timer.periodic`, який виконує синхронізацію у фоні без блокування UI.
-4. **PocketBase Realtime (SSE):** Використовується метод `pb.collection('...').subscribe('*', ..., filter: 'user_id = "..."')`. При надходженні події `create`/`update` дані зливаються в SQLite, при `delete` — видаляються локально.
+4. **Go backend:** клієнт читає та пише записи через REST-ендпоинти синхронізації Go-бекенду, захищені JWT токеном поточного користувача.
 5. **Стратегія злиття (Conflict Resolution):** **Newer Timestamp Wins** (виграє запис із пізнішою міткою часу `watchedAt` або `updated`).
 
 ---
 
 ## 5. Watch Party та P2P/WebRTC інтеграція
 
-Спільний перегляд реалізовано у [`WatchPartyService`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart) з підтримкою гібридної системи зв'язку: PocketBase (за замовчуванням) та fallback на P2P через бібліотеку **PeerDart** (WebRTC).
+Спільний перегляд реалізовано у [`WatchPartyService`](../frontend/lib/data/services/watch_party_service.dart) з підтримкою гібридної системи зв'язку: Go backend (за замовчуванням) та fallback на P2P через бібліотеку **PeerDart** (WebRTC).
 
 ### 5.1. Архітектура бекендів та Fallback
 
 ```mermaid
 flowchart LR
-    Start([Користувач створює / приєднується до кімнати]) --> TryPB{Спроба підключення через PocketBase}
-    TryPB -->|Успіх| PBMode[Режим PocketBase SSE]
-    TryPB -->|Збій / Помилка| FallbackPeerDart{Fallback на PeerDart P2P}
+    Start([Користувач створює / приєднується до кімнати]) --> TryBackend{Спроба підключення через Go backend}
+    TryBackend -->|Успіх| PBMode[Режим Go WebSocket]
+    TryBackend -->|Збій / Помилка| FallbackPeerDart{Fallback на PeerDart P2P}
     FallbackPeerDart -->|Успіх| P2PMode[Режим PeerDart WebRTC DataChannel]
     FallbackPeerDart -->|Збій| ErrorState[WatchPartyState.error]
 ```
 
 - **Кімната (Room Code):** 6-значний літерно-цифровий код (наприклад, `K7X9B2`).
-- **Хост-ідентифікатор у PeerDart:** `oxide-${roomCode}` (фіксований для спрощення знаходження піра клієнтами).
+- **Хост-ідентифікатор у PeerDart:** `kadrbox-${roomCode}` (фіксований для спрощення знаходження піра клієнтами).
 
 ### 5.2. Протокол команд та синхронізації
 Повідомлення інкапсулюються у клас `WatchPartyMessage`:
@@ -348,7 +348,7 @@ $$\text{Drift} = \text{ClientPosition} - \text{AdjustedHostPosition}$$
 
 ## 6. Інтеграція з TMDB API (The Movie Database)
 
-Сервіс [`TMDbService`](file:///e:/Github/oxide_film/lib/data/services/tmdb_service.dart) використовується для збагачення метаданих контенту українських провайдерів (описи, рейтинги IMDb/TMDb, акторський склад, постери високої роздільної здатності та трейлери з YouTube).
+Сервіс [`TMDbService`](../frontend/lib/data/services/tmdb_service.dart) використовується для збагачення метаданих контенту каталогового сервера (описи, рейтинги IMDb/TMDb, акторський склад, постери високої роздільної здатності та трейлери з YouTube).
 
 ### 6.1. Клієнт та параметри
 - **Base URL:** `https://api.themoviedb.org/3`
@@ -368,12 +368,12 @@ $$\text{Drift} = \text{ClientPosition} - \text{AdjustedHostPosition}$$
 
 ## 7. Сервіс автоматичного оновлення (OTA Update)
 
-Сервіс [`UpdateService`](file:///e:/Github/oxide_film/lib/data/services/update_service.dart) забезпечує перевірку наявності свіжих релізів, фонове завантаження інсталяційних пакетів та їх верифікацію без посередництва Google Play або сторонніх маркетів.
+Сервіс [`UpdateService`](../frontend/lib/data/services/update_service.dart) забезпечує перевірку наявності свіжих релізів, фонове завантаження інсталяційних пакетів та їх верифікацію без посередництва Google Play або сторонніх маркетів.
 
 ### 7.1. Механізм перевірки версій
-1. Поточна версія додатку зчитується з файлу `assets/version.json` через [`VersionService`](file:///e:/Github/oxide_film/lib/core/services/version_service.dart) (`versionCode` та `versionName`).
+1. Поточна версія додатку зчитується з файлу `assets/version.json` через [`VersionService`](../frontend/lib/core/services/version_service.dart) (`versionCode` та `versionName`).
 2. Додаток робить запит до конфігураційного маніфесту на GitHub:
-   `https://raw.githubusercontent.com/edhases/oxide_film/master/update.json?t={timestamp}`
+   `https://raw.githubusercontent.com/edhases/kadrbox/master/update.json?t={timestamp}`
    *(Мітка часу запобігає кешуванню HTTP-проксі).*
 
 ### 7.2. Структура `update.json`
@@ -384,8 +384,8 @@ $$\text{Drift} = \text{ClientPosition} - \text{AdjustedHostPosition}$$
     "android": {
       "versionCode": 20260205,
       "versionName": "20260205.0.0",
-      "releaseNotes": "Оновлення плеєра та виправлення парсерів",
-      "url": "https://github.com/edhases/oxide_film/releases/download/.../oxide_film.apk",
+      "releaseNotes": "Оновлення плеєра та виправлення відтворення",
+      "url": "https://github.com/edhases/kadrbox/releases/download/.../kadrbox.apk",
       "sha256": "74543BB2B5D066BE64ADDBF76986C5546D1D657ADEA146F05C605E03A0EF1053",
       "minVersionCode": 20260200
     },
@@ -393,7 +393,7 @@ $$\text{Drift} = \text{ClientPosition} - \text{AdjustedHostPosition}$$
       "versionCode": 20260205,
       "versionName": "20260205.0.0",
       "releaseNotes": "Покращення продуктивності Direct3D",
-      "url": "https://github.com/edhases/oxide_film/releases/download/.../oxide_film.exe",
+      "url": "https://github.com/edhases/kadrbox/releases/download/.../kadrbox.exe",
       "sha256": "EE5D73874B58731B7D36CCDC38E29195CCC94E589578B8C1223E3581AFF1C3A6",
       "minVersionCode": 20260200
     }
@@ -416,18 +416,18 @@ $$\text{Drift} = \text{ClientPosition} - \text{AdjustedHostPosition}$$
 
 ## 8. Зведена таблиця ін'єкцій залежностей (Dependency Injection)
 
-Реєстрація компонентів виконується у [`lib/core/di/injection.dart`](file:///e:/Github/oxide_film/lib/core/di/injection.dart) за допомогою контейнера `GetIt`:
+Реєстрація компонентів виконується у [`lib/core/di/injection.dart`](../frontend/lib/core/di/injection.dart) за допомогою контейнера `GetIt`:
 
 | Компонент / Сервіс | Тип реєстрації | Залежності | Призначення |
 | :--- | :--- | :--- | :--- |
 | `AppDatabase` | Singleton | — | Екземпляр бази даних Drift |
-| `PocketBaseService` | Singleton | `SharedPreferences` | Клієнт PocketBase із збереженням токенів |
-| `AuthService` | LazySingleton | `PocketBaseService` | Управління профілем та авторизацією |
-| `FavoritesService` | LazySingleton | `AppDatabase`, `PocketBaseService`, `AuthService` | Управління обраним з синхронізацією |
-| `HistoryService` | LazySingleton | `AppDatabase`, `PocketBaseService`, `AuthService` | Управління історією та відновленням перегляду |
+| `KadrboxServerService` | Singleton | `SharedPreferences` | Клієнт Go backend із збереженням токенів |
+| `AuthService` | LazySingleton | `KadrboxServerService` | Управління профілем та авторизацією |
+| `FavoritesService` | LazySingleton | `AppDatabase`, `KadrboxServerService`, `AuthService` | Управління обраним з синхронізацією |
+| `HistoryService` | LazySingleton | `AppDatabase`, `KadrboxServerService`, `AuthService` | Управління історією та відновленням перегляду |
 | `SyncService` | LazySingleton | `AppDatabase` | Експорт/імпорт бази даних у JSON та QR-код |
 | `DownloadService` | LazySingleton | `AppDatabase`, `ApiClient`, `SettingsService` | Фонове завантаження потоків на диск |
-| `WatchPartyService` | LazySingleton | `PocketBaseService`, `SettingsService` | Синхронізація спільного перегляду |
+| `WatchPartyService` | LazySingleton | `KadrboxServerService`, `SettingsService` | Синхронізація спільного перегляду |
 | `TMDbService` | LazySingleton | `ApiClient`, `SettingsService` | Метадані фільмів/серіалів та трейлери |
 | `UpdateService` | LazySingleton | `SettingsService` | Перевірка оновлень та встановлення APK/EXE |
-| `UnifiedContentRepository` | LazySingleton | Провайдери, `HistoryDao`, `FavoritesDao`, `MediaItemsDao` | Єдина точка доступу до каталогу та користувацьких даних |
+| `UnifiedContentRepository` | LazySingleton | Каталоговий сервер, `HistoryDao`, `FavoritesDao`, `MediaItemsDao` | Єдина точка доступу до каталогу та користувацьких даних |

@@ -3,16 +3,16 @@
 > - **Status:** fixed
 > - **Verified against:** `3ab45ef`
 > - **Актуальність:** ліміт пам'яті `app` піднято до `256M`
->   (`server/docker-compose.yml:41`) — рекомендація щодо Argon2id виконана.
+>   (`backend/docker-compose.yml:41`) — рекомендація щодо Argon2id виконана.
 > - **Додатково зроблено після аудиту:** обов'язкові змінні оточення через
 >   ``, `Redis --requirepass` + healthcheck з паролем, healthcheck у
 >   Dockerfile, `readHeaderTimeout`/`maxHeaderBytes` (`cmd/api/main.go:256-259`).
-> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 0 та Wave 1, агенти A та B).
+> - **Див. також:** `MIGRATION_REPORT.md` (Wave 0 та Wave 1, агенти A та B).
 >
 > Історичні знахідки нижче **не переписані**.
 # 05. Звіт аудиту: Інфраструктура, ресурси та безпека
 **Роль:** Аудитор 5 — Валідатор інфраструктури, ресурсів та безпеки (DevOps, Portainer, Resource & Security Auditor)  
-**Об'єкт аудиту:** Go-бекенд (`server/`), Docker-контейнеризація, CI/CD GitHub Actions, модель безпеки (Argon2id, JWT), пули з'єднань БД та горутини WebSocket Hub  
+**Об'єкт аудиту:** Go-бекенд (`backend/`), Docker-контейнеризація, CI/CD GitHub Actions, модель безпеки (Argon2id, JWT), пули з'єднань БД та горутини WebSocket Hub  
 **Дата аудиту:** 28 вересня 2026 р.  
 **Статус:** Завершено з виявленням критичних архітектурних ризиків та рекомендаціями щодо виправлення.
 
@@ -20,13 +20,13 @@
 
 ## 1. Резюме аудиту
 
-Було проведено детальний інженерний аудит інфраструктурного шару, конфігурацій контейнеризації, моделей безпеки автентифікації та механізмів управління ресурсами системи Oxide Film.
+Було проведено детальний інженерний аудит інфраструктурного шару, конфігурацій контейнеризації, моделей безпеки автентифікації та механізмів управління ресурсами системи Kadrbox.
 
 ### Ключові висновки:
 1. **Архітектура Zero Media Traffic підтверджена:** Сервер функціонує виключно як шар керування метаданими, автентифікації та сигналінгу спільного перегляду (Watch Party). Потоки відеоданих (HLS/MP4) передаються напряму між Flutter-клієнтом та CDN джерел контенту, завдяки чому споживання серверного мережевого трафіку зведено до мінімуму (< 30 МБ на добу на 1 000 користувачів).
 2. **Висока компактність образів:** Завдяки Multi-stage збірці на базі `alpine:3.20` розмір бінарного образу бекенда становить лише ~55 МБ.
-3. 🔴 **Критичний ризик OOM-падіння через невідповідність лімітів пам'яті:** У `docker-compose.yml` сервісу `app` встановлено ліміт пам'яті `128M`, тоді як алгоритм хешування паролів `Argon2id` у `server/internal/auth/password.go` виділяє `64 MB` оперативної пам'яті на одну операцію. Два одночасні запити на реєстрацію/вхід гарантовано викликають завершення роботи контейнера сигналом `OOMKilled` (Exit code 137).
-4. 🔴 **Критичний баг стану гонки (Data Race) та паніки в WebSocket Hub:** У файлі `server/internal/transport/ws/hub.go` операція видалення з мапи `delete(clients, client)` виконується під блокуванням на читання (`RLock()`), а також існує ризик повторного закриття каналу (`close of closed channel`), що призводить до аварійного падіння бекенда під навантаженням.
+3. 🔴 **Критичний ризик OOM-падіння через невідповідність лімітів пам'яті:** У `docker-compose.yml` сервісу `app` встановлено ліміт пам'яті `128M`, тоді як алгоритм хешування паролів `Argon2id` у `backend/internal/auth/password.go` виділяє `64 MB` оперативної пам'яті на одну операцію. Два одночасні запити на реєстрацію/вхід гарантовано викликають завершення роботи контейнера сигналом `OOMKilled` (Exit code 137).
+4. 🔴 **Критичний баг стану гонки (Data Race) та паніки в WebSocket Hub:** У файлі `backend/internal/transport/ws/hub.go` операція видалення з мапи `delete(clients, client)` виконується під блокуванням на читання (`RLock()`), а також існує ризик повторного закриття каналу (`close of closed channel`), що призводить до аварійного падіння бекенда під навантаженням.
 5. ⚠️ **Прогалина безпеки в CI/CD та конфігураціях:** Відсутній захист від запуску з дефолтним секретом `JWT_SECRET`, контейнер запускається від користувача `root`, а в Dockerfile та docker-compose для сервісу `app` відсутній `HEALTHCHECK`.
 
 ---
@@ -34,7 +34,7 @@
 ## 2. Аудит Dockerfile (CGO, musl, безпека, оптимізація)
 
 ### 2.1. Аналіз структури Dockerfile
-Файл: [`server/Dockerfile`](file:///e:/Github/oxide_film/server/Dockerfile)
+Файл: [`backend/Dockerfile`](../../backend/Dockerfile)
 
 ```dockerfile
 # Stage 1: Build з підтримкою CGO для tls-client
@@ -44,19 +44,23 @@ RUN apk add --no-cache git gcc musl-dev
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o /oxide-server ./cmd/api/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o /kadrbox-server ./cmd/api/main.go
 
 # Stage 2: Runtime
 FROM alpine:3.20
 RUN apk --no-cache add ca-certificates tzdata gcompat
 WORKDIR /root/
-COPY --from=builder /oxide-server .
+COPY --from=builder /kadrbox-server .
 EXPOSE 8080
-ENTRYPOINT ["./oxide-server"]
+ENTRYPOINT ["./kadrbox-server"]
 ```
 
 ### 2.2. Оцінка CGO, musl-dev та gcompat
-- **Необхідність CGO:** Бібліотека обходу захисту Cloudflare [`github.com/bogdanfinn/tls-client`](file:///e:/Github/oxide_film/server/internal/provider/client.go) використовує uTLS та оптимізовані криптографічні підпрограми. Для їх компіляції в Alpine Linux необхідний компілятор `gcc` та стандартна бібліотека `musl-dev`.
+> **Історична знахідка.** Оцінка стосувалася бекенду, який містив шар видобування контенту.
+> Після міграції цього шару в репозиторії немає, і питання CGO/musl/gcompat більше не
+> стосується Kadrbox.
+
+- **Необхідність CGO:** бібліотека відтворення TLS-відпечатків (`github.com/bogdanfinn/tls-client`) використовує uTLS та оптимізовані криптографічні підпрограми. Для їх компіляції в Alpine Linux необхідний компілятор `gcc` та стандартна бібліотека `musl-dev`.
 - **Роль gcompat:** Дистрибутив Alpine використовує бібліотеку `musl libc`, тоді як багато CGO-бібліотек очікують поведінку `glibc`. Пакет `gcompat` забезпечує шар сумісності API glibc поверх musl, усуваючи помилки лінкування динамічних бібліотек під час виконання бінарника в Alpine.
 - **Розмір фінального образу:**
   - `alpine:3.20` base: ~7.4 МБ
@@ -69,7 +73,7 @@ ENTRYPOINT ["./oxide-server"]
    - Робоча директорія `/root/` та запуск бінарника від `UID 0`. У разі вразливості віддаленого виконання коду (RCE) зловмисник отримує повні root-права всередині контейнера.
    - *Рекомендація:* Створити непривілейованого системного користувача:
      ```dockerfile
-     RUN addgroup -g 10001 -S oxide && adduser -u 10001 -S oxide -G oxide
+     RUN addgroup -g 10001 -S kadrbox && adduser -u 10001 -S kadrbox -G kadrbox
      USER 10001:10001
      ```
 2. ⚠️ **Відсутність директиви `HEALTHCHECK`:**
@@ -84,7 +88,7 @@ ENTRYPOINT ["./oxide-server"]
 
 ## 3. Аудит docker-compose.yml та конфігурації Portainer
 
-Файл: [`server/docker-compose.yml`](file:///e:/Github/oxide_film/server/docker-compose.yml)
+Файл: [`backend/docker-compose.yml`](../../backend/docker-compose.yml)
 
 ### 3.1. Мережева конфігурація та порти
 - Сервіс транслює порт `"8089:8080"`.
@@ -92,7 +96,7 @@ ENTRYPOINT ["./oxide-server"]
 - Всі сервіси (`app`, `postgres`, `redis`) знаходяться у спільній ізольованій мережі за замовчуванням (`default`).
 
 ### 3.2. Healthchecks та залежності сервісів
-- **Postgres:** Налаштовано коректно `pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-oxide_film}`, інтервал 5с.
+- **Postgres:** Налаштовано коректно `pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-kadrbox}`, інтервал 5с.
 - **Redis:** Налаштовано коректно `redis-cli ping`, інтервал 5с.
 - **App:** Має `depends_on` з `condition: service_healthy` для обох залежностей. Це гарантує, що Go-бекенд не стартує до повної готовності бази даних та кешу, запобігаючи паніці при підключенні.
 - ⚠️ **Недолік:** Для самого сервісу `app` у `docker-compose.yml` блок `healthcheck` відсутній. Якщо веб-сервер зависне або заблокується deadlock-ом, Docker та Portainer відображатимуть статус "Running".
@@ -147,7 +151,7 @@ redis:
 
 ## 4. CI/CD Пайплайн (.github/workflows/docker-publish.yml)
 
-Файл: [`.github/workflows/docker-publish.yml`](file:///e:/Github/oxide_film/.github/workflows/docker-publish.yml)
+Файл: [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)
 
 ### 4.1. Позитивні аспекти:
 - **Селективний тригер:** `paths: ['server/**', '.github/workflows/docker-publish.yml']` запобігає зайвим збіркам образу при змінах у Flutter-клієнті або документації.
@@ -174,7 +178,7 @@ redis:
 ## 5. Аудит безпеки: Паролі (Argon2id) та Токени (JWT)
 
 ### 5.1. Хешування паролів (Argon2id)
-Файл: [`server/internal/auth/password.go`](file:///e:/Github/oxide_film/server/internal/auth/password.go)
+Файл: [`backend/internal/auth/password.go`](../../backend/internal/auth/password.go)
 
 | Параметр | Поточне значення | Рекомендація OWASP / RFC 9106 | Оцінка |
 | :--- | :--- | :--- | :--- |
@@ -186,16 +190,16 @@ redis:
 | **Порівняння** | `subtle.ConstantTimeCompare` | Constant-time execution | **Захищено** від Timing Attacks |
 
 ### 5.2. Модель автентифікації та JWT
-Файл: [`server/internal/auth/jwt.go`](file:///e:/Github/oxide_film/server/internal/auth/jwt.go)
+Файл: [`backend/internal/auth/jwt.go`](../../backend/internal/auth/jwt.go)
 
 1. **Алгоритм підпису:** `SigningMethodHS256` (HMAC-SHA256).
    - У методі `ValidateAccessToken` реалізована жорстка перевірка `t.Method.(*jwt.SigningMethodHMAC)`, що виключає атаку зміни типу алгоритму на `none` або `RS256` (Key Confusion Attack).
 2. **Час життя токенів (TTL):**
    - **Access Token:** 15 хвилин (`15 * time.Minute`). Відповідає сучасному стандарту безпеки для мінімізації вікна компрометації.
    - **Refresh Token:** Криптографічний UUIDv4, зберігається в Redis з TTL 30 днів (`30 * 24 * time.Hour`).
-   - **Ротація сесій:** У методі [`Refresh`](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L119) реалізовано автоматичне відкликання старого токена (`redisClient.RevokeRefreshToken`) та генерацію нової пари токенів.
+   - **Ротація сесій:** У методі [`Refresh`](../../backend/internal/transport/http/auth_handler.go#L119) реалізовано автоматичне відкликання старого токена (`redisClient.RevokeRefreshToken`) та генерацію нової пари токенів.
 3. ⚠️ **Вразливість конфігурації за замовчуванням (Default Secret):**
-   - У `config.go`: `getEnv("JWT_SECRET", "super-secret-jwt-key-oxide-film-2026")`.
+   - У `config.go`: `getEnv("JWT_SECRET", "super-secret-jwt-key-2026")`.
    - У `docker-compose.yml`: `JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-2026}`.
    - Якщо системний адміністратор розгорне compose без створення `.env` файлу, будь-який зловмисник зможе згенерувати валідний токен адміністратора.
    - *Рекомендація:* Додати валідацію в `cmd/api/main.go`: якщо `JWT_SECRET` дорівнює дефолтному рядку або його довжина менша за 32 байти у продакшн-середовищі, виводити фатальну помилку та блокувати старт.
@@ -206,7 +210,7 @@ redis:
 
 ## 6. Розрахунок споживання ресурсів (Zero Media Traffic)
 
-Концепція **Zero Media Traffic** гарантує, що сервер Oxide Film виступає виключно як координатор сесій та сервіс пошуку/каталогізації, а не як медіа-проксі.
+Концепція **Zero Media Traffic** гарантує, що сервер Kadrbox виступає виключно як координатор сесій та сервіс пошуку/каталогізації, а не як медіа-проксі.
 
 ```mermaid
 flowchart LR
@@ -215,7 +219,7 @@ flowchart LR
         Player["MediaKit Плеєр"]
     end
 
-    subgraph Backend["Oxide Server Stack (Portainer)"]
+    subgraph Backend["Kadrbox Server Stack (Portainer)"]
         GoServer["Go Backend (Chi + WS)"]
         PG[("PostgreSQL 16")]
         RDC[("Redis 7")]
@@ -247,11 +251,11 @@ flowchart LR
 | **Мережевий вхід (RX)** | ~ 0 КБ/с | 20 – 60 КБ/с | 200 – 500 КБ/с | Залежить від каналу VPS |
 | **Мережевий вихід (TX)** | ~ 0 КБ/с | 10 – 30 КБ/с | 100 – 250 КБ/с | Залежить від каналу VPS |
 
-### 6.2. Порівняння мережевого трафіку: Традиційний проксі vs Oxide Film
+### 6.2. Порівняння мережевого трафіку: Традиційний проксі vs Kadrbox
 - **Традиційний сервер із проксіюванням потоків:**
   - 1 000 користувачів, які переглянули по 1 серії (1.5 ГБ): **1.5 ТЕРАБАЙТА серверного трафіку на добу**.
   - Вимагає виділеного гігабітного каналу вартістю від 50–100 $/міс.
-- **Oxide Film (Zero Media Traffic):**
+- **Kadrbox (Zero Media Traffic):**
   - Метадані пошуку, деталі фільму, завантаження історії та закладки: ~25 КБ на користувача.
   - Події Watch Party (1 подія на хвилину: плей/пауза/таймлайн): ~15 КБ за сесію.
   - 1 000 користувачів: **всього ~40 МЕГАБАЙТ трафіку на добу**!
@@ -261,9 +265,9 @@ flowchart LR
 
 ## 7. Аналіз витоків пам'яті, горутин та пулів з'єднань
 
-### 7.1. Критичні дефекти WebSocket Hub (`server/internal/transport/ws/hub.go`)
+### 7.1. Критичні дефекти WebSocket Hub (`backend/internal/transport/ws/hub.go`)
 
-Файл: [`server/internal/transport/ws/hub.go`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L113-L128)
+Файл: [`backend/internal/transport/ws/hub.go`](../../backend/internal/transport/ws/hub.go#L113-L128)
 
 #### Дефект 1: Concurrent Map Modification під RLock (Data Race & Fatal Panic)
 У гілці обробки broadcast:
@@ -302,9 +306,9 @@ case event := <-h.broadcast:
 - Метод `PublishWatchPartyEvent` викликається при кожній події, проте метод `SubscribeWatchPartyEvents` **не викликається в жодному місці коду**.
 - Якщо запустити більше одного контейнера бекенда за балансувальником навантаження, користувачі в одній кімнаті на різних інстансах не бачитимуть синхронізації дій один одного.
 
-### 7.2. Пули з'єднань PostgreSQL (`server/internal/repository/postgres/db.go`)
+### 7.2. Пули з'єднань PostgreSQL (`backend/internal/repository/postgres/db.go`)
 
-Файл: [`server/internal/repository/postgres/db.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/db.go#L23-L25)
+Файл: [`backend/internal/repository/postgres/db.go`](../../backend/internal/repository/postgres/db.go#L23-L25)
 
 ```go
 config.MaxConns = 25
@@ -312,9 +316,9 @@ config.MinConns = 2
 ```
 
 1. **Ревізія закриття курсорів `rows.Close()`:**
-   - [`history_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/history_repo.go#L64): `rows.Close()` викликається через `defer` після перевірки помилки у всіх методах вибірки списків.
-   - [`favorites_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/favorites_repo.go#L59): `defer rows.Close()` присутній і коректний.
-   - [`cache_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/cache_repo.go): використовує точкові `QueryRow` та `Exec`, витоки дескрипторів відсутні.
+   - [`history_repo.go`](../../backend/internal/repository/postgres/history_repo.go#L64): `rows.Close()` викликається через `defer` після перевірки помилки у всіх методах вибірки списків.
+   - [`favorites_repo.go`](../../backend/internal/repository/postgres/favorites_repo.go#L59): `defer rows.Close()` присутній і коректний.
+   - [`cache_repo.go`](../../backend/internal/repository/postgres/cache_repo.go): використовує точкові `QueryRow` та `Exec`, витоки дескрипторів відсутні.
    - **Висновок:** Витоків з'єднань через незакриті курсори `pgx.Rows` не виявлено.
 2. ⚠️ **Відсутність життєвого циклу з'єднань пулу:**
    - Не встановлені параметри `MaxConnLifetime`, `MaxConnIdleTime` та `HealthCheckPeriod`.
@@ -324,11 +328,11 @@ config.MinConns = 2
 
 ## 8. План усунення виявлених дефектів (Action Plan)
 
-### Крок 1: Виправлення WebSocket Hub (`server/internal/transport/ws/hub.go`)
+### Крок 1: Виправлення WebSocket Hub (`backend/internal/transport/ws/hub.go`)
 1. Замінити видалення клієнтів з мапи під `RLock` на надсилання повідомлення в канал `h.unregister <- client`.
 2. Забезпечити атомарне або одноразове закриття каналу `send` (через `sync.Once` у структурі `Client`).
 
-### Крок 2: Коригування лімітів пам'яті в `server/docker-compose.yml`
+### Крок 2: Коригування лімітів пам'яті в `backend/docker-compose.yml`
 1. Збільшити memory limit сервісу `app` до `256M` (або `384M`), щоб уникнути OOM при обчисленнях Argon2id.
 2. Зменшити `--maxmemory` у Redis до `48mb` або збільшити ліміт пам'яті контейнера до `80M`.
 3. Додати блок `healthcheck` для сервісу `app`:
@@ -342,7 +346,7 @@ config.MinConns = 2
    ```
 
 ### Крок 3: Оптимізація Dockerfile
-1. Додати непривілейованого користувача `oxide` (`UID 10001`).
+1. Додати непривілейованого користувача `kadrbox` (`UID 10001`).
 2. Додати директиву `HEALTHCHECK`.
 
 ### Крок 4: Оновлення CI/CD (.github/workflows/docker-publish.yml)

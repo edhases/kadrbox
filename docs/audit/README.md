@@ -1,16 +1,19 @@
-# Аудит Oxide Film — зведений покажчик
+# Аудит Kadrbox — зведений покажчик
 
-Цей каталог містить **8 звітів** (9 файлів, враховуючи цей покажчик). Усі вони — історичні
+Цей каталог містить **7 звітів** (8 файлів, враховуючи цей покажчик). Усі вони — історичні
 записи стану коду на момент проведення аудиту.
+
+> Звіт №2 (аналіз парсерів і джерел контенту) видалено: його зміст описував механіку
+> видобування контенту з веб-сайтів і не піддається безпечному редагуванню.
 
 > ⚠️ **Як читати цей каталог**
 >
 > Знахідки всередині звітів **не переписуються** — вони зафіксовують те, що було відкрито тоді.
 > Кожен файл має заголовок `## Статус документа` з полями `Status` та `Verified against: <sha>`.
-> Актуальний стан виконання — у [`../REMEDIATION_PLAN.md`](../REMEDIATION_PLAN.md).
+> Актуальний стан виконання — у [`../../MIGRATION_REPORT.md`](../../MIGRATION_REPORT.md).
 >
 > `Status: fixed` = усі ключові знахідки звіту перевірено на вказаному коміті та виправлено.
-> `Status: superseded by docs/REMEDIATION_PLAN.md` = звіт є вхідним документом для плану;
+> `Status: superseded` = звіт є вхідним документом для плану;
 > його знахідки розподілені між агентами і простежуються там.
 
 ---
@@ -23,7 +26,6 @@
 | № | Напрямок | Звіт | Status | Ключовий висновок |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | База даних та міграції | [01_DATABASE_MIGRATION_AUDIT.md](01_DATABASE_MIGRATION_AUDIT.md) | `fixed` | `season/episode = 0` ламало UI («S0 E0» для фільмів). Потрібні `NULL` + `UNIQUE NULLS NOT DISTINCT` (PostgreSQL 16), імпорт favorites/history. **Виправлено.** |
-| 2 | Провайдери та парсери | [02_PARSERS_AND_PROVIDERS_AUDIT.md](02_PARSERS_AND_PROVIDERS_AUDIT.md) | `fixed` | Застарілі селектори Eneyida (`.short-title` → `.short_title`), блокування редиректів UAKino, резолв прямого HLS замість iframe. **Виправлено.** |
 | 3 | Watch Party & WebSocket | [03_WATCH_PARTY_REALTIME_AUDIT.md](03_WATCH_PARTY_REALTIME_AUDIT.md) | `fixed` | Конфлікт регістру/ключів (`USER_JOINED` vs `userJoined`, `sender_id` vs `senderId`), data race у `hub.go`, стан кімнат не писався в Redis. **Виправлено.** |
 | 4 | API-контракти клієнта | [04_API_CONTRACTS_AND_CLIENT_COMPATIBILITY_AUDIT.md](04_API_CONTRACTS_AND_CLIENT_COMPATIBILITY_AUDIT.md) | `fixed` | CORS `AllowedOrigins: ["*"]` + `AllowCredentials` блокується браузерами; жорсткий каст `Map<String, dynamic>` падає на `List<dynamic>`. **Виправлено.** |
 | 5 | Інфраструктура та ресурси | [05_INFRASTRUCTURE_AND_RESOURCE_AUDIT.md](05_INFRASTRUCTURE_AND_RESOURCE_AUDIT.md) | `fixed` | Zero media traffic підтверджено, але ліміт RAM 128 MB ризикований через Argon2id (64 MB на хеш) — потрібно 256 MB. **Виправлено.** |
@@ -33,7 +35,7 @@
 ## 🗂️ Незалежні аудити (3 звіти)
 
 Ці звіти **не входили** до основного п'ятичленного аудиту, але без них вихідний план
-(`REMEDIATION_PLAN.md`) не виник би.
+(`MIGRATION_REPORT.md`) не виник би.
 
 | # | Звіт | Рядків | Status | Про що |
 | :--- | :--- | :--- | :--- | :--- |
@@ -46,7 +48,7 @@
 ## 🎯 Пріоритетні виправлення (зведено)
 
 Усі нижче перелічені пункти станом на поточний коміт **виконано**. Деталі — у
-[`../REMEDIATION_PLAN.md`](../REMEDIATION_PLAN.md).
+[`../../MIGRATION_REPORT.md`](../../MIGRATION_REPORT.md).
 
 1. **База даних** (`migrations/000001_init.up.sql`)
    - ✅ `season INT NOT NULL DEFAULT 0` → `season INT NULL`, `episode INT NULL` (рядки 44-45)
@@ -54,9 +56,9 @@
    - ✅ Поля `rating` та `rating_source` додано
    - ✅ `schema_migrations` ведеться (`repository/postgres/db.go`)
 
-2. **Парсери та редиректи**
-   - ✅ Селектори Eneyida → `.short_title` / `.short_img` (`provider/eneyida.go:131,138`)
-   - ✅ `client.go` проходить 301/302 з валідацією кожного хопу (`maxRedirects = 5`)
+2. **Джерела контенту**
+   - ✅ Пункт 2 зведено до нуля: механізм видобування контенту винесено з репозиторію
+     повністю. Актуальна модель — див. [`../../MIGRATION_REPORT.md`](../../MIGRATION_REPORT.md).
 
 3. **CORS та WebSocket Hub**
    - ✅ `AllowedOrigins: ["*"]` → `AllowOriginFunc` з allow-list (`router.go:42-50`)
@@ -77,7 +79,7 @@
 ## ⚠️ Незакритий ризик: breaking change у wire-форматі
 
 Після цих аудитів запроваджено єдиний response-envelope
-(`server/internal/transport/http/api_envelope.go`):
+(`backend/internal/transport/http/api_envelope.go`):
 
 ```
 success, list    {"data":[ … ],"meta":{"limit":200,"offset":0,"count":2,"total":5,"has_more":true}}
@@ -86,4 +88,4 @@ error            {"error":"…"}
 ```
 
 Списки більше не повертаються гола�� масивом. **Клієнт має бути оновлено синхронно** —
-див. [`../REMEDIATION_PLAN.md`](../REMEDIATION_PLAN.md), Wave 2G/2H.
+див. [`../../MIGRATION_REPORT.md`](../../MIGRATION_REPORT.md), Wave 2G/2H.

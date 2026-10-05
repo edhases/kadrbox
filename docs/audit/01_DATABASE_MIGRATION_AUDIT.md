@@ -7,7 +7,7 @@
 >   `UNIQUE NULLS NOT DISTINCT` застосовано, `rating`/`rating_source` додано,
 >   `schema_migrations` ведеться (`repository/postgres/db.go`),
 >   `CountUserFavorites` існує (`favorites_repo.go:112`).
-> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 2, агенти F та G).
+> - **Див. також:** `MIGRATION_REPORT.md` (Wave 2, агенти F та G).
 >
 > Історичні знахідки нижче **не переписані** — вони залишено як запис стану на момент аудиту.
 # Технічний аудит міграції бази даних (PostgreSQL vs PocketBase & Drift)
@@ -15,11 +15,11 @@
 **Дата аудиту:** 28 вересня 2026 року  
 **Роль:** Аудитор 1 — Валідатор міграції бази даних  
 **Об'єкти перевірки:**
-- Локальна схема Drift: [`lib/data/database/app_database.dart`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart), [`lib/data/database/dao/history_dao.dart`](file:///e:/Github/oxide_film/lib/data/database/dao/history_dao.dart), [`lib/data/database/dao/favorites_dao.dart`](file:///e:/Github/oxide_film/lib/data/database/dao/favorites_dao.dart)
-- Хмарні сервіси PocketBase: [`lib/data/services/pocketbase_service.dart`](file:///e:/Github/oxide_film/lib/data/services/pocketbase_service.dart), [`lib/data/services/history_service.dart`](file:///e:/Github/oxide_film/lib/data/services/history_service.dart), [`lib/data/services/favorites_service.dart`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart), [`lib/data/services/auth_service.dart`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart)
-- Серверна схема PostgreSQL та репозиторії Go: [`server/internal/repository/postgres/migrations/000001_init.up.sql`](file:///e:/Github/oxide_film/server/internal/repository/postgres/migrations/000001_init.up.sql), [`user_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/user_repo.go), [`history_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/history_repo.go), [`favorites_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/favorites_repo.go), [`cache_repo.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/cache_repo.go), [`db.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/db.go)
-- Утиліта міграції: [`server/cmd/migrate_pb/main.go`](file:///e:/Github/oxide_film/server/cmd/migrate_pb/main.go)
-- Контейнеризація: [`server/docker-compose.yml`](file:///e:/Github/oxide_film/server/docker-compose.yml), [`server/Dockerfile`](file:///e:/Github/oxide_film/server/Dockerfile)
+- Локальна схема Drift: [`lib/data/database/app_database.dart`](../../frontend/lib/data/database/app_database.dart), [`lib/data/database/dao/history_dao.dart`](../../frontend/lib/data/database/dao/history_dao.dart), [`lib/data/database/dao/favorites_dao.dart`](../../frontend/lib/data/database/dao/favorites_dao.dart)
+- Хмарні сервіси PocketBase: [`lib/data/services/pocketbase_service.dart`](../../frontend/lib/data/services/pocketbase_service.dart), [`lib/data/services/history_service.dart`](../../frontend/lib/data/services/history_service.dart), [`lib/data/services/favorites_service.dart`](../../frontend/lib/data/services/favorites_service.dart), [`lib/data/services/auth_service.dart`](../../frontend/lib/data/services/auth_service.dart)
+- Серверна схема PostgreSQL та репозиторії Go: [`backend/internal/repository/postgres/migrations/000001_init.up.sql`](../../backend/internal/repository/postgres/migrations/000001_init.up.sql), [`user_repo.go`](../../backend/internal/repository/postgres/user_repo.go), [`history_repo.go`](../../backend/internal/repository/postgres/history_repo.go), [`favorites_repo.go`](../../backend/internal/repository/postgres/favorites_repo.go), [`cache_repo.go`](../../backend/internal/repository/postgres/cache_repo.go), [`db.go`](../../backend/internal/repository/postgres/db.go)
+- Утиліта міграції: [`backend/cmd/migrate_pb/main.go`](../../backend/cmd/migrate_pb/main.go)
+- Контейнеризація: [`backend/docker-compose.yml`](../../backend/docker-compose.yml), [`backend/Dockerfile`](../../backend/Dockerfile)
 
 ---
 
@@ -75,7 +75,7 @@
 
 > [!NOTE]
 > **Аналіз полів рейтингу в `favorites`:**
-> У Drift таблиці [`Favorites`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart#L65-L81) наявні колонки `rating` та `ratingSource`. У PostgreSQL таблиці `favorites` ці стовпці відсутні. Якщо користувач додає фільм в обране в офлайні з рейтингом (наприклад, IMDB 8.5), після синхронізації з бекендом рейтинг не збережеться на сервері.
+> У Drift таблиці [`Favorites`](../../frontend/lib/data/database/app_database.dart#L65-L81) наявні колонки `rating` та `ratingSource`. У PostgreSQL таблиці `favorites` ці стовпці відсутні. Якщо користувач додає фільм в обране в офлайні з рейтингом (наприклад, IMDB 8.5), після синхронізації з бекендом рейтинг не збережеться на сервері.
 
 ---
 
@@ -143,7 +143,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_active_room_code ON watch_party_rooms(room
 
 ### 2.6. Локальні таблиці Drift, що залишаються на клієнті
 
-Наступні таблиці з [`app_database.dart`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart) обґрунтовано не потребують прямого дублювання в PostgreSQL:
+Наступні таблиці з [`app_database.dart`](../../frontend/lib/data/database/app_database.dart) обґрунтовано не потребують прямого дублювання в PostgreSQL:
 1. **`Downloads`:** Зберігає стан завантаження офлайн-відеофайлів (шляхи на диску пристрою, розміри, прогрес). Це специфіка локального сховища пристрою.
 2. **`SearchHistoryTable`:** Кеш пошукових запитів для миттєвих підказок в UI (offline-first).
 3. **`StoredMediaItems`:** Локальний SQLite-кеш раніше переглянутих карток для роботи без мережі.
@@ -170,16 +170,16 @@ CONSTRAINT uq_user_history UNIQUE (user_id, media_id, provider_id, season, episo
 ### 3.3. Виявлена колізія в клієнтському коді Flutter
 Незважаючи на коректність у SQL, передача `0` замість `null` у клієнт Flutter спричиняє декілька серйозних багів:
 
-1. **Баг у віджеті "Продовжити перегляд" ([`continue_watching_section.dart:185`](file:///e:/Github/oxide_film/lib/presentation/widgets/home/continue_watching_section.dart#L185)):**
+1. **Баг у віджеті "Продовжити перегляд" ([`continue_watching_section.dart:185`](../../frontend/lib/presentation/widgets/home/continue_watching_section.dart#L185)):**
    ```dart
    if (item.season != null && item.episode != null) ...[
      Text('S${item.season} E${item.episode}'),
    ]
    ```
    Якщо фільм синхронізовано з бекенду зі значеннями `season: 0, episode: 0`, перевірка `!= null` поверне `true`. На картці фільму з'явиться некоректний бейдж: **`S0 E0`**.
-2. **Баг на сторінці деталей ([`details_page.dart:1103`](file:///e:/Github/oxide_film/lib/presentation/pages/details/details_page.dart#L1103)):**
+2. **Баг на сторінці деталей ([`details_page.dart:1103`](../../frontend/lib/presentation/pages/details/details_page.dart#L1103)):**
    Параметр `'initialSeason': item.season` передасть значення `0`. Оскільки в серіалах сезони починаються з 1, логіка вибору епізоду може впасти з помилкою або вибрати пустий список.
-3. **Баг у DAO пошуку ([`history_dao.dart:32`](file:///e:/Github/oxide_film/lib/data/database/dao/history_dao.dart#L32)):**
+3. **Баг у DAO пошуку ([`history_dao.dart:32`](../../frontend/lib/data/database/dao/history_dao.dart#L32)):**
    ```dart
    (season != null ? t.season.equals(season) : t.season.isNull()) &
    (episode != null ? t.episode.equals(episode) : t.episode.isNull())
@@ -248,7 +248,7 @@ DO UPDATE SET
 
 ## 5. Аудит скрипта імпорту даних `cmd/migrate_pb/main.go`
 
-Було проведено ретельний рядок-за-рядком аналіз коду [`server/cmd/migrate_pb/main.go`](file:///e:/Github/oxide_film/server/cmd/migrate_pb/main.go).
+Було проведено ретельний рядок-за-рядком аналіз коду [`backend/cmd/migrate_pb/main.go`](../../backend/cmd/migrate_pb/main.go).
 
 ```go
 // Фрагмент із migrate_pb/main.go:
@@ -279,7 +279,7 @@ for _, u := range users {
 ## 6. Інфраструктура та розгортання (Docker & Portainer)
 
 ### 6.1. Автоматичний накат міграцій
-У файлі [`server/internal/repository/postgres/db.go`](file:///e:/Github/oxide_film/server/internal/repository/postgres/db.go#L13-L65):
+У файлі [`backend/internal/repository/postgres/db.go`](../../backend/internal/repository/postgres/db.go#L13-L65):
 ```go
 //go:embed migrations/*.sql
 var MigrationsFS embed.FS
@@ -288,7 +288,7 @@ var MigrationsFS embed.FS
 - **Оцінка:** **Відмінно**. Додатку не потрібні сторонні утиліти (`migrate-cli`) під час старту в Docker/Portainer. При першому піднятті стека всі таблиці та індекси створюються автономно.
 
 ### 6.2. Docker Compose та ресурсні ліміти
-У [`server/docker-compose.yml`](file:///e:/Github/oxide_film/server/docker-compose.yml):
+У [`backend/docker-compose.yml`](../../backend/docker-compose.yml):
 - Образ `postgres:16-alpine` з томом `pgdata:/var/lib/postgresql/data`.
 - Healthcheck налаштовано коректно через `pg_isready`.
 - Ліміти пам'яті:
@@ -303,12 +303,12 @@ var MigrationsFS embed.FS
 
 | № | Дефект / Невідповідність | Рівень критичності | Компонент | Необхідна дія |
 | :- | :--- | :--- | :--- | :--- |
-| **1** | Скрипт `migrate_pb/main.go` не імпортує `favorites` та `watch_history` | 🔴 **CRITICAL** | `server/cmd/migrate_pb` | Реалізувати повноцінний експорт усіх колекцій з мапінгом `pb_id -> pg_uuid` за email. |
+| **1** | Скрипт `migrate_pb/main.go` не імпортує `favorites` та `watch_history` | 🔴 **CRITICAL** | `backend/cmd/migrate_pb` | Реалізувати повноцінний експорт усіх колекцій з мапінгом `pb_id -> pg_uuid` за email. |
 | **2** | Колізія `season/episode = 0` у клієнтському UI ("S0 E0" для фільмів) та збій пошуку в `HistoryDao` | 🔴 **CRITICAL** | `migrations` / `history_repo` / Flutter UI | Використати `UNIQUE NULLS NOT DISTINCT` у Postgres 16 або мапити `0 <-> null` у DTO. |
 | **3** | Втрата полів `rating` та `rating_source` в таблицях `favorites` та `watch_history` | 🟡 **MEDIUM** | `migrations/000001_init.up.sql` | Додати `rating REAL`, `rating_source VARCHAR(100)` до міграцій PostgreSQL. |
 | **4** | Розбіжність полів профілю користувача (`name` vs `username`, `avatar` vs `avatar_url`) | 🟡 **MEDIUM** | `domain/user.go`, `auth_handler.go` | Додати псевдоніми або уніфікувати JSON-контракт між Flutter та Go. |
-| **5** | Відсутність підтримки OAuth2 (Google/Discord) у новому Go-сервері | 🟡 **MEDIUM** | `server/internal/auth` | Розробити модуль OAuth2 обміну кодами на JWT або зафіксувати це обмеження в документації. |
-| **6** | Скидання паролів у `migrate_pb` на фіктивне значення без механізму скидання | 🟡 **MEDIUM** | `server/cmd/migrate_pb` | Додати генерацію одноразових токенів скидання або розсилку повідомлень користувачам. |
+| **5** | Відсутність підтримки OAuth2 (Google/Discord) у новому Go-сервері | 🟡 **MEDIUM** | `backend/internal/auth` | Розробити модуль OAuth2 обміну кодами на JWT або зафіксувати це обмеження в документації. |
+| **6** | Скидання паролів у `migrate_pb` на фіктивне значення без механізму скидання | 🟡 **MEDIUM** | `backend/cmd/migrate_pb` | Додати генерацію одноразових токенів скидання або розсилку повідомлень користувачам. |
 
 ---
 

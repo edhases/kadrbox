@@ -1,16 +1,16 @@
 > ## Статус документа
 >
-> - **Status:** superseded by `docs/REMEDIATION_PLAN.md`
+> - **Status:** superseded by `MIGRATION_REPORT.md`
 > - **Verified against:** `3ab45ef`
 > - **Актуальність:** аудит «тихих» помилок, зависань і падінь у клієнті та бекенді.
->   Знахідки перенесені в `docs/REMEDIATION_PLAN.md` (Wave 2H, Wave 3J — Dart).
+>   Знахідки перенесені в `MIGRATION_REPORT.md` (Wave 2H, Wave 3J — Dart).
 > - **Вибірково перевірено на `3ab45ef`:** 401-interceptor з refresh-and-replay замість
 >   миттєвого `signOut()` та in-flight guard для `_saveProgress`
 >   (`lib/core/network/api_client.dart`, `lib/data/services/history_service.dart`).
 > - **Не переписано:** історичні знахідки залишено як є.
 # Комплексний аудит тихих помилок, зависань та аварійних завершень (Silent Failures, Freezes & Crashes Audit Report)
 
-**Проєкт:** Oxide Film (Flutter Client + Go Backend)  
+**Проєкт:** Kadrbox (Flutter Client + Go Backend)  
 **Дата аудиту:** 28 вересня 2026 року  
 **Роль:** Site Reliability & Code Quality Auditor  
 **Статус:** Завершено  
@@ -19,7 +19,7 @@
 
 ## 1. Резюме та матриця ризиків
 
-В ході глибокого аудиту кодової бази **Oxide Film** (клієнтська частина у `lib/` та серверна частина у `server/`) було проведено комплексне сканування на наявність дефектів двох фундаментальних категорій:
+В ході глибокого аудиту кодової бази **Kadrbox** (клієнтська частина у `lib/` та серверна частина у `backend/`) було проведено комплексне сканування на наявність дефектів двох фундаментальних категорій:
 1. **Тихі помилки (Silent Errors / Swallowed Exceptions):** ковтання винятків блоками `catch (_) {}`, ігнорування помилок операцій вводу-виводу/БД (`_ = ...`), відсутність обробки статус-кодів upstream-провайдерів (Cloudflare 403/502), через що користувач бачить порожній екран замість інформативної причини збою.
 2. **Падіння без повідомлень, зависання та дедлоки (Silent Crashes, Freezes & Deadlocks):** незахищені фонові горутини в Go без `recover()` (що призводять до миттєвого завершення процесу всієї програми), блокування небуферизованих каналів при завершенні роботи, вічні спінери (`isLoading = true`) через відсутність блоків `finally`, безкінечні зависання мережевих викликів без таймаутів та вічна буферизація у відеоплеєрі.
 
@@ -27,20 +27,20 @@
 
 | ID | Компонент | Рівень | Назва дефекту | Наслідок для системи |
 |---|---|---|---|---|
-| **CRIT-01** | `server/internal/provider/registry.go`, `server/cmd/api/main.go` | **Критичний (P0)** | Goroutine Panics Without Recover у фонових воркерах і пошуку | Повне падіння процесу сервера при будь-якій помилці стороннього провайдера |
-| **CRIT-02** | `server/internal/transport/ws/hub.go`, `main.go` | **Критичний (P0)** | Дедлок на небуферизованому каналі `register` при зупинці сервера | Зависання HTTP-хендлерів та блокування процесу Graceful Shutdown |
+| **CRIT-01** | `backend/internal/provider/registry.go`, `backend/cmd/api/main.go` | **Критичний (P0)** | Goroutine Panics Without Recover у фонових воркерах і пошуку | Повне падіння процесу сервера при будь-якій помилці стороннього провайдера |
+| **CRIT-02** | `backend/internal/transport/ws/hub.go`, `main.go` | **Критичний (P0)** | Дедлок на небуферизованому каналі `register` при зупинці сервера | Зависання HTTP-хендлерів та блокування процесу Graceful Shutdown |
 | **CRIT-03** | `lib/presentation/pages/player/player_controller.dart` | **Критичний (P0)** | Вічна буферизація плеєра при помилці потоку (`position > Duration.zero`) | Зависання інтерфейсу користувача у вічному спінері без відображення помилки |
 | **CRIT-04** | `lib/data/services/watch_party_service.dart` | **Критичний (P0)** | Відсутність таймауту ініціалізації брокера PeerDart / WebSocket | Безкінечний спінер створення або підключення до кімнати Watch Party |
-| **HIGH-01** | `server/internal/provider/client.go` | **Високий (P1)** | Ігнорування HTTP StatusCode у TLSClient (Cloudflare 403/502/429) | Маскування блокувань та помилок серверів під порожній результат пошуку |
-| **HIGH-02** | `server/internal/transport/http/sync_handler.go` | **Високий (P1)** | Ігнорування помилок бази даних при зміні статусу обраного (ToggleFavorite) | Розсинхронізація клієнта: успішна відповідь 200 OK при фейлі запису в БД |
+| **HIGH-01** | `backend/internal/provider/client.go` | **Високий (P1)** | Ігнорування HTTP StatusCode у TLSClient (Cloudflare 403/502/429) | Маскування блокувань та помилок серверів під порожній результат пошуку |
+| **HIGH-02** | `backend/internal/transport/http/sync_handler.go` | **Високий (P1)** | Ігнорування помилок бази даних при зміні статусу обраного (ToggleFavorite) | Розсинхронізація клієнта: успішна відповідь 200 OK при фейлі запису в БД |
 | **HIGH-03** | `lib/presentation/pages/details/details_page.dart` | **Високий (P1)** | Вічне зависання вибору серії при відсутності провайдера | Елемент вибору серії блокується у стані `_isLoadingEpisode = true` назавжди |
 | **HIGH-04** | `lib/data/services/search_service.dart`, `search_page.dart` | **Високий (P1)** | Послідовне очікування результатів у стрімі пошуку та незавершуваний прогрес | Повільні провайдери блокують швидких; вічний індикатор пошуку |
 | **HIGH-05** | `lib/presentation/pages/home/home_page.dart` | **Високий (P1)** | Ковтання помилок усіх провайдерів на головному екрані | Каталог відображає "Немає контенту" замість повідомлення про відсутність мережі |
 | **MED-01** | `lib/data/services/sync_service.dart` | **Середній (P2)** | Ковтання помилок схеми/типів при імпорті бекапу | Успішний статус імпорту при реальній втраті даних користувача |
-| **MED-02** | `server/internal/repository/postgres/user_repo.go` | **Середній (P2)** | Ігнорування помилок видалення використаних токенів скидання пароля | Можливість повторного використання токенів скидання пароля |
+| **MED-02** | `backend/internal/repository/postgres/user_repo.go` | **Середній (P2)** | Ігнорування помилок видалення використаних токенів скидання пароля | Можливість повторного використання токенів скидання пароля |
 | **MED-03** | `lib/data/services/update_service.dart` | **Середній (P2)** | Відсутність таймаутів з'єднання у клієнті оновлень Dio | Зависання діалогу перевірки та завантаження оновлень |
-| **MED-04** | `server/internal/transport/http/auth_handler.go` | **Середній (P2)** | Відсутність очищення тимчасових файлів при завантаженні аватарів | Потенційний витік дискового простору при обробці великих завантажень |
-| **MED-05** | `lib/data/services/oxide_server_service.dart` | **Середній (P2)** | Відсутність таймауту на виклику `WebSocket.connect` | Зависання клієнта при недоступності вебсокет-сервера |
+| **MED-04** | `backend/internal/transport/http/auth_handler.go` | **Середній (P2)** | Відсутність очищення тимчасових файлів при завантаженні аватарів | Потенційний витік дискового простору при обробці великих завантажень |
+| **MED-05** | `lib/data/services/kadrbox_server_service.dart` | **Середній (P2)** | Відсутність таймауту на виклику `WebSocket.connect` | Зависання клієнта при недоступності вебсокет-сервера |
 | **LOW-01** | `lib/presentation/pages/auth/profile_page.dart`, `login_page.dart` | **Низький (P3)** | Відсутність блоків finally та небезпечне розіменування полів помилок | Текст "Помилка: null" та потенційне залипання індикатора прогресу |
 | **LOW-02** | `lib/presentation/pages/player/player_controls.dart` | **Низький (P3)** | Використання `try-catch` як штатного flow-control у селекторах | Неохайне перехоплення винятків замість безпечних методів колекцій |
 | **LOW-03** | `lib/presentation/pages/provider/provider_page.dart` | **Низький (P3)** | Падіння пагінації без інформування користувача | Раптове припинення довантаження списку без повідомлень у UI |
@@ -52,9 +52,9 @@
 ### CRIT-01: Go Goroutine Panics Without Recover у фонових воркерах та паралельному пошуку
 
 - **Файли та рядки:**
-  - `server/internal/provider/registry.go:56-65`
-  - `server/cmd/api/main.go:51-65`
-  - `server/internal/transport/ws/hub.go:54-122`, `178-180`
+  - `backend/internal/provider/registry.go:56-65`
+  - `backend/cmd/api/main.go:51-65`
+  - `backend/internal/transport/ws/hub.go:54-122`, `178-180`
 - **Сценарій виникнення:**
   1. Користувач здійснює пошуковий запит через `SingleFlightSearch` / `SearchAll`. Сервер запускає паралельні горутини для кожного провайдера: `go func(prov domain.Provider)`.
   2. Якщо сторонній сайт змінив розмітку або повернув неочікуваний контент, і DOM-парсер (або маніпуляція зі зрізами/стрінгами) викликає `runtime error: index out of range` або `nil pointer dereference`.
@@ -65,7 +65,7 @@
 - **Код для виправлення:**
 
 ```go
-// Файл: server/internal/provider/registry.go
+// Файл: backend/internal/provider/registry.go
 func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaItem {
 	providers := r.List()
 	var wg sync.WaitGroup
@@ -105,8 +105,8 @@ func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaIt
 ### CRIT-02: Дедлок на небуферизованому каналі `register` при зупинці сервера
 
 - **Файли та рядки:**
-  - `server/internal/transport/ws/hub.go:48-49`, `176-177`
-  - `server/cmd/api/main.go:121-127`
+  - `backend/internal/transport/ws/hub.go:48-49`, `176-177`
+  - `backend/cmd/api/main.go:121-127`
 - **Сценарій виникнення:**
   1. Під час штатного завершення роботи сервера (`SIGTERM`/`SIGINT`), `main.go` викликає:
      ```go
@@ -126,7 +126,7 @@ func (r *Registry) SearchAll(ctx context.Context, query string) []domain.MediaIt
 - **Код для виправлення:**
 
 ```go
-// Файл: server/internal/transport/ws/hub.go
+// Файл: backend/internal/transport/ws/hub.go
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomCode := r.URL.Query().Get("room")
 	userID := r.URL.Query().Get("user_id")
@@ -170,7 +170,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Також змінити порядок у `server/cmd/api/main.go`: спочатку `server.Shutdown(shutdownCtx)`, щоб припинити прийом нових HTTP/WS запитів, і лише потім `wsHub.GracefulStop()`.
+Також змінити порядок у `backend/cmd/api/main.go`: спочатку `server.Shutdown(shutdownCtx)`, щоб припинити прийом нових HTTP/WS запитів, і лише потім `wsHub.GracefulStop()`.
 
 ---
 
@@ -260,24 +260,27 @@ try {
 
 ## 3. Дефекти високого рівня ризику (High / Severity P1)
 
-### HIGH-01: Ігнорування HTTP StatusCode у TLSClient (Cloudflare 403/502/429)
+### HIGH-01: Ігнорування HTTP StatusCode у TLSClient (403/502/429)
 
-- **Файли та рядки:**
-  - `server/internal/provider/client.go:49-60`, `77-88`
-  - `server/internal/provider/uakino.go:40-86`
-  - `server/internal/provider/eneyida.go:38-75`
+> **Історична знахідка.** Становилась у шарі видобування контенту, який після міграції
+> винесено з репозиторію. Сам дефект — неперевірений код відповіді upstream — залишається
+> актуальним для будь-якого клієнта зовнішнього сервера, зокрема каталогового.
+
+- **Файли та рядки (на момент аудиту):**
+  - `backend/internal/provider/client.go:49-60`, `77-88`
+  - `backend/internal/provider/<source>.go` (файли джерел контенту)
 - **Сценарій виникнення:**
-  1. `TLSClient.Get()` та `TLSClient.PostForm()` виконують запит до провайдера.
-  2. Якщо провайдер повертає `403 Forbidden` (капча/блокування Cloudflare), `502 Bad Gateway` або `429 Too Many Requests`, клієнт **НЕ перевіряє** `resp.StatusCode`.
-  3. Клієнт повертає вміст сторінки помилки Cloudflare у вигляді рядка з `err == nil`.
-  4. Парсер (наприклад, `goquery.NewDocumentFromReader`) парсить цей HTML. Селектори `.movie-item`, `.short-story` не знаходять жодного збігу.
+  1. HTTP-клієнт виконує запит до зовнішнього сервера.
+  2. Якщо сервер повертає `403 Forbidden`, `502 Bad Gateway` або `429 Too Many Requests`, клієнт **НЕ перевіряє** `resp.StatusCode`.
+  3. Клієнт повертає вміст сторінки помилки у вигляді рядка з `err == nil`.
+  4. Розбірник парсить цей HTML і не знаходить жодного збігу.
   5. Метод `Search()` повертає порожній зріз `[]domain.MediaItem` з `err == nil`.
 - **Чому це "тиха помилка":**
-  Клієнт і сервер вважають, що запит виконано успішно, і що фільм просто "відсутній у каталозі". Адміністратор не бачить блокування провайдера, а користувач отримує хибне враження, що контенту немає, хоча сервіс насправді заблокований Cloudflare або лежить.
+  Клієнт і сервер вважають, що запит виконано успішно, і що фільм просто "відсутній у каталозі". Адміністратор не бачить блокування, а користувач отримує хибне враження, що контенту немає, хоча сервіс насправді заблокований або лежить.
 - **Код для виправлення:**
 
 ```go
-// Файл: server/internal/provider/client.go
+// Файл: backend/internal/provider/client.go
 if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 	bodySnippet := string(bodyBytes)
 	if len(bodySnippet) > 200 {
@@ -292,7 +295,7 @@ if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 ### HIGH-02: Ігнорування помилок бази даних при зміні статусу обраного (ToggleFavorite)
 
 - **Файли та рядки:**
-  - `server/internal/transport/http/sync_handler.go:270-278`
+  - `backend/internal/transport/http/sync_handler.go:270-278`
 - **Сценарій виникнення:**
   1. Клієнт надсилає запит `POST /api/v1/sync/favorites/toggle`.
   2. Хендлер перевіряє статус і викликає:
@@ -312,7 +315,7 @@ if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 - **Код для виправлення:**
 
 ```go
-// Файл: server/internal/transport/http/sync_handler.go
+// Файл: backend/internal/transport/http/sync_handler.go
 if isFav {
 	if err := h.favoritesRepo.RemoveFavorite(r.Context(), userID, fav.MediaID, fav.ProviderID); err != nil {
 		http.Error(w, `{"error":"failed to remove favorite"}`, http.StatusInternalServerError)
@@ -466,7 +469,7 @@ Future<void> _selectEpisode(int season, int episode) async {
 ### MED-02: Ігнорування помилок видалення токенів відновлення пароля та верифікації
 
 - **Файли та рядки:**
-  - `server/internal/repository/postgres/user_repo.go:65, 73, 144, 176`
+  - `backend/internal/repository/postgres/user_repo.go:65, 73, 144, 176`
 - **Опис проблеми:**
   Виклики `_, _ = r.pool.Exec(ctx, "DELETE FROM password_resets WHERE user_id = $1", userID)` ігнорують помилки виконання SQL. Якщо через збій у базі запис не видалився, метод `MarkPasswordResetUsed` повертає `nil` (успіх), залишаючи токен валідним до закінчення його 1-годинного TTL.
 - **Рекомендація щодо виправлення:**
@@ -488,7 +491,7 @@ Future<void> _selectEpisode(int season, int episode) async {
 ### MED-04: Відсутність очищення тимчасових файлів при завантаженні аватарів у Go
 
 - **Файли та рядки:**
-  - `server/internal/transport/http/auth_handler.go:450`
+  - `backend/internal/transport/http/auth_handler.go:450`
 - **Опис проблеми:**
   Виклик `r.ParseMultipartForm(5 << 20)` створює тимчасові файли у системній директорії `/tmp`, якщо файл перевищує поріг пам'яті. У коді відсутній обов'язковий виклик `defer r.MultipartForm.RemoveAll()`, що спричиняє поступове засмічення диску сервера при частих завантаженнях файлів.
 - **Рекомендація щодо виправлення:**
@@ -496,10 +499,10 @@ Future<void> _selectEpisode(int season, int episode) async {
 
 ---
 
-### MED-05: Відсутність таймауту на WebSocket.connect у OxideServerService
+### MED-05: Відсутність таймауту на WebSocket.connect у KadrboxServerService
 
 - **Файли та рядки:**
-  - `lib/data/services/oxide_server_service.dart:506`
+  - `lib/data/services/kadrbox_server_service.dart:506`
 - **Опис проблеми:**
   Метод `WebSocket.connect(uri.toString())` викликається без таймауту. Якщо сервер недоступний через підвисання фаєрвола, виклик чекає на системний таймаут сокета ОС (який може складати до 2-3 хвилин), блокуючи клієнтський потік ініціалізації Watch Party.
 - **Рекомендація щодо виправлення:**

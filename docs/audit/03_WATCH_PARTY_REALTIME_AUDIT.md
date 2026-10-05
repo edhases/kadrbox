@@ -8,7 +8,7 @@
 >   2. **Іменування вирівняно** з Flutter-клієнтом: `userJoined` / `senderId`
 >      (`hub.go:493` ↔ `lib/data/services/watch_party_service.dart:26,36`).
 >   3. **Стан кімнат** тепер реально публікується в Redis.
-> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 1, агент C).
+> - **Див. також:** `MIGRATION_REPORT.md` (Wave 1, агент C).
 >
 > Історичні знахідки нижче **не переписані**.
 # Звіт аудиту №3: Валідація Watch Party та WebSocket (Realtime Subsystem)
@@ -21,11 +21,11 @@
 
 ## 1. Резюме аудиту (Executive Summary)
 
-У ході аудиту підсистеми спільного перегляду проведено детальний статичний та контрактурний аналіз клієнтської частини Flutter ([`lib/data/services/watch_party_service.dart`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart), [`lib/domain/entities/room_state.dart`](file:///e:/Github/oxide_film/lib/domain/entities/room_state.dart), [`lib/presentation/widgets/watch_party_overlay.dart`](file:///e:/Github/oxide_film/lib/presentation/widgets/watch_party_overlay.dart)) та бекенд-компонентів Go ([`server/internal/transport/ws/hub.go`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go), [`server/internal/repository/redis/redis.go`](file:///e:/Github/oxide_film/server/internal/repository/redis/redis.go), [`server/internal/domain/party.go`](file:///e:/Github/oxide_film/server/internal/domain/party.go)).
+У ході аудиту підсистеми спільного перегляду проведено детальний статичний та контрактурний аналіз клієнтської частини Flutter ([`lib/data/services/watch_party_service.dart`](../../frontend/lib/data/services/watch_party_service.dart), [`lib/domain/entities/room_state.dart`](../../frontend/lib/domain/entities/room_state.dart), [`lib/presentation/widgets/watch_party_overlay.dart`](../../frontend/lib/presentation/widgets/watch_party_overlay.dart)) та бекенд-компонентів Go ([`backend/internal/transport/ws/hub.go`](../../backend/internal/transport/ws/hub.go), [`backend/internal/repository/redis/redis.go`](../../backend/internal/repository/redis/redis.go), [`backend/internal/domain/party.go`](../../backend/internal/domain/party.go)).
 
 ### Ключові висновки:
 1. **Критична несумісність JSON-контрактів:** Клієнт Flutter та сервер Go використовують різні стилі іменування полів (`camelCase` проти `snake_case`) та регістри дій (`userJoined` проти `USER_JOINED`). Клієнт не розпізнає системні повідомлення сервера та отримує порожні `senderId` і `senderName`.
-2. **Втрата системних подій приєднання/виходу:** У [`hub.go`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L81-L111) події `USER_JOINED` та `USER_LEFT` відправляються виключно в Redis Pub/Sub і **не передаються** у канал трансляції `h.broadcast`.
+2. **Втрата системних подій приєднання/виходу:** У [`hub.go`](../../backend/internal/transport/ws/hub.go#L81-L111) події `USER_JOINED` та `USER_LEFT` відправляються виключно в Redis Pub/Sub і **не передаються** у канал трансляції `h.broadcast`.
 3. **Dead Code у Redis Pub/Sub та відсутність збереження стану:** Метод підписки `SubscribeWatchPartyEvents` ніколи не викликається в серверному Hub. Збереження та зчитування стану кімнати (`SetWatchPartyState`, `GetWatchPartyState`) є «мертвим кодом» і не інтегровані в життєвий цикл сесії.
 4. **Race Condition у Go Hub:** У циклі `h.broadcast` за наявності закритого буфера клієнта виконується мутація карти `delete(clients, client)` під блокуванням читання `RLock()`, що спричиняє невизначену поведінку та паніку runtime Go.
 5. **Відсутність WebSocket-бекенду у Flutter:** Клієнт підтримує лише `PocketBase` та `PeerDart` (WebRTC). Реалізація підключення до нового сокета Go (`/api/v1/ws/watch-party`) у клієнтському коді наразі повністю відсутня.
@@ -35,7 +35,7 @@
 ## 2. Аналіз сумісності JSON-контрактів та протоколу
 
 ### 2.1. Конфлікт найменувань полів (Field Casing)
-У Flutter-клієнті [`WatchPartyMessage`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L49-L73):
+У Flutter-клієнті [`WatchPartyMessage`](../../frontend/lib/data/services/watch_party_service.dart#L49-L73):
 ```dart
 factory WatchPartyMessage.fromJson(Map<String, dynamic> json) {
   return WatchPartyMessage(
@@ -52,7 +52,7 @@ factory WatchPartyMessage.fromJson(Map<String, dynamic> json) {
   );
 }
 ```
-У Go-структурі [`domain.WatchPartyEvent`](file:///e:/Github/oxide_film/server/internal/domain/party.go#L17-L24):
+У Go-структурі [`domain.WatchPartyEvent`](../../backend/internal/domain/party.go#L17-L24):
 ```go
 type WatchPartyEvent struct {
     Action     string      `json:"action"`
@@ -94,8 +94,8 @@ type WatchPartyEvent struct {
 
 ### 2.4. Невідповідність сутностей: `RoomState` проти `WatchPartyService`
 У проєкті виявлено дві ізольовані моделі кімнати:
-1. [`lib/domain/entities/room_state.dart`](file:///e:/Github/oxide_film/lib/domain/entities/room_state.dart) — архітектурна Clean Architecture сутність (`RoomState`, `RoomMedia`, `RoomPeer`, `RoomStatus`), яка **не використовується** у робочому коді спільного перегляду.
-2. Внутрішні класи у [`lib/data/services/watch_party_service.dart`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart) (`WatchPartyRoom`, `WatchPartyParticipant`, `ChatMessage`), які фактично керують станом інтерфейсу.
+1. [`lib/domain/entities/room_state.dart`](../../frontend/lib/domain/entities/room_state.dart) — архітектурна Clean Architecture сутність (`RoomState`, `RoomMedia`, `RoomPeer`, `RoomStatus`), яка **не використовується** у робочому коді спільного перегляду.
+2. Внутрішні класи у [`lib/data/services/watch_party_service.dart`](../../frontend/lib/data/services/watch_party_service.dart) (`WatchPartyRoom`, `WatchPartyParticipant`, `ChatMessage`), які фактично керують станом інтерфейсу.
 Рекомендується консолідувати моделі даних та позбутися мертвого коду в `domain/entities`.
 
 ---
@@ -123,7 +123,7 @@ sequenceDiagram
 ```
 
 ### 3.1. Клієнтський алгоритм компенсації дрифту (Drift Correction)
-У [`WatchPartyService._handleSync`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L869-L952) реалізовано коректний трирівневий механізм:
+У [`WatchPartyService._handleSync`](../../frontend/lib/data/services/watch_party_service.dart#L869-L952) реалізовано коректний трирівневий механізм:
 * **Мережева затримка:**
   $$\text{CappedDelay} = \text{clamp}(T_{\text{client\_now\_utc}} - T_{\text{message\_timestamp}}, 0, 5000\text{ ms})$$
 * **Коригована позиція хоста:** $\text{AdjustedHostPosition} = \text{HostPosition} + \text{CappedDelay}$
@@ -134,7 +134,7 @@ sequenceDiagram
   - $> 15000\text{ ms}$: Примусовий `hardSeek` на точну позицію хоста.
 
 ### 3.2. Проблема спотворення часу сервером
-У [`hub.go:readPump`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L195):
+У [`hub.go:readPump`](../../backend/internal/transport/ws/hub.go#L195):
 ```go
 event.Timestamp = time.Now()
 ```
@@ -142,8 +142,8 @@ event.Timestamp = time.Now()
 * **Виправлення:** Зберігати оригінальний `client_timestamp` хоста всередині payload або додати окреме поле `ServerTimestamp` без перезапису вихідного.
 
 ### 3.3. Проблема дублювання Heartbeat у Flutter
-- У [`watch_party_service.dart:662`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L662) запускається `_heartbeatTimer` із періодом 2 секунди, який викликає `syncPosition()`.
-- У [`watch_party_overlay.dart:54`](file:///e:/Github/oxide_film/lib/presentation/widgets/watch_party_overlay.dart#L54) у плеєрі **додатково** запускається ще один `_syncTimer` із періодом 2 секунди, який також викликає `widget.service.syncPosition()`.
+- У [`watch_party_service.dart:662`](../../frontend/lib/data/services/watch_party_service.dart#L662) запускається `_heartbeatTimer` із періодом 2 секунди, який викликає `syncPosition()`.
+- У [`watch_party_overlay.dart:54`](../../frontend/lib/presentation/widgets/watch_party_overlay.dart#L54) у плеєрі **додатково** запускається ще один `_syncTimer` із періодом 2 секунди, який також викликає `widget.service.syncPosition()`.
 * **Наслідок:** Під час активного перегляду хост спамить сервер подвоєною кількістю повідомлень синхронізації (по 1 повідомленню щосекунди замість 1 разу на 2 секунди).
 
 ---
@@ -151,7 +151,7 @@ event.Timestamp = time.Now()
 ## 4. Аудит взаємодії з Redis та розсилки Pub/Sub
 
 ### 4.1. Дефект втрати подій `USER_JOINED` та `USER_LEFT`
-У [`server/internal/transport/ws/hub.go`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L81-L112):
+У [`backend/internal/transport/ws/hub.go`](../../backend/internal/transport/ws/hub.go#L81-L112):
 ```go
 case client := <-h.register:
     // ... збереження клієнта в h.rooms ...
@@ -169,13 +169,13 @@ case client := <-h.register:
 * **Наслідок:** Події відправляються **тільки** в Redis-канал `room:<roomCode>:events`. Оскільки підписників на Redis Pub/Sub немає, події зникають, а підключені WebSocket-клієнти ніколи не отримують нотифікації про вхід/вихід користувачів.
 
 ### 4.2. Мертвий код Pub/Sub та збереження стану
-1. Метод [`SubscribeWatchPartyEvents`](file:///e:/Github/oxide_film/server/internal/repository/redis/redis.go#L96) визначений у репозиторії, але **ніколи не викликається** в жодному місці сервера. Для масштабування на кілька екземплярів інстанс сервера зобов'язаний слухати Redis Pub/Sub та направляти повідомлення у свій локальний пул `h.broadcast`.
-2. Методи [`SetWatchPartyState`](file:///e:/Github/oxide_film/server/internal/repository/redis/redis.go#L62) та [`GetWatchPartyState`](file:///e:/Github/oxide_film/server/internal/repository/redis/redis.go#L72) повністю відсутні в ланцюжку виконання:
+1. Метод [`SubscribeWatchPartyEvents`](../../backend/internal/repository/redis/redis.go#L96) визначений у репозиторії, але **ніколи не викликається** в жодному місці сервера. Для масштабування на кілька екземплярів інстанс сервера зобов'язаний слухати Redis Pub/Sub та направляти повідомлення у свій локальний пул `h.broadcast`.
+2. Методи [`SetWatchPartyState`](../../backend/internal/repository/redis/redis.go#L62) та [`GetWatchPartyState`](../../backend/internal/repository/redis/redis.go#L72) повністю відсутні в ланцюжку виконання:
    - При надсиланні хостом подій `PLAY`, `PAUSE`, `SEEK`, `SYNC` стан у Redis не оновлюється.
    - Новий учасник при підключенні не отримує поточного стану кімнати з Redis, а змушений очікувати наступного повідомлення від хоста. Якщо хост тимчасово офлайн, сесія для нового користувача блокується.
 
 ### 4.3. Критичний Race Condition у Hub
-У [`hub.go:113-128`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L113-L128):
+У [`hub.go:113-128`](../../backend/internal/transport/ws/hub.go#L113-L128):
 ```go
 case event := <-h.broadcast:
     h.mu.RLock() // <--- Блокування на читання
@@ -200,7 +200,7 @@ case event := <-h.broadcast:
 ## 5. Міграція клієнта: Заміна PocketBase SSE / WebRTC на WebSocket
 
 ### 5.1. Поточний стан реалізації клієнта
-У Flutter [`watch_party_service.dart`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart) реалізовано:
+У Flutter [`watch_party_service.dart`](../../frontend/lib/data/services/watch_party_service.dart) реалізовано:
 1. `_PocketBaseBackend` (працює через PocketBase SDK таблиці `watch_party_rooms` та `watch_party_messages` через Server-Sent Events).
 2. `_PeerDartBackend` (пряме P2P WebRTC DataChannel з'єднання через публічний або локальний STUN/Peer-сервер).
 3. Підключення до Go WebSocket Hub **відсутнє**.
@@ -263,14 +263,14 @@ class _WebSocketBackend implements WatchPartyBackend {
 ## 6. Docker, мережева топологія та конфігурація
 
 ### 6.1. docker-compose.yml та ліміти ресурсів
-У [`server/docker-compose.yml`](file:///e:/Github/oxide_film/server/docker-compose.yml):
+У [`backend/docker-compose.yml`](../../backend/docker-compose.yml):
 - Сервіс `app` транслює порт `8089:8080`.
 - Обмеження пам'яті: `limits.memory: 128M` для сервера, `64M` для Redis.
 - Політика Redis: `--maxmemory 64mb --maxmemory-policy allkeys-lru`.
 - **Аналіз надійності:** Для WebSocket з'єднань розмір буферів Gorilla WebSocket становить `1024` байти для читання і запису на клієнта, плюс канал `chan []byte` розміром `256` елементів. При 100 активних кімнатах (по 4 користувачі) навантаження на пам'ять не перевищить 20-30 МБ, тому встановлені ліміти є адекватними.
 
 ### 6.2. Безпека ендпоінта WebSocket
-У [`server/internal/transport/http/router.go:46`](file:///e:/Github/oxide_film/server/internal/transport/http/router.go#L46):
+У [`backend/internal/transport/http/router.go:46`](../../backend/internal/transport/http/router.go#L46):
 ```go
 r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
 ```
@@ -281,7 +281,7 @@ r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
 ## 7. Покроковий план виправлень (Actionable Remediation Plan)
 
 ### Крок 1: Уніфікація контрактів на стороні Go та Flutter (Пріоритет: КРИТИЧНИЙ)
-1. У Go [`domain.WatchPartyEvent`](file:///e:/Github/oxide_film/server/internal/domain/party.go) змінити або розширити JSON-теги для підтримки як `camelCase`, так і `snake_case`:
+1. У Go [`domain.WatchPartyEvent`](../../backend/internal/domain/party.go) змінити або розширити JSON-теги для підтримки як `camelCase`, так і `snake_case`:
    ```go
    type WatchPartyEvent struct {
        Action     string      `json:"action"`
@@ -292,7 +292,7 @@ r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
        Timestamp  time.Time   `json:"timestamp"`
    }
    ```
-2. У Flutter [`WatchPartyMessage.fromJson`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart) забезпечити регістронезалежний парсинг дії та підтримку обох нотацій:
+2. У Flutter [`WatchPartyMessage.fromJson`](../../frontend/lib/data/services/watch_party_service.dart) забезпечити регістронезалежний парсинг дії та підтримку обох нотацій:
    ```dart
    final rawAction = (json['action'] ?? json['type'] ?? '').toString().toLowerCase();
    // Мапінг 'user_joined' та 'userjoined' -> WatchPartyMessageType.userJoined
@@ -301,7 +301,7 @@ r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
    ```
 
 ### Крок 2: Виправлення дефектів у Go WebSocket Hub (Пріоритет: КРИТИЧНИЙ)
-1. Усунути Race Condition у [`hub.go`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L114-L127): замінити `h.mu.RLock()` на повне блокування `h.mu.Lock()` під час відправки з можливістю видалення з карти, або відокремити очищення відключених клієнтів у `unregister`.
+1. Усунути Race Condition у [`hub.go`](../../backend/internal/transport/ws/hub.go#L114-L127): замінити `h.mu.RLock()` на повне блокування `h.mu.Lock()` під час відправки з можливістю видалення з карти, або відокремити очищення відключених клієнтів у `unregister`.
 2. У кейсах `register` та `unregister` додати виклик трансляції у локальний пул:
    ```go
    h.broadcast <- event
@@ -312,7 +312,7 @@ r.Get("/api/v1/ws/watch-party", hub.HandleWebSocket)
 1. Додати значення `websocket` до enum `WatchPartyBackendType`.
 2. Реалізувати клас `_WebSocketBackend`, підключений до ендпоінта `/api/v1/ws/watch-party`.
 3. Забезпечити фільтрацію власних повідомлень за `senderId` (Echo Cancellation).
-4. Усунути дублюючий `_syncTimer` у [`watch_party_overlay.dart`](file:///e:/Github/oxide_film/lib/presentation/widgets/watch_party_overlay.dart#L54).
+4. Усунути дублюючий `_syncTimer` у [`watch_party_overlay.dart`](../../frontend/lib/presentation/widgets/watch_party_overlay.dart#L54).
 
 ### Крок 4: Збереження стану сесії в Redis (Пріоритет: СЕРЕДНІЙ)
 1. При отриманні подій `SYNC`, `PLAY`, `PAUSE`, `SEEK` зберігати актуальний стан через `r.redisClient.SetWatchPartyState()`.

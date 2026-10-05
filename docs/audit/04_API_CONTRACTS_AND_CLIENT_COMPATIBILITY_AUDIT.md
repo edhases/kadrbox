@@ -9,8 +9,8 @@
 > - **⚠️ BREAKING CHANGE після цього аудиту:** запроваджено єдиний response-envelope
 >   (`transport/http/api_envelope.go`). Списки тепер повертаються як
 >   `{"data":[...],"meta":{...}}` замість голого масиву. Клієнт **має** бути оновлено
->   синхронно — див. `docs/REMEDIATION_PLAN.md`.
-> - **Див. також:** `docs/REMEDIATION_PLAN.md` (Wave 2, агенти G та H).
+>   синхронно — див. `MIGRATION_REPORT.md`.
+> - **Див. також:** `MIGRATION_REPORT.md` (Wave 2, агенти G та H).
 >
 > Історичні знахідки нижче **не переписані**.
 # Технічний аудит API контрактів та клієнт-серверної сумісності (Go Backend vs Flutter Client)
@@ -19,14 +19,14 @@
 **Роль:** Аудитор 4 — Валідатор API контрактів та клієнт-серверної інтеграції  
 **Об'єкти аудиту:**
 - **Go-бекенд (Серверна частина):**
-  - Маршрутизатор та Middleware: [`server/internal/transport/http/router.go`](file:///e:/Github/oxide_film/server/internal/transport/http/router.go), [`server/internal/transport/http/middleware/auth.go`](file:///e:/Github/oxide_film/server/internal/transport/http/middleware/auth.go)
-  - Хендлери: [`server/internal/transport/http/auth_handler.go`](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go), [`server/internal/transport/http/content_handler.go`](file:///e:/Github/oxide_film/server/internal/transport/http/content_handler.go), [`server/internal/transport/http/sync_handler.go`](file:///e:/Github/oxide_film/server/internal/transport/http/sync_handler.go)
-  - Моделі домену: [`server/internal/domain/user.go`](file:///e:/Github/oxide_film/server/internal/domain/user.go), [`server/internal/domain/content.go`](file:///e:/Github/oxide_film/server/internal/domain/content.go), [`server/internal/domain/party.go`](file:///e:/Github/oxide_film/server/internal/domain/party.go)
-  - WebSocket Hub: [`server/internal/transport/ws/hub.go`](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go)
+  - Маршрутизатор та Middleware: [`backend/internal/transport/http/router.go`](../../backend/internal/transport/http/router.go), [`backend/internal/transport/http/middleware/auth.go`](../../backend/internal/transport/http/middleware/auth.go)
+  - Хендлери: [`backend/internal/transport/http/auth_handler.go`](../../backend/internal/transport/http/auth_handler.go), [`backend/internal/transport/http/content_handler.go`](../../backend/internal/transport/http/content_handler.go), [`backend/internal/transport/http/sync_handler.go`](../../backend/internal/transport/http/sync_handler.go)
+  - Моделі домену: [`backend/internal/domain/user.go`](../../backend/internal/domain/user.go), [`backend/internal/domain/content.go`](../../backend/internal/domain/content.go), [`backend/internal/domain/party.go`](../../backend/internal/domain/party.go)
+  - WebSocket Hub: [`backend/internal/transport/ws/hub.go`](../../backend/internal/transport/ws/hub.go)
 - **Flutter-клієнт:**
-  - Мережевий транспорт: [`lib/core/network/api_client.dart`](file:///e:/Github/oxide_film/lib/core/network/api_client.dart)
-  - Сервіси автентифікації та синхронізації: [`lib/data/services/auth_service.dart`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart), [`lib/data/services/pocketbase_service.dart`](file:///e:/Github/oxide_film/lib/data/services/pocketbase_service.dart), [`lib/data/services/history_service.dart`](file:///e:/Github/oxide_film/lib/data/services/history_service.dart), [`lib/data/services/favorites_service.dart`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart), [`lib/data/services/watch_party_service.dart`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart)
-  - Репозиторії та моделі: [`lib/data/repositories/unified_content_repository_impl.dart`](file:///e:/Github/oxide_film/lib/data/repositories/unified_content_repository_impl.dart), [`lib/domain/entities/media_item.dart`](file:///e:/Github/oxide_film/lib/domain/entities/media_item.dart), [`lib/domain/entities/media_details.dart`](file:///e:/Github/oxide_film/lib/domain/entities/media_details.dart), [`lib/domain/entities/stream_source.dart`](file:///e:/Github/oxide_film/lib/domain/entities/stream_source.dart)
+  - Мережевий транспорт: [`lib/core/network/api_client.dart`](../../frontend/lib/core/network/api_client.dart)
+  - Сервіси автентифікації та синхронізації: [`lib/data/services/auth_service.dart`](../../frontend/lib/data/services/auth_service.dart), [`lib/data/services/pocketbase_service.dart`](../../frontend/lib/data/services/pocketbase_service.dart), [`lib/data/services/history_service.dart`](../../frontend/lib/data/services/history_service.dart), [`lib/data/services/favorites_service.dart`](../../frontend/lib/data/services/favorites_service.dart), [`lib/data/services/watch_party_service.dart`](../../frontend/lib/data/services/watch_party_service.dart)
+  - Репозиторії та моделі: [`lib/data/repositories/unified_content_repository_impl.dart`](../../frontend/lib/data/repositories/unified_content_repository_impl.dart), [`lib/domain/entities/media_item.dart`](../../frontend/lib/domain/entities/media_item.dart), [`lib/domain/entities/media_details.dart`](../../frontend/lib/domain/entities/media_details.dart), [`lib/domain/entities/stream_source.dart`](../../frontend/lib/domain/entities/stream_source.dart)
 
 ---
 
@@ -39,11 +39,11 @@
    - Go-сервер реалізує **11 REST-ендпоінтів** та **1 WebSocket-шлюз**.
    - Повністю покриває базові сценарії: Реєстрація, Логін, Рефреш токена, Отримання поточного юзера, Пошук контенту, Деталі медіа, Отримання відеопотоків, Читання/запис історії перегляду, "Продовжити перегляд", Список обраного та перемикання обраного.
 2. **Критичні архітектурні невідповідності (Blockers):**
-   - **CORS Misconfiguration:** У [`router.go`](file:///e:/Github/oxide_film/server/internal/transport/http/router.go#L29-L36) виставлено `AllowedOrigins: ["*"]` одночасно з `AllowCredentials: true`. Згідно з W3C/WHATWG CORS специфікацією, браузери блокують будь-які запити з `credentials: include` при wildcard origin `*`. Це зламає роботу Flutter Web та клієнтів за межами Desktop.
+   - **CORS Misconfiguration:** У [`router.go`](../../backend/internal/transport/http/router.go#L29-L36) виставлено `AllowedOrigins: ["*"]` одночасно з `AllowCredentials: true`. Згідно з W3C/WHATWG CORS специфікацією, браузери блокують будь-які запити з `credentials: include` при wildcard origin `*`. Це зламає роботу Flutter Web та клієнтів за межами Desktop.
    - **Типізація у `ApiClient.dart`:** Метод `ApiClient.getJson()` жорстко кастує відповідь у `Map<String, dynamic>`. Ендпоінти Go `/api/v1/content/search`, `/api/v1/sync/history`, `/api/v1/sync/continue-watching`, `/api/v1/sync/favorites` повертають **JSON Array (`List<dynamic>`)**, що викличе миттєвий `TypeError` у Dart.
-   - **Конфлікт `null` у JSON при збереженні історії:** У Go struct [`WatchHistory`](file:///e:/Github/oxide_film/server/internal/domain/user.go#L45-L46) поля `Season` та `Episode` оголошені як `int` (а не `*int`). Якщо клієнт Flutter передає `{"season": null, "episode": null}` для фільмів, парсер Go поверне `400 Bad Request` (`cannot unmarshal null into Go struct field WatchHistory.season of type int`).
+   - **Конфлікт `null` у JSON при збереженні історії:** У Go struct [`WatchHistory`](../../backend/internal/domain/user.go#L45-L46) поля `Season` та `Episode` оголошені як `int` (а не `*int`). Якщо клієнт Flutter передає `{"season": null, "episode": null}` для фільмів, парсер Go поверне `400 Bad Request` (`cannot unmarshal null into Go struct field WatchHistory.season of type int`).
    - **Неузгодженість ключів користувача:** У клієнтському коді PocketBase ім'я користувача передається/зчитується як `name`, тоді як Go очікує і повертає `username`.
-   - **Content-Type помилок:** Використання `http.Error(w, ...)` у Go встановлює заголовок `Content-Type: text/plain; charset=utf-8`, незважаючи на передачу JSON-рядка `{"error":"..."}`. Крім того, хендлер [`SaveProgress`](file:///e:/Github/oxide_film/server/internal/transport/http/sync_handler.go#L69-L71) взагалі не встановлює `Content-Type: application/json`.
+   - **Content-Type помилок:** Використання `http.Error(w, ...)` у Go встановлює заголовок `Content-Type: text/plain; charset=utf-8`, незважаючи на передачу JSON-рядка `{"error":"..."}`. Крім того, хендлер [`SaveProgress`](../../backend/internal/transport/http/sync_handler.go#L69-L71) взагалі не встановлює `Content-Type: application/json`.
 3. **Статус клієнтської міграції:**
    - Клієнт Flutter наразі **на 100% прив'язаний до PocketBase SDK** (`pocketbase: ^0.19.0`). Жоден виклик у `AuthService`, `HistoryService`, `FavoritesService`, `WatchPartyService` ще не переведений на Go API.
 
@@ -126,10 +126,10 @@ classDiagram
 ```
 
 #### Виявлені колізії:
-1. **Ключ `username` vs `name`:** У Flutter [`auth_service.dart`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart#L46) очікується `record.data['name']`. Go API віддає `{"user": {"username": "..."}}`.
+1. **Ключ `username` vs `name`:** У Flutter [`auth_service.dart`](../../frontend/lib/data/services/auth_service.dart#L46) очікується `record.data['name']`. Go API віддає `{"user": {"username": "..."}}`.
 2. **Формат аватара:** У PocketBase аватар зберігався як назва файлу і генерувався URL виду `${pb.baseUrl}/api/files/users/${id}/${avatar}`. У Go це повноцінний `avatar_url` (TEXT).
 3. **Відсутні функції в Go бекенді:**
-   У клієнті [`AuthService`](file:///e:/Github/oxide_film/lib/data/services/auth_service.dart) реалізовано:
+   У клієнті [`AuthService`](../../frontend/lib/data/services/auth_service.dart) реалізовано:
    - `resetPassword(email)` -> в Go відсутній endpoint
    - `requestVerification(email)` -> в Go відсутній endpoint
    - `updateProfile({displayName, bio})` -> в Go відсутній `PUT /api/v1/auth/me`
@@ -148,15 +148,15 @@ classDiagram
 ```json
 [
   {
-    "id": "https://uakino.me/filmy/12345-movie.html",
-    "provider_id": "uakino",
+    "id": "https://catalog.example/films/12345",
+    "provider_id": "catalog",
     "title": "Назва фільму",
     "original_title": "Original Movie",
-    "poster_url": "https://uakino.me/posters/12345.jpg",
+    "poster_url": "https://cdn.example/posters/12345.jpg",
     "year": 2024,
     "type": "movie",
     "rating": 8.4,
-    "url": "https://uakino.me/filmy/12345-movie.html"
+    "url": "https://catalog.example/films/12345"
   }
 ]
 ```
@@ -164,16 +164,16 @@ classDiagram
   - В Flutter `MediaItem.type` є enum `ContentType { movie, series, cartoon, anime, dorama, unknown }`. Go передає string (`"movie"`, `"series"`). Необхідна фабрика `ContentType.values.firstWhere((e) => e.name == json['type'])`.
 
 #### 2. Деталі (`GET /api/v1/content/details?provider={id}&url={url}`)
-- **Запит:** Очікує два обов'язкових параметри: `provider` (наприклад, `uakino`) та `url` (повний або відносний URL сторінки).
+- **Запит:** Очікує два обов'язкових параметри: `source` (наприклад, `catalog`) та `url` (повний або відносний URL сторінки).
 - **Колізія з клієнтом:**
-  - Клієнтський інтерфейс [`UnifiedContentRepository.getDetails(String id)`](file:///e:/Github/oxide_film/lib/data/repositories/unified_content_repository_impl.dart#L60) приймає єдиний рядок виду `"uakino:filmy/12345-movie"`.
+  - Клієнтський інтерфейс [`UnifiedContentRepository.getDetails(String id)`](../../frontend/lib/data/repositories/unified_content_repository_impl.dart#L60) приймає єдиний рядок виду `"catalog:films/12345"`.
   - Клієнтський репозиторій розбиває його на `providerId` та `itemId`. Для виклику Go API клієнт повинен передавати `itemId` або зібраний повний URL у параметрі `url`.
 
 #### 3. Стріми (`GET /api/v1/content/streams?provider={id}&url={url}&season={s}&episode={e}&voice={v}`)
-- **Відповідь Go:** `200 OK` із структурою [`ContentStreamsResponse`](file:///e:/Github/oxide_film/server/internal/domain/content.go#L62-L66):
+- **Відповідь Go:** `200 OK` із структурою [`ContentStreamsResponse`](../../backend/internal/domain/content.go#L62-L66):
 ```json
 {
-  "provider_id": "uakino",
+  "provider_id": "catalog",
   "streams": [
     {
       "quality": "1080p",
@@ -182,7 +182,7 @@ classDiagram
       "requires_proxy": false,
       "headers": {
         "User-Agent": "Mozilla/5.0 ...",
-        "Referer": "https://uakino.me/"
+        "Referer": "https://catalog.example/"
       }
     }
   ],
@@ -196,19 +196,19 @@ classDiagram
 }
 ```
 - **Сумісність із відеоплеєром Flutter (`media_kit`):**
-  - **Ідеально:** Поле `headers` у Go struct [`StreamSource`](file:///e:/Github/oxide_film/server/internal/domain/content.go#L9) містить `Referer` та `User-Agent`. Це критично необхідно для `media_kit`, який підтримує передачу HTTP-заголовків через `Media(stream.url, httpHeaders: stream.headers)`.
-  - **Розбіжність субтитрів:** У Go `subtitles` винесені в корінь об'єкта `ContentStreamsResponse`. У Dart моделі [`StreamSource`](file:///e:/Github/oxide_film/lib/domain/entities/stream_source.dart#L67) субтитри вкладені в кожен окремий потік. При десеріалізації на клієнті потрібно змапити кореневі субтитри до кожного потоку.
+  - **Ідеально:** Поле `headers` у Go struct [`StreamSource`](../../backend/internal/domain/content.go#L9) містить `Referer` та `User-Agent`. Це критично необхідно для `media_kit`, який підтримує передачу HTTP-заголовків через `Media(stream.url, httpHeaders: stream.headers)`.
+  - **Розбіжність субтитрів:** У Go `subtitles` винесені в корінь об'єкта `ContentStreamsResponse`. У Dart моделі [`StreamSource`](../../frontend/lib/domain/entities/stream_source.dart#L67) субтитри вкладені в кожен окремий потік. При десеріалізації на клієнті потрібно змапити кореневі субтитри до кожного потоку.
 
 ---
 
 ### 3.3. Модуль синхронізації (`/api/v1/sync/*`)
 
 #### 1. Збереження прогресу (`POST /api/v1/sync/history`)
-- **Go Handler:** Приймає JSON [`domain.WatchHistory`](file:///e:/Github/oxide_film/server/internal/domain/user.go#L36-L53).
+- **Go Handler:** Приймає JSON [`domain.WatchHistory`](../../backend/internal/domain/user.go#L36-L53).
 ```json
 {
   "media_id": "12345",
-  "provider_id": "uakino",
+  "provider_id": "catalog",
   "title": "Дюна: Частина друга",
   "poster_url": "https://...",
   "year": 2024,
@@ -229,7 +229,7 @@ classDiagram
 > Season  int `json:"season"`
 > Episode int `json:"episode"`
 > ```
-> У Flutter [`HistoryDao`](file:///e:/Github/oxide_film/lib/data/database/dao/history_dao.dart) для фільмів `season` та `episode` мають значення `null`.
+> У Flutter [`HistoryDao`](../../frontend/lib/data/database/dao/history_dao.dart) для фільмів `season` та `episode` мають значення `null`.
 > Якщо Flutter-клієнт відправить JSON:
 > ```json
 > {"season": null, "episode": null}
@@ -240,11 +240,11 @@ classDiagram
 
 #### 2. Отримання історії (`GET /api/v1/sync/history?limit=50&offset=0`)
 - **Відповідь Go:** `200 OK` із масивом `[]domain.WatchHistory`.
-- **Сумісність:** Назви полів (`position_ms`, `duration_ms`, `watched_at`) на 100% співпадають з полями таблиці Drift [`WatchHistory`](file:///e:/Github/oxide_film/lib/data/database/app_database.dart#L96-L108).
+- **Сумісність:** Назви полів (`position_ms`, `duration_ms`, `watched_at`) на 100% співпадають з полями таблиці Drift [`WatchHistory`](../../frontend/lib/data/database/app_database.dart#L96-L108).
 
 #### 3. Обране (`GET /api/v1/sync/favorites` та `POST /api/v1/sync/favorites/toggle`)
 - **Відповідь Go на Toggle:** `200 OK`, `{"is_favorite": true}` або `{"is_favorite": false}`.
-- **Сумісність:** Повністю відповідає очікуванням UI у [`FavoritesService.toggle()`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart#L68-L87), який повертає булеве значення стану.
+- **Сумісність:** Повністю відповідає очікуванням UI у [`FavoritesService.toggle()`](../../frontend/lib/data/services/favorites_service.dart#L68-L87), який повертає булеве значення стану.
 
 ---
 
@@ -267,7 +267,7 @@ classDiagram
   "timestamp": "2026-09-28T16:35:00Z"
 }
 ```
-- **Порівняння з Flutter [`WatchPartyMessage`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L34-L73):**
+- **Порівняння з Flutter [`WatchPartyMessage`](../../frontend/lib/data/services/watch_party_service.dart#L34-L73):**
   - У клієнті поле дії сериалізується як `'action'` (з підтримкою `'type'` для сумісності).
   - Імена екшенів: `sync`, `play`, `pause`, `seek`, `speed`, `chat`, `userJoined`, `userLeft`.
   - У Go: `Action: "USER_JOINED"`, `Action: "USER_LEFT"`, `SYNC`, `PLAY`, `PAUSE`.
@@ -278,7 +278,7 @@ classDiagram
 ## 4. Аналіз транспортного рівня, CORS та кодів помилок
 
 ### 4.1. Аналіз CORS конфігурації
-У [`server/internal/transport/http/router.go`](file:///e:/Github/oxide_film/server/internal/transport/http/router.go#L29-L36):
+У [`backend/internal/transport/http/router.go`](../../backend/internal/transport/http/router.go#L29-L36):
 ```go
 r.Use(cors.Handler(cors.Options{
     AllowedOrigins:   []string{"*"},
@@ -321,7 +321,7 @@ func respondError(w http.ResponseWriter, code int, message string) {
 
 ## 5. Аудит клієнтського мережевого стеку Flutter
 
-### 5.1. Обмеження [`ApiClient.dart`](file:///e:/Github/oxide_film/lib/core/network/api_client.dart)
+### 5.1. Обмеження [`ApiClient.dart`](../../frontend/lib/core/network/api_client.dart)
 Файл `lib/core/network/api_client.dart` містить методи:
 ```dart
 Future<Map<String, dynamic>> getJson(String url, {...}) async {
@@ -383,7 +383,7 @@ sequenceDiagram
 1. Створити `TokenStorage` на базі `flutter_secure_storage` для безпечного зберігання `accessToken` та `refreshToken`.
 2. Додати `AuthInterceptor` до `Dio` у `ApiClient`.
 3. Додати підтримку запитів, що повертають `List<dynamic>`.
-4. Оновити `AppConfig.backendUrl` на адресу нового Go-сервера (наприклад, `http://localhost:8080` для розробки або `https://api.oxide.skystreamua.space`).
+4. Оновити `AppConfig.backendUrl` на адресу нового Go-сервера (наприклад, `http://localhost:8080` для розробки або `https://api.example.com`).
 
 ### Фаза 2: Підміна сервісу автентифікації (`AuthService`)
 Замінити прямі виклики PocketBase на виклики Go API через `ApiClient`:
@@ -393,7 +393,7 @@ sequenceDiagram
 - `currentUser` / `profile` -> читання з розпарсеного `domain.User` (`GET /api/v1/auth/me`).
 
 ### Фаза 3: Підміна хмарної синхронізації в `HistoryService`
-У файлі [`lib/data/services/history_service.dart`](file:///e:/Github/oxide_film/lib/data/services/history_service.dart):
+У файлі [`lib/data/services/history_service.dart`](../../frontend/lib/data/services/history_service.dart):
 1. **Метод `_pullFromCloud()`:**
    - Замість `_pocketBase.pb.collection('watch_history').getList(...)` викликати `GET /api/v1/sync/history?limit=500`.
    - Розпарсити `List<domain.WatchHistory>` та зберегти у локальну Drift БД через `_dao.saveProgress()`.
@@ -402,7 +402,7 @@ sequenceDiagram
    - Забезпечити передачу `season: item.season ?? 0` та `episode: item.episode ?? 0` (захист від `null`).
 
 ### Фаза 4: Підміна хмарної синхронізації в `FavoritesService`
-У файлі [`lib/data/services/favorites_service.dart`](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart):
+У файлі [`lib/data/services/favorites_service.dart`](../../frontend/lib/data/services/favorites_service.dart):
 1. **Метод `_pullFromCloud()`:**
    - Замість PocketBase `collection('favorites').getFullList(...)` викликати `GET /api/v1/sync/favorites`.
    - Злити записи з локальною Drift БД через `_dao.add()`.
@@ -410,7 +410,7 @@ sequenceDiagram
    - Викликати `POST /api/v1/sync/favorites/toggle` з JSON об'єктом тайтлу.
 
 ### Фаза 5: Інтеграція Watch Party через WebSocket
-У файлі [`lib/data/services/watch_party_service.dart`](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart):
+У файлі [`lib/data/services/watch_party_service.dart`](../../frontend/lib/data/services/watch_party_service.dart):
 1. Створити `_GoWsBackend implements WatchPartyBackend`.
 2. Використовувати `web_socket_channel` для підключення до `ws://<backend>/api/v1/ws/watch-party?room={code}&user_id={id}&user_name={name}`.
 3. Мапити події між Dart `WatchPartyMessage` та Go `domain.WatchPartyEvent` (враховуючи регістр `action`).

@@ -1,9 +1,9 @@
 > ## Статус документа
 >
-> - **Status:** superseded by `docs/REMEDIATION_PLAN.md`
+> - **Status:** superseded by `MIGRATION_REPORT.md`
 > - **Verified against:** `3ab45ef`
 > - **Актуальність:** цей звіт — один із трьох незалежних аудитів, що сформували
->   `docs/REMEDIATION_PLAN.md` (Wave 0-3). Усі знахідки звідси були перенесені в план
+>   `MIGRATION_REPORT.md` (Wave 0-3). Усі знахідки звідси були перенесені в план
 >   і розподілені між власниками файлів. Актуальний стан виконання — у плані, а не тут.
 > - **Вибірково перевірено на `3ab45ef`:** OAuth `state` + PKCE S256 із серверним
 >   одноразовим споживанням (`transport/http/oauth_state.go`), атомарний `GETDEL`
@@ -13,20 +13,20 @@
 > - **Не переписано:** історичні знахідки залишено як є.
 >
 > ⚠️ Не читайте цей звіт як актуальний опис коду — він описує стан до Wave 0-3.
-# Звіт незалежного аудиту якості коду та безпеки: Oxide Film (Go Backend & Flutter Client)
+# Звіт незалежного аудиту якості коду та безпеки: Kadrbox (Go Backend & Flutter Client)
 
 **Дата аудиту:** 28 вересня 2026 року  
 **Статус:** Виявлено критичні вразливості та архітектурні дефекти  
 **Аудитор:** Principal Security & Reliability Auditor  
 **Об'єкти перевірки:**
-- Go Backend (`server/`)
+- Go Backend (`backend/`)
 - Flutter Client (`lib/`)
 
 ---
 
 ## 1. Загальна оцінка надійності та безпеки (Executive Summary)
 
-Проєкт **Oxide Film** є амбітною мультиплатформенною системою онлайн-кінотеатру, що поєднує високоефективний бекенд на мові Go (архітектура Chi + PostgreSQL 16 + Redis) та повнофункціональний клієнт на Flutter з підтримкою Desktop/Mobile, локальної бази даних Drift, механізму синхронізації та Watch Party (спільного перегляду через WebSocket та P2P WebRTC).
+Проєкт **Kadrbox** є амбітною мультиплатформенною системою онлайн-кінотеатру, що поєднує високоефективний бекенд на мові Go (архітектура Chi + PostgreSQL 16 + Redis) та повнофункціональний клієнт на Flutter з підтримкою Desktop/Mobile, локальної бази даних Drift, механізму синхронізації та Watch Party (спільного перегляду через WebSocket та P2P WebRTC).
 
 Кодова база демонструє високу інженерну культуру: присутні юніт-тести, типізація, розділення на шари DAO/репозиторіїв та застосування патернів Offline-First. Проте ретельний аналіз виявив **низку критичних дефектів безпеки, конкурентності та сумісності контрактів**, які можуть призвести до повної компрометації облікових записів користувачів, взаємного блокування (deadlock) бекенду при навантаженні, витоків горутин та втрати користувацьких даних синхронізації:
 
@@ -42,7 +42,7 @@
    - Виявлено race condition при записі в Gorilla WebSocket під час зупинки сервера (`WriteMessage` викликається одночасно з `writePump`).
 
 3. **Критичні невідповідності контрактів (API & Cloud Sync Mismatches):**
-   - Клієнт `OxideServerService` надсилає дані збереження історії та обраного в `camelCase` (`mediaId`, `providerId`, `posterUrl`, `positionMs`), тоді як Go-сервер очікує `snake_case` (`media_id`, `provider_id`). Через це десеріалізація в Go обнуляє ці поля — прогрес перегляду та обране записуються в базу з порожніми ключами!
+   - Клієнт `KadrboxServerService` надсилає дані збереження історії та обраного в `camelCase` (`mediaId`, `providerId`, `posterUrl`, `positionMs`), тоді як Go-сервер очікує `snake_case` (`media_id`, `provider_id`). Через це десеріалізація в Go обнуляє ці поля — прогрес перегляду та обране записуються в базу з порожніми ключами!
    - У `FavoritesService` видалення тайтла з обраного локально взагалі не викликає сервер, якщо `isFavorite == false`. Через це видалені фільми повторно завантажуються з сервера при кожному запуску застосунку ("Zombie Favorites").
    - У Flutter відсутній перехоплювач HTTP 401 для ротації JWT access-токена: через 15 хвилин після запуску всі запити синхронізації починають падати з помилкою Unauthorized.
 
@@ -52,23 +52,23 @@
 
 | ID | Компонент | Рівень | Назва проблеми | CWE / Категорія |
 |---|---|---|---|---|
-| **BUG-GO-01** | `server/auth` | **CRITICAL** | Google OAuth ID Token Impersonation (Відсутність валідації `aud` і `email_verified`) | CWE-287 / CWE-347 |
-| **BUG-GO-02** | `server/ws` | **CRITICAL** | WebSocket Hub Deadlock через буферизацію каналу `h.broadcast` | CWE-833 (Deadlock) |
-| **BUG-GO-03** | `server/ws` | **CRITICAL** | Goroutine Leak клієнтських горутин `readPump` при GracefulStop | CWE-400 (Resource Leak) |
-| **BUG-GO-04** | `server/ws` | **HIGH** | Race Condition: одночасний запис у WebSocket з двох горутин у `GracefulStop` | CWE-362 (Race Condition) |
-| **BUG-GO-05** | `server/router` | **HIGH** | Небезпечний динамічний CORS з підтримкою `AllowCredentials` | CWE-942 (Permissive CORS) |
-| **BUG-GO-06** | `server/router` | **HIGH** | Directory Listing у роздачі завантажених файлів `/uploads/` | CWE-548 (Info Disclosure) |
-| **BUG-GO-07** | `server/auth` | **HIGH** | Відсутність перевірки Magic Bytes / MIME-типу в `UploadAvatar` | CWE-434 (Unrestricted Upload) |
-| **BUG-GO-08** | `server/docker` | **HIGH** | Відсутність Docker Volume для збереження завантажених аватарів | Data Loss |
-| **BUG-GO-09** | `server/auth` | **HIGH** | Відсутність інвалідації Redis сесій при зміні/скиданні пароля та видаленні акаунту | CWE-613 (Session Expiration) |
-| **BUG-GO-10** | `server/ws` | **HIGH** | Відсутність підписки на Redis Pub/Sub у хабі Watch Party (Dead Code) | Scalability / Architecture |
-| **BUG-GO-11** | `server/config` | **MEDIUM** | Жорстко закодований резервний JWT секрет у конфігурації | CWE-798 (Hardcoded Secret) |
-| **BUG-GO-12** | `server/provider`| **MEDIUM** | Скасування контексту першого клієнта перериває запити інших у `SingleFlightSearch` | Concurrency / Availability |
-| **BUG-GO-13** | `server/http` | **MEDIUM** | Некоректні коди помилок (маскування збоїв БД під 409) та Content-Type `text/plain` | API Design |
-| **BUG-GO-14** | `server/db` | **MEDIUM** | Небезпечне багаторазове виконання міграцій без блокування та таблиці обліку | Database Integrity |
-| **BUG-GO-15** | `server/email` | **MEDIUM** | Синхронне блокування HTTP-запитів реєстрації зовнішнім Resend API | Latency / DoS |
-| **BUG-GO-16** | `server/http` | **MEDIUM** | Мертвий код CacheRepository у `ContentHandler` (відсутність кешування) | Performance |
-| **BUG-GO-18** | `server/postgres`| **LOW** | Неможливість скинути `bio` та `avatar_url` на порожнє значення у `UpdateProfile` | Logic Flaw |
+| **BUG-GO-01** | `backend/auth` | **CRITICAL** | Google OAuth ID Token Impersonation (Відсутність валідації `aud` і `email_verified`) | CWE-287 / CWE-347 |
+| **BUG-GO-02** | `backend/ws` | **CRITICAL** | WebSocket Hub Deadlock через буферизацію каналу `h.broadcast` | CWE-833 (Deadlock) |
+| **BUG-GO-03** | `backend/ws` | **CRITICAL** | Goroutine Leak клієнтських горутин `readPump` при GracefulStop | CWE-400 (Resource Leak) |
+| **BUG-GO-04** | `backend/ws` | **HIGH** | Race Condition: одночасний запис у WebSocket з двох горутин у `GracefulStop` | CWE-362 (Race Condition) |
+| **BUG-GO-05** | `backend/router` | **HIGH** | Небезпечний динамічний CORS з підтримкою `AllowCredentials` | CWE-942 (Permissive CORS) |
+| **BUG-GO-06** | `backend/router` | **HIGH** | Directory Listing у роздачі завантажених файлів `/uploads/` | CWE-548 (Info Disclosure) |
+| **BUG-GO-07** | `backend/auth` | **HIGH** | Відсутність перевірки Magic Bytes / MIME-типу в `UploadAvatar` | CWE-434 (Unrestricted Upload) |
+| **BUG-GO-08** | `backend/docker` | **HIGH** | Відсутність Docker Volume для збереження завантажених аватарів | Data Loss |
+| **BUG-GO-09** | `backend/auth` | **HIGH** | Відсутність інвалідації Redis сесій при зміні/скиданні пароля та видаленні акаунту | CWE-613 (Session Expiration) |
+| **BUG-GO-10** | `backend/ws` | **HIGH** | Відсутність підписки на Redis Pub/Sub у хабі Watch Party (Dead Code) | Scalability / Architecture |
+| **BUG-GO-11** | `backend/config` | **MEDIUM** | Жорстко закодований резервний JWT секрет у конфігурації | CWE-798 (Hardcoded Secret) |
+| **BUG-GO-12** | `backend/provider`| **MEDIUM** | Скасування контексту першого клієнта перериває запити інших у `SingleFlightSearch` | Concurrency / Availability |
+| **BUG-GO-13** | `backend/http` | **MEDIUM** | Некоректні коди помилок (маскування збоїв БД під 409) та Content-Type `text/plain` | API Design |
+| **BUG-GO-14** | `backend/db` | **MEDIUM** | Небезпечне багаторазове виконання міграцій без блокування та таблиці обліку | Database Integrity |
+| **BUG-GO-15** | `backend/email` | **MEDIUM** | Синхронне блокування HTTP-запитів реєстрації зовнішнім Resend API | Latency / DoS |
+| **BUG-GO-16** | `backend/http` | **MEDIUM** | Мертвий код CacheRepository у `ContentHandler` (відсутність кешування) | Performance |
+| **BUG-GO-18** | `backend/postgres`| **LOW** | Неможливість скинути `bio` та `avatar_url` на порожнє значення у `UpdateProfile` | Logic Flaw |
 | **BUG-FL-01** | `lib/services` | **CRITICAL** | Контрактний розрив регістру полів (camelCase vs snake_case) у Cloud Sync | Contract Mismatch |
 | **BUG-FL-02** | `lib/services` | **CRITICAL** | Помилка синхронізації обраного: неможливо видалити фільм із сервера ("Zombie Favorites") | Data Integrity |
 | **BUG-FL-03** | `lib/network` | **HIGH** | Відсутність автоматичного перехоплення 401 (Refresh Token Interceptor) у `ApiClient` | Authentication Flow |
@@ -88,13 +88,13 @@
 
 ## 3. Детальний опис знайдених дефектів
 
-### Блок 1: Go Backend (`server/`)
+### Блок 1: Go Backend (`backend/`)
 
 #### BUG-GO-01 [CRITICAL]: Google OAuth ID Token Impersonation (CWE-287 / CWE-347)
-- **Файл та рядки:** [auth_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L498-L533)
+- **Файл та рядки:** [auth_handler.go](../../backend/internal/transport/http/auth_handler.go#L498-L533)
 - **У чому полягає проблема:**
   У функції `GoogleAuth` токен клієнта валідується через відправку запиту на `https://oauth2.googleapis.com/tokeninfo?id_token=...`. Отримана відповідь містить email користувача. Проте обробник:
-  1. **Взагалі не перевіряє поле `aud`** (Audience / Client ID). Google підтверджує валідність токена для *будь-якого* застосунку в екосистемі Google. Зловмисник може створити власний Google OAuth проект, отримати токен на свій клієнт зі своєю поштою або чужою Gmail-поштою, надіслати його в Oxide Server і успішно увійти!
+  1. **Взагалі не перевіряє поле `aud`** (Audience / Client ID). Google підтверджує валідність токена для *будь-якого* застосунку в екосистемі Google. Зловмисник може створити власний Google OAuth проект, отримати токен на свій клієнт зі своєю поштою або чужою Gmail-поштою, надіслати його в Kadrbox Server і успішно увійти!
   2. **Не перевіряє статус підтвердження пошти (`email_verified`)**. Якщо в Google обліковому записі пошта не верифікована, вона все одно вважається валідною.
   3. Не використовує таймаут або `r.Context()` при виклику `http.Get(tokenURL)`, що може заблокувати горутину.
 - **Вектор атаки:**
@@ -131,7 +131,7 @@ if info.EmailVerified != "true" {
 ---
 
 #### BUG-GO-02 [CRITICAL]: WebSocket Hub Permanent Self-Deadlock на каналі `h.broadcast`
-- **Файл та рядки:** [hub.go](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L54-L138)
+- **Файл та рядки:** [hub.go](../../backend/internal/transport/ws/hub.go#L54-L138)
 - **У чому полягає проблема:**
   У методі `Run()` горутина хабу одноосібно вичитує події з каналів `h.register`, `h.unregister`, `h.broadcast` та `h.stopChan`:
   ```go
@@ -148,8 +148,8 @@ if info.EmailVerified != "true" {
   Безпосередньо викликати внутрішній метод розсилки `h.broadcastEvent(event)` або використовувати неблокуючу відправку `select { case h.broadcast <- event: default: }`, а найкраще — прибрати рекурсивний запис у власний канал:
 
 ```diff
---- a/server/internal/transport/ws/hub.go
-+++ b/server/internal/transport/ws/hub.go
+--- a/backend/internal/transport/ws/hub.go
++++ b/backend/internal/transport/ws/hub.go
 @@ -87,7 +87,7 @@ func (h *Hub) Run() {
  			if h.redisClient != nil {
  				_ = h.redisClient.PublishWatchPartyEvent(context.Background(), client.roomCode, event)
@@ -169,7 +169,7 @@ if info.EmailVerified != "true" {
 ---
 
 #### BUG-GO-03 [CRITICAL]: Goroutine Leak клієнтських горутин `readPump` при GracefulStop
-- **Файл та рядки:** [hub.go](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L57-L70), [hub.go](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L180-L184)
+- **Файл та рядки:** [hub.go](../../backend/internal/transport/ws/hub.go#L57-L70), [hub.go](../../backend/internal/transport/ws/hub.go#L180-L184)
 - **У чому полягає проблема:**
   При надходженні сигналу завершення роботи `GracefulStop()` закриває `stopChan`. У `h.Run()` спрацьовує:
   ```go
@@ -202,7 +202,7 @@ defer func() {
 ---
 
 #### BUG-GO-04 [HIGH]: Race Condition та паніка при одночасному записі у WebSocket у `GracefulStop`
-- **Файл та рядки:** [hub.go](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L61-L64)
+- **Файл та рядки:** [hub.go](../../backend/internal/transport/ws/hub.go#L61-L64)
 - **У чому полягає проблема:**
   У `case <-h.stopChan:` горутина `h.Run()` викликає:
   ```go
@@ -223,7 +223,7 @@ close(client.send) // writePump побачить закриття і корек�
 ---
 
 #### BUG-GO-05 [HIGH]: Небезпечний динамічний CORS з підтримкою `AllowCredentials` (CWE-942)
-- **Файл та рядки:** [router.go](file:///e:/Github/oxide_film/server/internal/transport/http/router.go#L29-L38)
+- **Файл та рядки:** [router.go](../../backend/internal/transport/http/router.go#L29-L38)
 - **У чому полягає проблема:**
   ```go
   r.Use(cors.Handler(cors.Options{
@@ -234,13 +234,13 @@ close(client.send) // writePump побачить закриття і корек�
       // ...
   }))
   ```
-  Повернення `true` для будь-якого Origin при ввімкненому `AllowCredentials: true` є грубим порушенням моделі безпеки Same-Origin Policy. Будь-який сторонній сайт (наприклад, зловмисний `evil-site.com`), відкритий користувачем у браузері, може виконувати фонові автентифіковані AJAX-запити до Oxide Server і читати історію, профіль або змінювати налаштування.
+  Повернення `true` для будь-якого Origin при ввімкненому `AllowCredentials: true` є грубим порушенням моделі безпеки Same-Origin Policy. Будь-який сторонній сайт (наприклад, зловмисний `evil-site.com`), відкритий користувачем у браузері, може виконувати фонові автентифіковані AJAX-запити до Kadrbox Server і читати історію, профіль або змінювати налаштування.
 - **Спосіб виправлення:**
   Обмежити перелік дозволених origins білим списком (наприклад, домен застосунку, localhost для розробки):
 
 ```go
 AllowedOrigins: []string{
-    "https://film.oxideteam.pp.ua",
+    "https://app.example.com",
     "http://localhost:*",
     "tauri://localhost",
 },
@@ -249,7 +249,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-06 [HIGH]: Directory Listing у роздачі завантажених файлів `/uploads/`
-- **Файл та рядки:** [router.go](file:///e:/Github/oxide_film/server/internal/transport/http/router.go#L51)
+- **Файл та рядки:** [router.go](../../backend/internal/transport/http/router.go#L51)
 - **У чому полягає проблема:**
   ```go
   r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./data/uploads"))))
@@ -261,7 +261,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-07 [HIGH]: Відсутність перевірки Magic Bytes / MIME-типу в `UploadAvatar`
-- **Файл та рядки:** [auth_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L458-L462)
+- **Файл та рядки:** [auth_handler.go](../../backend/internal/transport/http/auth_handler.go#L458-L462)
 - **У чому полягає проблема:**
   Перевірка розширення виконується виключно за рядком імені файлу клієнта:
   ```go
@@ -285,7 +285,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-08 [HIGH]: Відсутність Docker Volume для збереження завантажених аватарів
-- **Файл та рядки:** [docker-compose.yml](file:///e:/Github/oxide_film/server/docker-compose.yml#L40-L71)
+- **Файл та рядки:** [docker-compose.yml](../../backend/docker-compose.yml#L40-L71)
 - **У чому полягає проблема:**
   Аватари користувачів зберігаються на диск у директорію `./data/uploads/avatars` (всередині контейнера сервісу `app`). Проте у `docker-compose.yml` у секції `volumes` змонтовано лише `pgdata` для PostgreSQL! Для контейнера `app` немає volume mount. При будь-якому перестворенні (`docker-compose down && docker-compose up`) або оновленні образу всі аватари користувачів видаляються назавжди.
 - **Спосіб виправлення:**
@@ -302,7 +302,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-09 [HIGH]: Відсутність інвалідації Redis сесій при зміні/скиданні пароля
-- **Файл та рядки:** [auth_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L313-L356), [auth_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L402-L435)
+- **Файл та рядки:** [auth_handler.go](../../backend/internal/transport/http/auth_handler.go#L313-L356), [auth_handler.go](../../backend/internal/transport/http/auth_handler.go#L402-L435)
 - **У чому полягає проблема:**
   В API відсутній ендпоінт `POST /auth/logout`. Крім того, коли користувач змінює пароль (`ChangePassword`) або скидає його (`ResetPassword`), старі довготривалі `refresh_token` у Redis не інвалідуються. Зловмисник, який вкрав або перехопив сесію, може продовжувати оновлювати access-токени протягом 30 днів навіть після того, як власник змінив свій пароль.
 - **Спосіб виправлення:**
@@ -311,7 +311,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-10 [HIGH]: Відсутність підписки на Redis Pub/Sub у хабі Watch Party
-- **Файл та рядки:** [hub.go](file:///e:/Github/oxide_film/server/internal/transport/ws/hub.go#L88), [redis.go](file:///e:/Github/oxide_film/server/internal/repository/redis/redis.go#L96)
+- **Файл та рядки:** [hub.go](../../backend/internal/transport/ws/hub.go#L88), [redis.go](../../backend/internal/repository/redis/redis.go#L96)
 - **У чому полягає проблема:**
   Метод `PublishWatchPartyEvent` викликається при кожній події у WebSocket, але метод `SubscribeWatchPartyEvents` ніколи не викликається в коді хабу (він присутній лише в тестах). Якщо сервер масштабується на кілька інстансів або контейнерів, повідомлення з Redis Pub/Sub не слухаються жодним екземпляром сервера. Крім того, стан кімнати (`SetWatchPartyState`) ніколи не зберігається в Redis при play/pause/seek.
 - **Спосіб виправлення:**
@@ -320,10 +320,10 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-11 [MEDIUM]: Жорстко закодований дефолтний JWT секрет
-- **Файл та рядки:** [config.go](file:///e:/Github/oxide_film/server/config/config.go#L47)
+- **Файл та рядки:** [config.go](../../backend/config/config.go#L47)
 - **У чому полягає проблема:**
   ```go
-  JWTSecret: getEnv("JWT_SECRET", "super-secret-jwt-key-oxide-film-2026")
+  JWTSecret: getEnv("JWT_SECRET", "super-secret-jwt-key-2026")
   ```
   Якщо адміністратор забуде задати змінну `JWT_SECRET` у бойовому середовищі, сервер мовчки стартує з відомим публічним секретом, що дозволяє підробляти токени довільних користувачів та отримувати права адміністратора.
 - **Спосіб виправлення:**
@@ -332,7 +332,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-12 [MEDIUM]: Singleflight скасування контексту першого клієнта
-- **Файл та рядки:** [registry.go](file:///e:/Github/oxide_film/server/internal/provider/registry.go#L71-L81)
+- **Файл та рядки:** [registry.go](../../backend/internal/provider/registry.go#L71-L81)
 - **У чому полягає проблема:**
   ```go
   func (r *Registry) SingleFlightSearch(ctx context.Context, query string) ([]domain.MediaItem, error) {
@@ -348,7 +348,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-13 [MEDIUM]: Некоректні коди помилок та неконсистентний Content-Type
-- **Файл та рядки:** [auth_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L91-L94), [content_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/content_handler.go#L27)
+- **Файл та рядки:** [auth_handler.go](../../backend/internal/transport/http/auth_handler.go#L91-L94), [content_handler.go](../../backend/internal/transport/http/content_handler.go#L27)
 - **У чому полягає проблема:**
   1. У `Register` будь-яка помилка створення користувача (включно з відмовою підключення до PostgreSQL або таймаутом) повертає статус `409 Conflict: "email already registered"`. Допоміжна функція `isDuplicateKeyError` у репозиторії написана, але не використовується.
   2. У `content_handler.go` помилки повертаються через `http.Error()`, що примусово виставляє `Content-Type: text/plain; charset=utf-8`, тоді як клієнт очікує єдиний JSON-формат `application/json`.
@@ -358,7 +358,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-14 [MEDIUM]: Небезпечний механізм міграцій БД без блокування та обліку
-- **Файл та рядки:** [db.go](file:///e:/Github/oxide_film/server/internal/repository/postgres/db.go#L43-L65)
+- **Файл та рядки:** [db.go](../../backend/internal/repository/postgres/db.go#L43-L65)
 - **У чому полягає проблема:**
   Функція `runMigrations` на кожному старті сервера виконує всі SQL-файли без перевірки таблиці `schema_migrations` та без блокування на рівні БД (`pg_advisory_lock`). При одночасному запуску кількох інстансів або додаванні неідемпотентних інструкцій виникне помилка запуску. Також відсутнє сортування файлів міграцій (`sort.Slice`), що може призвести до запуску міграцій у непередбачуваному порядку на різних ОС.
 - **Спосіб виправлення:**
@@ -367,7 +367,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-15 [MEDIUM]: Синхронне блокування HTTP-запитів реєстрації зовнішнім Resend API
-- **Файл та рядки:** [auth_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/auth_handler.go#L101), [email.go](file:///e:/Github/oxide_film/server/internal/email/email.go#L133-L144)
+- **Файл та рядки:** [auth_handler.go](../../backend/internal/transport/http/auth_handler.go#L101), [email.go](../../backend/internal/email/email.go#L133-L144)
 - **У чому полягає проблема:**
   Виклик `SendVerificationEmail` виконується синхронно у тілі запиту `Register`. Якщо Resend API має затримки, клієнт чекає до 10 секунд на завершення реєстрації. Також у запиті `http.NewRequest` не передається контекст.
 - **Спосіб виправлення:**
@@ -376,7 +376,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-16 [MEDIUM]: Мертвий код CacheRepository у `ContentHandler`
-- **Файл та рядки:** [content_handler.go](file:///e:/Github/oxide_film/server/internal/transport/http/content_handler.go#L12-L22)
+- **Файл та рядки:** [content_handler.go](../../backend/internal/transport/http/content_handler.go#L12-L22)
 - **У чому полягає проблема:**
   Поле `cacheRepo` передається в конструктор `ContentHandler`, але жодного разу не використовується в методах `Search`, `GetDetails` або `GetStreams`. Весь функціонал кешування метаданих фільмів у Postgres є "мертвим" кодом.
 - **Спосіб виправлення:**
@@ -385,7 +385,7 @@ AllowedOrigins: []string{
 ---
 
 #### BUG-GO-18 [LOW]: Неможливість скинути `bio` та `avatar_url` на порожнє значення
-- **Файл та рядки:** [user_repo.go](file:///e:/Github/oxide_film/server/internal/repository/postgres/user_repo.go#L106-L115)
+- **Файл та рядки:** [user_repo.go](../../backend/internal/repository/postgres/user_repo.go#L106-L115)
 - **У чому полягає проблема:**
   У запиті `UpdateProfile` стоїть умова:
   `bio = CASE WHEN $3 <> '' THEN $3 ELSE bio END`.
@@ -398,7 +398,7 @@ AllowedOrigins: []string{
 ### Блок 2: Flutter Client (`lib/`)
 
 #### BUG-FL-01 [CRITICAL]: Контрактний розрив регістру полів (camelCase vs snake_case) у Cloud Sync
-- **Файл та рядки:** [oxide_server_service.dart](file:///e:/Github/oxide_film/lib/data/services/oxide_server_service.dart#L379-L395), [oxide_server_service.dart](file:///e:/Github/oxide_film/lib/data/services/oxide_server_service.dart#L452-L462)
+- **Файл та рядки:** [kadrbox_server_service.dart](../../frontend/lib/data/services/kadrbox_server_service.dart#L379-L395), [kadrbox_server_service.dart](../../frontend/lib/data/services/kadrbox_server_service.dart#L452-L462)
 - **У чому полягає проблема:**
   У `saveHistoryProgress` клієнт відправляє на бекенд JSON з ключами в **camelCase**:
   ```dart
@@ -427,7 +427,7 @@ AllowedOrigins: []string{
   2. Перший же доданий тайтл в обране створює запис з порожнім `media_id`. Спроба додати будь-який інший фільм розцінюється як той самий запис через унікальний індекс `(user_id, media_id, provider_id)`.
   3. Хмарна синхронізація повністю непрацездатна.
 - **Спосіб виправлення:**
-  Привести JSON-ключі у `OxideServerService` до єдиного формату `snake_case`:
+  Привести JSON-ключі у `KadrboxServerService` до єдиного формату `snake_case`:
 
 ```dart
 final payload = {
@@ -451,7 +451,7 @@ final payload = {
 ---
 
 #### BUG-FL-02 [CRITICAL]: Неможливість видалити фільм із сервера ("Zombie Favorites")
-- **Файл та рядки:** [favorites_service.dart](file:///e:/Github/oxide_film/lib/data/services/favorites_service.dart#L329-L334)
+- **Файл та рядки:** [favorites_service.dart](../../frontend/lib/data/services/favorites_service.dart#L329-L334)
 - **У чому полягає проблема:**
   Погляньмо на метод синхронізації одиночного елемента `_syncSingleItemToCloud`:
   ```dart
@@ -493,18 +493,18 @@ if (_server.isAuthenticated) {
 ---
 
 #### BUG-FL-03 [HIGH]: Відсутність перехоплювача 401 (Refresh Token Interceptor) у `ApiClient`
-- **Файл та рядки:** [api_client.dart](file:///e:/Github/oxide_film/lib/core/network/api_client.dart#L30-L48), [main.dart](file:///e:/Github/oxide_film/lib/main.dart#L79-L98)
+- **Файл та рядки:** [api_client.dart](../../frontend/lib/core/network/api_client.dart#L30-L48), [main.dart](../../frontend/lib/main.dart#L79-L98)
 - **У чому полягає проблема:**
   JWT Access Token на Go-сервері живе рівно 15 хвилин. `ApiClient` налаштований з `RetryInterceptor` для мережевих збоїв, але **не має жодного інтерцептора для обробки HTTP 401 Unauthorized**.
   Метод `refreshAuth()` викликається **лише один раз при холодному старті додатку** в `main.dart`.
   Якщо користувач дивиться серію тривалістю 45 хвилин, через 15 хвилин його токен прострочується. Наступні періодичні спроби зберегти прогрес перегляду (`saveHistoryProgress`) або додати в обране завершуються помилкою 401 і тихим відхиленням запиту.
 - **Спосіб виправлення:**
-  Додати `QueuedInterceptor` до Dio екземпляра в `ApiClient`, який при отриманні 401 ставить запити на паузу, викликає `OxideServerService.refreshAuth()`, оновлює заголовок `Authorization: Bearer <new_token>` та повторює оригінальний запит.
+  Додати `QueuedInterceptor` до Dio екземпляра в `ApiClient`, який при отриманні 401 ставить запити на паузу, викликає `KadrboxServerService.refreshAuth()`, оновлює заголовок `Authorization: Bearer <new_token>` та повторює оригінальний запит.
 
 ---
 
 #### BUG-FL-04 [HIGH]: Втрата тексту помилки бекенду у `ApiClient._handleDioError`
-- **Файл та рядки:** [api_client.dart](file:///e:/Github/oxide_film/lib/core/network/api_client.dart#L233-L241)
+- **Файл та рядки:** [api_client.dart](../../frontend/lib/core/network/api_client.dart#L233-L241)
 - **У чому полягає проблема:**
   ```dart
   case DioExceptionType.badResponse:
@@ -537,9 +537,9 @@ case DioExceptionType.badResponse:
 ---
 
 #### BUG-FL-05 [HIGH]: Ігнорування розриву WebSocket у `WatchPartyService`
-- **Файл та рядки:** [watch_party_service.dart](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L382-L388)
+- **Файл та рядки:** [watch_party_service.dart](../../frontend/lib/data/services/watch_party_service.dart#L382-L388)
 - **У чому полягає проблема:**
-  У `_OxideServerBackend.connect` слухач потоку WebSocket:
+  У `_KadrboxServerBackend.connect` слухач потоку WebSocket:
   ```dart
   onError: (err) {
     Logger.e('WS error: $err', tag: _tag);
@@ -562,7 +562,7 @@ onDone: () {
 ---
 
 #### BUG-FL-06 [HIGH]: Конфлікт блокування екрана (Wakelock) між `DownloadService` та `PlayerController`
-- **Файл та рядки:** [download_service.dart](file:///e:/Github/oxide_film/lib/data/services/download_service.dart#L121-L127), [player_controller.dart](file:///e:/Github/oxide_film/lib/presentation/pages/player/player_controller.dart#L538)
+- **Файл та рядки:** [download_service.dart](../../frontend/lib/data/services/download_service.dart#L121-L127), [player_controller.dart](../../frontend/lib/presentation/pages/player/player_controller.dart#L538)
 - **У чому полягає проблема:**
   У `DownloadService`:
   ```dart
@@ -587,7 +587,7 @@ onDone: () {
 ---
 
 #### BUG-FL-07 [MEDIUM]: Відсутність методу `dispose()` у `WatchPartyService`
-- **Файл та рядки:** [watch_party_service.dart](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L740-L755), [watch_party_service.dart](file:///e:/Github/oxide_film/lib/data/services/watch_party_service.dart#L1270-L1275)
+- **Файл та рядки:** [watch_party_service.dart](../../frontend/lib/data/services/watch_party_service.dart#L740-L755), [watch_party_service.dart](../../frontend/lib/data/services/watch_party_service.dart#L1270-L1275)
 - **У чому полягає проблема:**
   Клас `WatchPartyService extends ChangeNotifier` запускає періодичний таймер `_heartbeatTimer = Timer.periodic(const Duration(seconds: 2), ...)` та відкриває з'єднання бекендів. При цьому в класі взагалі **відсутнє перевизначення методу `dispose()`**. Якщо сервіс перестворюється (наприклад, у тестах або при зміні конфігурації), таймер продовжує тікати у фоні, утримуючи весь сервіс у пам'яті.
 - **Спосіб виправлення:**
@@ -605,7 +605,7 @@ void dispose() {
 ---
 
 #### BUG-FL-08 [MEDIUM]: Небезпечний виклик `_setupControllerCallbacks` після асинхронного `open()` у `PlayerPage`
-- **Файл та рядки:** [player_page.dart](file:///e:/Github/oxide_film/lib/presentation/pages/player/player_page.dart#L80-L111)
+- **Файл та рядки:** [player_page.dart](../../frontend/lib/presentation/pages/player/player_page.dart#L80-L111)
 - **У чому полягає проблема:**
   У `_PlayerPageState._initPlayer`:
   ```dart
@@ -621,7 +621,7 @@ void dispose() {
 ---
 
 #### BUG-FL-09 [MEDIUM]: Помилка видалення лісенера у `VideoPlayerService.close()`
-- **Файл та рядки:** [video_player_service.dart](file:///e:/Github/oxide_film/lib/data/services/video_player_service.dart#L70), [video_player_service.dart](file:///e:/Github/oxide_film/lib/data/services/video_player_service.dart#L133)
+- **Файл та рядки:** [video_player_service.dart](../../frontend/lib/data/services/video_player_service.dart#L70), [video_player_service.dart](../../frontend/lib/data/services/video_player_service.dart#L133)
 - **У чому полягає проблема:**
   У методі `open()` додається лісенер:
   `_controller!.addListener(_safeNotifyListeners);`
@@ -634,7 +634,7 @@ void dispose() {
 ---
 
 #### BUG-FL-10 [MEDIUM]: `HistoryDao.saveProgress` ігнорує переданий `watchedAt` при нових записах
-- **Файл та рядки:** [history_dao.dart](file:///e:/Github/oxide_film/lib/data/database/dao/history_dao.dart#L134)
+- **Файл та рядки:** [history_dao.dart](../../frontend/lib/data/database/dao/history_dao.dart#L134)
 - **У чому полягає проблема:**
   У параметрах методу є `DateTime? watchedAt` для коректної синхронізації з хмари. При оновленні запису використовується `Value(watchedAt ?? DateTime.now())`. Проте в гілці створення нового запису (`insert`) жорстко прописано:
   `watchedAt: Value(DateTime.now())`.
@@ -646,7 +646,7 @@ void dispose() {
 ---
 
 #### BUG-FL-11 [MEDIUM]: `EpisodeUpdateService` втрачає стан відомих епізодів при перезапуску
-- **Файл та рядки:** [episode_update_service.dart](file:///e:/Github/oxide_film/lib/data/services/episode_update_service.dart#L52), [episode_update_service.dart](file:///e:/Github/oxide_film/lib/data/services/episode_update_service.dart#L123-L152)
+- **Файл та рядки:** [episode_update_service.dart](../../frontend/lib/data/services/episode_update_service.dart#L52), [episode_update_service.dart](../../frontend/lib/data/services/episode_update_service.dart#L123-L152)
 - **У чому полягає проблема:**
   Колекція `final Map<String, int> _lastKnownEpisodes = {};` існує виключно в оперативній пам'яті. При кожному закритті та повторному відкритті застосунку вона порожня. Під час першої перевірки `lastKnown == null`, сервіс лише заповнює карту і не виявляє нові епізоди. Таким чином, якщо додаток не тримати відкритим цілодобово, користувач ніколи не отримає сповіщення про вихід нових серій.
 - **Спосіб виправлення:**
@@ -655,7 +655,7 @@ void dispose() {
 ---
 
 #### BUG-FL-12 [LOW]: Невивільнений `ValueNotifier<Duration>` у `PlayerController.dispose()`
-- **Файл та рядки:** [player_controller.dart](file:///e:/Github/oxide_film/lib/presentation/pages/player/player_controller.dart#L207), [player_controller.dart](file:///e:/Github/oxide_film/lib/presentation/pages/player/player_controller.dart#L1114-L1161)
+- **Файл та рядки:** [player_controller.dart](../../frontend/lib/presentation/pages/player/player_controller.dart#L207), [player_controller.dart](../../frontend/lib/presentation/pages/player/player_controller.dart#L1114-L1161)
 - **У чому полягає проблема:**
   Поле `final ValueNotifier<Duration> positionNotifier = ValueNotifier(Duration.zero);` ніколи не закривається в `PlayerController.dispose()`.
 - **Спосіб виправлення:**
@@ -664,7 +664,7 @@ void dispose() {
 ---
 
 #### BUG-FL-13 [LOW]: Витоки `TextEditingController` у модальних діалогах
-- **Файл та рядки:** [login_page.dart](file:///e:/Github/oxide_film/lib/presentation/pages/auth/login_page.dart#L489), [profile_page.dart](file:///e:/Github/oxide_film/lib/presentation/pages/auth/profile_page.dart#L179-L181)
+- **Файл та рядки:** [login_page.dart](../../frontend/lib/presentation/pages/auth/login_page.dart#L489), [profile_page.dart](../../frontend/lib/presentation/pages/auth/profile_page.dart#L179-L181)
 - **У чому полягає проблема:**
   У методах `_showForgotPasswordDialog` та `_showChangePasswordDialog` локально створюються контролери текстових полів (`TextEditingController()`), які передаються у віджети діалогів і ніколи не утилізуються через `.dispose()`.
 - **Спосіб виправлення:**
@@ -673,7 +673,7 @@ void dispose() {
 ---
 
 #### BUG-FL-14 [LOW]: Некеровані фонові запити при скасуванні підписки на `_streamProviders`
-- **Файл та рядки:** [unified_content_repository_impl.dart](file:///e:/Github/oxide_film/lib/data/repositories/unified_content_repository_impl.dart#L394-L437)
+- **Файл та рядки:** [unified_content_repository_impl.dart](../../frontend/lib/data/repositories/unified_content_repository_impl.dart#L394-L437)
 - **У чому полягає проблема:**
   Створений `StreamController<List<MediaItem>>` не має обробника `onCancel`. Якщо користувач скасовує пошук або вводить новий запит, попередні паралельні мережеві запити до парсерів продовжують виконуватися і навантажувати мережу та процесор.
 - **Спосіб виправлення:**
@@ -695,7 +695,7 @@ void dispose() {
    - Усунути конкурентний запис у сокет при `GracefulStop`.
 
 3. **Фаза 3: Клієнт-серверні контракти та Синхронізація (Високий пріоритет):**
-   - Перевести всі ключі в `OxideServerService` (`saveHistoryProgress`, `toggleFavorite`) у `snake_case`.
+   - Перевести всі ключі в `KadrboxServerService` (`saveHistoryProgress`, `toggleFavorite`) у `snake_case`.
    - Виправити логіку `_syncSingleItemToCloud` у `FavoritesService`, щоб видалення фільму викликало сервер.
    - Додати в `ApiClient` обробку HTTP 401 з автоматичною ротацією токенів через `refreshAuth()`.
    - Зберегти вихідне повідомлення помилки бекенду в `_handleDioError`.
@@ -712,4 +712,4 @@ void dispose() {
 
 Проведений незалежний аудит виявив **3 критичні вразливості та архітектурні дефекти на Go-сервері** та **2 критичні баги у Flutter-клієнті**, разом із 8 проблемами високого рівня важливості. 
 
-Більшість виявлених дефектів мають точкову природу та піддаються швидкому виправленню без кардинального переписування архітектури проєкту. Виконання наданих у цьому звіті рекомендацій дозволить забезпечити повну безпеку автентифікації користувачів, гарантувати стабільність WebSocket хабу під навантаженням та відновити повноцінну хмарну синхронізацію між усіма пристроями платформи Oxide Film.
+Більшість виявлених дефектів мають точкову природу та піддаються швидкому виправленню без кардинального переписування архітектури проєкту. Виконання наданих у цьому звіті рекомендацій дозволить забезпечити повну безпеку автентифікації користувачів, гарантувати стабільність WebSocket хабу під навантаженням та відновити повноцінну хмарну синхронізацію між усіма пристроями платформи Kadrbox.
