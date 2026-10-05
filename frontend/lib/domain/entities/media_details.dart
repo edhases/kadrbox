@@ -126,8 +126,8 @@ class MediaDetails extends Equatable {
 
 /// A dubbing studio ("1+1", "Postmodern") and the seasons it provides.
 ///
-/// Distinct from the CDN/player that actually serves the bytes ("HDVB",
-/// "Ashdi"): [id] is the studio identifier the backend uses to resolve
+/// Distinct from the CDN/player that actually serves the bytes (a host
+/// name): [id] is the studio identifier the backend uses to resolve
 /// playback, [name] is what the user reads.
 class Voiceover extends Equatable {
   final String id;

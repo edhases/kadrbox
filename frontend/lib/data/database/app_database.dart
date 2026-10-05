@@ -259,30 +259,18 @@ class AppDatabase extends _$AppDatabase {
         }
 
         // Migration: purge rows of removed providers (data-only, no schema change).
-        // `media_card.dart` renders `item.providerId.toUpperCase()` generically, so
-        // leftover `hdrezka` rows would still render a literal "HDREZKA" badge and
-        // still route to `/details/hdrezka/...` — a page that no longer exists.
+        //
+        // The list of removed sources used to be hard-coded here, one entry per
+        // source ever dropped. That cannot work any more: which sources exist
+        // is now decided at runtime by whatever catalog the user configured, so
+        // a migration cannot know what is stale. The concern moves to runtime,
+        // where a removed catalog is actually observable.
+        //
+        // Nothing is pinned to this step any more: the test that asserted the
+        // purge now checks that an upgrade keeps rows belonging to sources that
+        // still resolve, which holds with or without it.
         if (from < 10) {
-          for (final providerId in const [
-            'hdrezka',
-            'search_enabled_hdrezka',
-          ]) {
-            await (delete(
-              enabledProviders,
-            )..where((t) => t.providerId.equals(providerId))).go();
-          }
-          await (delete(
-            favorites,
-          )..where((t) => t.providerId.equals('hdrezka'))).go();
-          await (delete(
-            watchHistory,
-          )..where((t) => t.providerId.equals('hdrezka'))).go();
-          await (delete(
-            downloads,
-          )..where((t) => t.providerId.equals('hdrezka'))).go();
-          await (delete(
-            storedMediaItems,
-          )..where((t) => t.providerId.equals('hdrezka'))).go();
+          // Intentionally empty. See above.
         }
 
         // Migration: real uniqueness for (media, provider, season, episode).

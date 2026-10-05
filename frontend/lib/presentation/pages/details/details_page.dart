@@ -606,8 +606,8 @@ class _DetailsPageState extends State<DetailsPage> {
   Widget _buildStreamSelector() {
     // The backend's own season tree wins over anything derived from streams.
     // DLE streams carry a CDN/player name at best and no episode numbers at
-    // all, so grouping them by `voiceover` produced a list of "Ashdi",
-    // "Zenith", "HDVB" where the user expects "1+1", "Postmodern".
+    // all, so grouping them by `voiceover` produced a list of CDN names,
+    // where the user expects studio names such as "1+1" or "Postmodern".
     if (_voiceovers.isNotEmpty) {
       return _buildVoiceoverSelector();
     }
@@ -799,7 +799,7 @@ class _DetailsPageState extends State<DetailsPage> {
 
   /// Player names of the streams resolved for the current selection.
   ///
-  /// Shows the CDN ("HDVB") rather than the studio: the studio is already the
+  /// Shows the CDN rather than the studio: the studio is already the
   /// selector above, and the player is the only thing left that differs.
   List<Widget> _buildResolvedSourceTiles() {
     if (_streams.isEmpty) return const [];

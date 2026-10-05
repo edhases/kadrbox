@@ -293,7 +293,7 @@ class ServerBackedProvider extends ContentProvider {
   ///   documented values.
   /// * `sources` is empty and the segment reports no sources. A flat list
   ///   genuinely carries no source attribution, so the UI correctly shows no
-  ///   per-source chips instead of inventing a "bandera" source that the
+  ///   per-source chips instead of inventing a placeholder source that the
   ///   server never mentioned.
   ///
   /// Delete this once every deployed backend runs the envelope contract.
@@ -438,7 +438,7 @@ class ServerBackedProvider extends ContentProvider {
   Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async {
     final params = <String, dynamic>{'provider': id, 'page': page};
     if (type != null) params['type'] = type.name;
-    // A null body (Eneyida answers `200` with JSON `null`) is normalised to
+    // A null body (some upstreams answer `200` with JSON `null`) is normalised to
     // `[]` by ApiClient.getJsonList, so an empty catalogue stays an empty
     // catalogue and never a crash.
     final items = await _guarded('popular:$params', () async {
@@ -633,7 +633,7 @@ class ServerBackedProvider extends ContentProvider {
       type: _mapStreamType(url),
       language: language,
       // Deliberately NOT `voiceover ?? player`. A player is a CDN/balancer
-      // ("HDVB", "Ashdi"), a voiceover is a dubbing studio ("1+1"). Falling
+      // (a CDN name), a voiceover is a dubbing studio. Falling
       // back put CDN names in the voiceover dropdown, which is exactly the
       // confusion this separation removes. DLE streams carry no studio, so
       // their voiceover stays null and the selector labels them by player.

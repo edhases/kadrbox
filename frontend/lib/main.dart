@@ -160,7 +160,7 @@ void _syncProviderCatalog() {
 
 /// Resolve provider URLs in background
 ///
-/// This detects domain changes (e.g., uaflix.net -> uafix.net)
+/// This detects domain changes on the upstream side
 /// by following HTTP redirects and caching results.
 void _resolveProviderUrls() {
   try {

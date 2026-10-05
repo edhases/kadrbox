@@ -136,13 +136,14 @@ class SmartSearchService {
 
   /// The provider that can serve the server-side envelope.
   ///
-  /// Bandera is the one provider that fronts an aggregator, so it is the
-  /// only sensible target. Falling back to "any server-backed provider" would
-  /// reintroduce per-provider fan-out against scrapers, which is exactly the
-  /// ban surface we closed.
+  /// Resolved by capability, never by a hard-coded source id. A literal here
+  /// meant the search path silently stopped working the moment that source
+  /// disappeared from the registry, with only a log line to show for it -- and
+  /// it also tied the client to a name the app is no longer allowed to know.
   ServerBackedProvider? _resolveProvider() {
-    final bandera = _registry.getById('bandera');
-    if (bandera is ServerBackedProvider) return bandera;
+    for (final provider in _registry.enabled) {
+      if (provider is ServerBackedProvider) return provider;
+    }
     return null;
   }
 

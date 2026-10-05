@@ -19,7 +19,7 @@ import '../providers/server_backed_provider.dart';
 class ProviderCatalogService extends ChangeNotifier {
   static const _tag = 'ProviderCatalog';
   // Cache keys are versioned: the v1 snapshot may still contain providers that
-  // no longer exist locally (e.g. hdrezka), and [_applyCatalog] auto-registers a
+  // no longer exist locally, and [_applyCatalog] auto-registers a
   // working ServerBackedProvider for any unknown id. A stale snapshot would thus
   // resurrect a removed provider on every offline start — bypassing the backend
   // DISABLED_PROVIDERS kill-switch, since the snapshot carries its own

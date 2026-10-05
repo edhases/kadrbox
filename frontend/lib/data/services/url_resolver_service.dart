@@ -5,7 +5,7 @@ import '../../core/utils/logger.dart';
 
 /// Service for resolving provider URLs by following HTTP redirects
 ///
-/// Many Ukrainian streaming sites frequently change domains (e.g., uaflix.net -> uafix.net).
+/// Streaming upstreams frequently change domains, so old hostnames are remapped.
 /// This service automatically detects these changes by following HTTP redirects.
 class UrlResolverService {
   static const String _tag = 'UrlResolver';

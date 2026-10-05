@@ -4,7 +4,7 @@ import '../../../domain/entities/entities.dart';
 
 /// Статус окремого підджерела всередині сегмента.
 ///
-/// Comes from `meta.statuses` of the Bandera API and travels all the way to
+/// Comes from the upstream `meta.statuses` field and travels all the way to
 /// the UI, so a timed-out source is distinguishable from a source that
 /// legitimately returned nothing. Collapsing those two into "0 results"
 /// is exactly what made the old source chips useless.
@@ -69,7 +69,7 @@ class SearchSourceStatus extends Equatable {
   /// Whether the source answered but had nothing to offer.
   ///
   /// Derived rather than read off [status]: the status string originates from
-  /// Bandera's `meta.statuses` and is passed through by the backend without
+  /// the upstream `meta.statuses` and is passed through by the backend without
   /// validation, so it is not a reliable place to encode "zero hits". The
   /// count is. Treating `status: "ok", count: 0` as `ok` would put a
   /// selectable chip reading "0" in the filter bar.
@@ -246,7 +246,7 @@ class ScoredMediaItem extends Equatable {
   /// Distinct upstream sources this item is playable from.
   int get sourceCount => sources.length;
 
-  /// e.g. `uaflix + mikai` — used for the card badge.
+  /// e.g. `alpha + beta` - used for the card badge.
   String get sourceLabel => sources
       .map((s) => s.sourceKey)
       .where((k) => k.isNotEmpty)
