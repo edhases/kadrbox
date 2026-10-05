@@ -15,7 +15,6 @@ import (
 	"github.com/edhases/oxide-server/config"
 	"github.com/edhases/oxide-server/internal/email"
 	"github.com/edhases/oxide-server/internal/logging"
-	"github.com/edhases/oxide-server/internal/provider"
 	"github.com/edhases/oxide-server/internal/repository/postgres"
 	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
@@ -124,28 +123,20 @@ func run(ctx context.Context, cfg *config.Config) error {
 	userRepo := postgres.NewUserRepository(dbPool)
 	historyRepo := postgres.NewHistoryRepository(dbPool)
 	favoritesRepo := postgres.NewFavoritesRepository(dbPool)
-	cacheRepo := postgres.NewCacheRepository(dbPool)
 
-	// 4. Фоновий воркер очищення кешу (кожні 6 годин) + індексу сесій (щогодини)
+	// 4. Фоновий воркер очищення індексу сесій (щогодини)
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("[PANIC RECOVER] Cache worker panic: %v", rec)
+				log.Printf("[PANIC RECOVER] Session worker panic: %v", rec)
 			}
 		}()
-		cacheTicker := time.NewTicker(cacheSweepInterval)
-		defer cacheTicker.Stop()
 		sessionTicker := time.NewTicker(time.Hour)
 		defer sessionTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-cacheTicker.C:
-				count, err := cacheRepo.DeleteExpired(ctx)
-				if err == nil && count > 0 {
-					log.Printf("[Cache Worker] Purged %d expired records from PostgreSQL", count)
-				}
 			case <-sessionTicker.C:
 				// Кожна ротація refresh-токена лишає один мертвий член у
 				// sessions:<userID>, бо TTL індексу збігається з TTL токена.
@@ -156,20 +147,6 @@ func run(ctx context.Context, cfg *config.Config) error {
 		}
 	}()
 
-	// 5. Провайдери та емуляція браузерного TLS
-	// SSRF allow-list має бути встановлений ДО створення провайдерів: без нього
-	// ValidateSafeURL пропускає будь-який публічний хост, тобто ендпоінт
-	// content/details перетворюється на проксі до довільних адрес. Список читається
-	// з оточення (Portainer stack variable), порожнє значення = без обмежень.
-	if hosts := splitCSV(os.Getenv("UPSTREAM_HOST_ALLOWLIST")); len(hosts) > 0 {
-		transporthttp.SetUpstreamHostAllowlist(hosts)
-		log.Printf("[SSRF] upstream host allow-list active (%d entries)", len(hosts))
-	} else {
-		log.Println("[SSRF] WARNING: UPSTREAM_HOST_ALLOWLIST is empty — any public host is reachable")
-	}
-	if sources := splitCSV(os.Getenv("UPSTREAM_SOURCE_ALLOWLIST")); len(sources) > 0 {
-		transporthttp.SetUpstreamSourceAllowlist(sources)
-	}
 	if proxies := splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")); len(proxies) > 0 {
 		if err := middleware.SetTrustedProxies(proxies); err != nil {
 			return fmt.Errorf("[RateLimit] invalid TRUSTED_PROXY_CIDRS: %w", err)
@@ -177,31 +154,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 		log.Printf("[RateLimit] trusted proxies configured (%d entries)", len(proxies))
 	}
 
-	var clientOpts []provider.ClientOption
-	if cfg.WorkerProxyURL != "" {
-		interval := time.Duration(cfg.WorkerMinIntervalMs) * time.Millisecond
-		clientOpts = append(clientOpts, provider.WithWorkerProxy(cfg.WorkerProxyURL, cfg.WorkerProxySecret, interval))
-		log.Printf("[TLS Client] Using Cloudflare Worker Proxy at %s (min interval %v)", cfg.WorkerProxyURL, interval)
-	}
-
-	tlsClient, err := provider.NewTLSClient(clientOpts...)
-	if err != nil {
-		return fmt.Errorf("[TLS Client] failed to initialize: %w", err)
-	}
-
-	registry := provider.NewRegistry()
-	registry.Register(provider.NewUakinoProvider(tlsClient))
-	registry.Register(provider.NewEneyidaProvider(tlsClient))
-	registry.Register(provider.NewLavakinoProvider(tlsClient))
-	registry.Register(provider.NewUaserialsProvider(tlsClient))
-	registry.Register(provider.NewBanderaProvider())
-	if disabled := cfg.GetDisabledProviders(); len(disabled) > 0 {
-		registry.DisableMany(disabled)
-		log.Printf("[Registry] Disabled providers (kill-switch): %v", disabled)
-	}
-	log.Printf("[Registry] Registered %d content providers", len(registry.List()))
-
-	// 6. WebSocket Hub для Watch Party.
+	// 5. WebSocket Hub для Watch Party.
 	// JWTSecret обов'язковий: без нього тікети не виписуються і хаб
 	// fail-closed відповідає 503, а не приймає identity з query-параметрів.
 	wsHub := ws.NewHub(redisClient, ws.Options{
@@ -219,7 +172,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 		log.Printf("[WS Hub] cross-instance fan-out disabled: %v", err)
 	}
 
-	// 7. HTTP Хендлери та Chi Роутер
+	// 6. HTTP Хендлери та Chi Роутер
 	emailSvc := email.NewService()
 	if emailSvc.IsConfigured() {
 		log.Println("[Email] Resend service configured ✓")
@@ -247,7 +200,6 @@ func run(ctx context.Context, cfg *config.Config) error {
 		log.Println("[OAuth] Discord auth configured ✓")
 	}
 
-	contentHandler := transporthttp.NewContentHandler(registry, cacheRepo)
 	syncHandler := transporthttp.NewSyncHandler(historyRepo, favoritesRepo)
 
 	// Readiness-піни передаються до NewRouter, який знімає їх під час
@@ -255,7 +207,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	middleware.SetPostgresPing(func(c context.Context) error { return dbPool.Ping(c) })
 	middleware.SetRedisPing(func(c context.Context) error { return redisClient.Ping(c) })
 
-	router := transporthttp.NewRouter(cfg.JWTSecret, authHandler, contentHandler, syncHandler, wsHub, cfg.AppURL)
+	router := transporthttp.NewRouter(cfg.JWTSecret, authHandler, syncHandler, wsHub, cfg.AppURL)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.ServerPort,

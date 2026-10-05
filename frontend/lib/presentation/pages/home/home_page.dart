@@ -298,6 +298,47 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _openNetworkStream() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Відкрити мережевий потік'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'https://example.com/stream.m3u8',
+            labelText: 'URL відео або HLS потоку',
+            prefixIcon: Icon(Icons.link),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Скасувати'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Відтворити'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty && mounted) {
+      context.push(
+        '/player',
+        extra: {
+          'url': result,
+          'title': 'Мережевий потік',
+          'subtitle': result,
+          'isOffline': false,
+        },
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDesktopPlatform =
@@ -482,32 +523,19 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (_filteredItems.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              _filter.hasActiveFilters
-                  ? Icons.filter_alt_off
-                  : Icons.movie_outlined,
-              size: 64,
-              color: Colors.grey,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _filter.hasActiveFilters
-                  ? 'Нічого не знайдено'
-                  : 'Немає контенту',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _filter.hasActiveFilters
-                  ? 'Спробуйте змінити фільтри'
-                  : 'Спробуйте пошукати щось',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            if (_filter.hasActiveFilters) ...[
+      if (_filter.hasActiveFilters) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.filter_alt_off, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              Text(
+                'Нічого не знайдено',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              const Text('Спробуйте змінити фільтри'),
               const SizedBox(height: 16),
               TextButton.icon(
                 onPressed: () {
@@ -526,9 +554,12 @@ class _HomePageState extends State<HomePage> {
                 label: const Text('Скинути фільтри'),
               ),
             ],
-          ],
-        ),
-      );
+          ),
+        );
+      }
+
+      // Чистий медіаплеєр за замовчуванням
+      return _buildCleanPlayerHome();
     }
 
     // Top recommended / popular item for Hero Banner
@@ -1091,6 +1122,133 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCleanPlayerHome() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_circle_filled_rounded,
+                  size: 44,
+                  color: AppTheme.primaryColor,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Kadrbox Медіаплеєр',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Відтворюйте відеофайли з диска, мережеві потоки або дивіться разом з друзями через Watch Party.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.white70,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _openLocalFile,
+                  icon: const Icon(Icons.folder_open_rounded),
+                  label: const Text('Відкрити локальний файл'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _openNetworkStream,
+                  icon: const Icon(Icons.link_rounded),
+                  label: const Text('Відкрити потік / URL'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push('/watch-party'),
+                  icon: const Icon(Icons.group_work_rounded),
+                  label: const Text('Спільний перегляд (Watch Party)'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 32),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTheme.darkCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.darkBorder),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.extension_outlined,
+                      color: Colors.white70,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Підключення плагінів',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Підключіть сумісний плагін у налаштуваннях для онлайн-каталогів.',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => context.push('/settings'),
+                      child: const Text('Налаштувати'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

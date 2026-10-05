@@ -84,7 +84,6 @@ func TestCovRunRefusesToStartOnAnUnreachableDatabase(t *testing.T) {
 		AppURL:       "https://app.example",
 		LogLevel:     "info",
 		LogFormat:    "text",
-		BaseProxyURL: "",
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Skipf("config is not valid in this environment, nothing to assert: %v", err)

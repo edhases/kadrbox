@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/edhases/oxide-server/internal/email"
-	"github.com/edhases/oxide-server/internal/provider"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
 	"github.com/edhases/oxide-server/internal/transport/ws"
 )
@@ -18,12 +17,10 @@ import (
 
 func qwAuthRouter(t *testing.T, svc *email.Service) http.Handler {
 	t.Helper()
-	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
-	contentH := transporthttp.NewContentHandler(reg, nil)
 	authH := transporthttp.NewAuthHandler(nil, nil, svc, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
-	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
+	return transporthttp.NewRouter("secret", authH, syncH, hub, testAppURL)
 }
 
 func qwPost(t *testing.T, h http.Handler, path, body string) *httptest.ResponseRecorder {

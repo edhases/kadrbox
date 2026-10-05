@@ -18,7 +18,6 @@ import (
 
 	"github.com/edhases/oxide-server/internal/domain"
 	"github.com/edhases/oxide-server/internal/email"
-	"github.com/edhases/oxide-server/internal/provider"
 	"github.com/edhases/oxide-server/internal/repository/postgres"
 	redisRepo "github.com/edhases/oxide-server/internal/repository/redis"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
@@ -53,16 +52,13 @@ func covFlowRigSetup(t *testing.T) *covFlowRig {
 	userRepo := postgres.NewUserRepository(pool)
 	historyRepo := postgres.NewHistoryRepository(pool)
 	favoritesRepo := postgres.NewFavoritesRepository(pool)
-	cacheRepo := postgres.NewCacheRepository(pool)
 
-	reg := provider.NewRegistry()
 	authH := transporthttp.NewAuthHandler(userRepo, redisClient, emailSvc, "test-secret", "")
-	contentH := transporthttp.NewContentHandler(reg, cacheRepo)
 	syncH := transporthttp.NewSyncHandler(historyRepo, favoritesRepo)
 	hub := ws.NewHub(redisClient)
 
 	return &covFlowRig{
-		router: transporthttp.NewRouter("test-secret", authH, contentH, syncH, hub, testAppURL),
+		router: transporthttp.NewRouter("test-secret", authH, syncH, hub, testAppURL),
 	}
 }
 

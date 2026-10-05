@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -29,9 +28,7 @@ type Config struct {
 	JWTSecret           string
 	LogLevel            string
 	LogFormat           string
-	BaseProxyURL        string
 	AppURL              string
-	DisabledProviders   string
 	GoogleClientID      string
 	GoogleClientSecret  string
 	GoogleRedirectURI   string
@@ -40,9 +37,6 @@ type Config struct {
 	DiscordClientID     string
 	DiscordClientSecret string
 	DiscordRedirectURI  string
-	WorkerProxyURL      string
-	WorkerProxySecret   string
-	WorkerMinIntervalMs int
 }
 
 func (c *Config) PostgresDSN() string {
@@ -72,9 +66,7 @@ func Load() *Config {
 		JWTSecret:           os.Getenv("JWT_SECRET"),
 		LogLevel:            getEnv("LOG_LEVEL", "info"),
 		LogFormat:           getEnv("LOG_FORMAT", "text"),
-		BaseProxyURL:        getEnv("BASE_PROXY_URL", "http://127.0.0.1:8089"),
 		AppURL:              getEnv("APP_URL", "https://film.oxideteam.pp.ua"),
-		DisabledProviders:   getEnv("DISABLED_PROVIDERS", ""),
 		GoogleClientID:      getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret:  getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURI:   getEnv("GOOGLE_REDIRECT_URI", "https://film.oxideteam.pp.ua/api/v1/auth/google/callback"),
@@ -83,9 +75,6 @@ func Load() *Config {
 		DiscordClientID:     getEnv("DISCORD_CLIENT_ID", ""),
 		DiscordClientSecret: getEnv("DISCORD_CLIENT_SECRET", ""),
 		DiscordRedirectURI:  getEnv("DISCORD_REDIRECT_URI", "https://film.oxideteam.pp.ua/api/v1/auth/discord/callback"),
-		WorkerProxyURL:      getEnv("WORKER_PROXY_URL", ""),
-		WorkerProxySecret:   getEnv("WORKER_PROXY_SECRET", ""),
-		WorkerMinIntervalMs: getEnvInt("WORKER_MIN_INTERVAL_MS", 150),
 	}
 }
 
@@ -130,9 +119,6 @@ func (c *Config) Validate() error {
 	if c.AppURL == "" {
 		errs = append(errs, "APP_URL is required (used for OAuth redirect URIs)")
 	}
-	if c.WorkerProxyURL != "" && c.WorkerProxySecret == "" {
-		errs = append(errs, "WORKER_PROXY_SECRET is required when WORKER_PROXY_URL is set")
-	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(errs, "\n  - "))
@@ -149,24 +135,4 @@ func isPlaceholderSecret(s string) bool {
 		return true
 	}
 	return strings.Contains(l, "super-secret")
-}
-
-// GetDisabledProviders парсить DISABLED_PROVIDERS (напр. "uakino, lavakino") у список ID.
-func (c *Config) GetDisabledProviders() []string {
-	var out []string
-	for _, id := range strings.Split(c.DisabledProviders, ",") {
-		if trimmed := strings.TrimSpace(id); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
-}
-
-func getEnvInt(key string, defaultVal int) int {
-	if val := os.Getenv(key); val != "" {
-		if intVal, err := strconv.Atoi(val); err == nil {
-			return intVal
-		}
-	}
-	return defaultVal
 }

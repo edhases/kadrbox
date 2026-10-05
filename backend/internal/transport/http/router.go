@@ -14,7 +14,6 @@ import (
 func NewRouter(
 	jwtSecret string,
 	authH *AuthHandler,
-	contentH *ContentHandler,
 	syncH *SyncHandler,
 	hub *ws.Hub,
 	appURL string,
@@ -99,16 +98,6 @@ func NewRouter(
 			r.Post("/discord", authH.DiscordAuthAPI)
 			r.Get("/discord/login", authH.DiscordLogin)
 			r.Get("/discord/callback", authH.DiscordCallback)
-		})
-
-		// Публічний каталог і пошук
-		r.Route("/content", func(r chi.Router) {
-			r.Get("/providers", contentH.Providers)
-			r.Get("/search", contentH.Search)
-			r.Get("/popular", contentH.Popular)
-			r.Get("/category", contentH.Category)
-			r.Get("/details", contentH.GetDetails)
-			r.Get("/streams", contentH.GetStreams)
 		})
 
 		// Захищені ендпоінти користувача

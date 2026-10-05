@@ -5,19 +5,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/provider"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
 	"github.com/edhases/oxide-server/internal/transport/ws"
 )
 
-// covTestRouter будує роутер з nil-залежностями хендлерів і порожнім реєстром.
+// covTestRouter будує роутер з nil-залежностями хендлерів.
 func covTestRouter() http.Handler {
-	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
-	contentH := transporthttp.NewContentHandler(reg, nil)
 	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
-	return transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
+	return transporthttp.NewRouter("secret", authH, syncH, hub, testAppURL)
 }
 
 // TestCovHttpRouterProtectedRequireAuth — 6 захищених маршрутів без заголовка дають 401.
@@ -45,31 +42,6 @@ func TestCovHttpRouterProtectedRequireAuth(t *testing.T) {
 
 			if rr.Code != http.StatusUnauthorized {
 				t.Errorf("%s %s: очікувався 401, отримано %d", tc.method, tc.target, rr.Code)
-			}
-		})
-	}
-}
-
-// TestCovHttpRouterPublicContentAccessible — публічні content-маршрути не вимагають
-// авторизації: без q має бути 400 (а НЕ 401), без параметрів details — теж 400.
-func TestCovHttpRouterPublicContentAccessible(t *testing.T) {
-	router := covTestRouter()
-	cases := []struct {
-		name   string
-		target string
-	}{
-		{"Search без q", "/api/v1/content/search"},
-		{"Details без параметрів", "/api/v1/content/details"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
-			rr := httptest.NewRecorder()
-
-			router.ServeHTTP(rr, req)
-
-			if rr.Code != http.StatusBadRequest {
-				t.Errorf("%s: очікувався 400 (публічний маршрут), отримано %d", tc.target, rr.Code)
 			}
 		})
 	}

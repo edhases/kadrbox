@@ -12,8 +12,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -483,6 +485,28 @@ func marshalFrom(data interface{}) ([]byte, error) {
 
 func unmarshalInto(raw []byte, target interface{}) bool {
 	return json.Unmarshal(raw, target) == nil
+}
+
+func assertJSONError(t *testing.T, rec *httptest.ResponseRecorder, wantMsg string) {
+	t.Helper()
+	var env map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("error body is not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if got := env["error"]; got != wantMsg {
+		t.Errorf("error = %q, want %q", got, wantMsg)
+	}
+}
+
+func assertJSONErrorPrefix(t *testing.T, rec *httptest.ResponseRecorder, wantPrefix string) {
+	t.Helper()
+	var env map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("error body is not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if got := env["error"]; !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("error = %q, want it to start with %q", got, wantPrefix)
+	}
 }
 
 // Conformance: the in-memory stores must satisfy the interfaces the handlers

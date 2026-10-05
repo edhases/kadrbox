@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/edhases/oxide-server/internal/provider"
 	transporthttp "github.com/edhases/oxide-server/internal/transport/http"
 	"github.com/edhases/oxide-server/internal/transport/ws"
 )
@@ -16,13 +15,11 @@ import (
 const testAppURL = "https://film.oxideteam.pp.ua"
 
 func TestRouterHealthEndpoint(t *testing.T) {
-	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
-	contentH := transporthttp.NewContentHandler(reg, nil)
 	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 
-	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
+	router := transporthttp.NewRouter("secret", authH, syncH, hub, testAppURL)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
 	rr := httptest.NewRecorder()
@@ -44,15 +41,13 @@ func TestRouterHealthEndpoint(t *testing.T) {
 }
 
 func TestRouterCORSHeaders(t *testing.T) {
-	reg := provider.NewRegistry()
 	hub := ws.NewHub(nil)
-	contentH := transporthttp.NewContentHandler(reg, nil)
 	authH := transporthttp.NewAuthHandler(nil, nil, nil, "secret", "")
 	syncH := transporthttp.NewSyncHandler(nil, nil)
 
-	router := transporthttp.NewRouter("secret", authH, contentH, syncH, hub, testAppURL)
+	router := transporthttp.NewRouter("secret", authH, syncH, hub, testAppURL)
 
-	req, _ := http.NewRequest("OPTIONS", "/api/v1/content/search", nil)
+	req, _ := http.NewRequest("OPTIONS", "/api/v1/auth/login", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	rr := httptest.NewRecorder()

@@ -49,7 +49,6 @@ func TestCovConfigAllCustom(t *testing.T) {
 	t.Setenv("REDIS_ADDR", "custom-redis:6380")
 	t.Setenv("REDIS_PASSWORD", "redis-pass")
 	t.Setenv("JWT_SECRET", "custom-jwt-secret")
-	t.Setenv("BASE_PROXY_URL", "http://127.0.0.1:9999")
 
 	cfg := config.Load()
 
@@ -64,7 +63,6 @@ func TestCovConfigAllCustom(t *testing.T) {
 		"RedisAddr":    "custom-redis:6380",
 		"RedisPass":    "redis-pass",
 		"JWTSecret":    "custom-jwt-secret",
-		"BaseProxyURL": "http://127.0.0.1:9999",
 	}
 	got := map[string]string{
 		"ServerPort":   cfg.ServerPort,
@@ -77,7 +75,6 @@ func TestCovConfigAllCustom(t *testing.T) {
 		"RedisAddr":    cfg.RedisAddr,
 		"RedisPass":    cfg.RedisPass,
 		"JWTSecret":    cfg.JWTSecret,
-		"BaseProxyURL": cfg.BaseProxyURL,
 	}
 	for k, w := range want {
 		if got[k] != w {

@@ -132,53 +132,9 @@ class ProviderCatalogService extends ChangeNotifier {
       Logger.w('Failed to apply cached catalog: $e', tag: _tag);
     }
 
-    // Default static fallback catalog
-    final fallbackEntries = [
-      const ProviderCatalogEntry(
-        id: 'uakino',
-        name: 'UAKino',
-        baseUrl: 'https://uakino.biz',
-        showOnHome: true,
-        hasFixedStreams: false,
-        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
-        searchEnabledDefault: true,
-        enabled: true,
-        healthy: true,
-      ),
-      const ProviderCatalogEntry(
-        id: 'eneyida',
-        name: 'Eneyida',
-        baseUrl: 'https://eneyida.tv',
-        showOnHome: true,
-        hasFixedStreams: false,
-        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
-        searchEnabledDefault: true,
-        enabled: true,
-        healthy: true,
-      ),
-      const ProviderCatalogEntry(
-        id: 'lavakino',
-        name: 'Lavakino',
-        baseUrl: 'https://lavakino.net',
-        showOnHome: true,
-        hasFixedStreams: false,
-        contentTypes: ['movie', 'series', 'cartoon', 'anime'],
-        searchEnabledDefault: true,
-        enabled: true,
-        healthy: true,
-      ),
-      const ProviderCatalogEntry(
-        id: 'bandera',
-        name: 'Bandera Online',
-        baseUrl: 'https://bbe.lme.isroot.in/api/v2',
-        showOnHome: true,
-        hasFixedStreams: false,
-        contentTypes: ['movie', 'series', 'anime'],
-        searchEnabledDefault: true,
-        enabled: true,
-        healthy: true,
-      ),
-    ];
+    // Clean default: no hardcoded scraper providers.
+    // Plugins/sources are connected dynamically.
+    final fallbackEntries = <ProviderCatalogEntry>[];
     await _applyCatalog(
       ProviderCatalog(version: 1, providers: fallbackEntries),
       stale: true,
