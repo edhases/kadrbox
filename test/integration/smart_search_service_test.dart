@@ -192,11 +192,10 @@ void main() {
 
       final result = await service.search('q').first;
 
-      expect(
-        result.rankedItems.map((i) => i.id),
-        ['a', 'b'],
-        reason: 'server order is authoritative — the client must not re-rank',
-      );
+      expect(result.rankedItems.map((i) => i.id), [
+        'a',
+        'b',
+      ], reason: 'server order is authoritative — the client must not re-rank');
     });
 
     test('surfaces filtered-out count for display', () async {

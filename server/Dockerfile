@@ -1,5 +1,5 @@
 # Stage 1: Build з підтримкою CGO для tls-client
-FROM golang:1.23.6-alpine3.20 AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 

@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../data/services/history_service.dart';
 import '../../../data/database/app_database.dart'; // For WatchHistoryData
 import '../../../domain/entities/entities.dart';
+
 // Removed unused skeleton import
 
 /// Section that displays "Continue Watching" items from history
