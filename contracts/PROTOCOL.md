@@ -30,6 +30,36 @@ All four are `GET`, all return JSON.
 
 The client calls `/status` first. Everything else assumes the connection works.
 
+## Item identity, and why there is no migration for it
+
+`item_id` is assigned by the server and is **not globally unique**. Two catalog
+servers can legitimately return the same `item_id` for different content, so
+the client scopes every stored reference as `<catalog_id>:<item_id>`.
+
+The column that holds this already exists on both sides and is already part of
+every uniqueness key that matters:
+
+```
+backend  uq_user_history   UNIQUE NULLS NOT DISTINCT (user_id, media_id, provider_id, season, episode)
+backend  uq_user_favorite  UNIQUE(user_id, media_id, provider_id)
+client   watch_history     uniqueKeys => [{mediaId, providerId}]
+```
+
+So the scoping this protocol needs is already enforced. `catalog_id` is
+carried in the existing `provider_id` / `providerId` field.
+
+**A migration adding a separate `catalog_id` column would be actively harmful,
+and this is written down so nobody attempts it again.** Every legacy row would
+backfill to the same empty catalog value, the new unique key would collapse
+rows that are currently distinct, and `ADD CONSTRAINT` would fail against a
+populated table — a migration-time outage on the live database. It would also
+desync every `ON CONFLICT` upsert target written against the current key.
+
+What remains is only naming: the field called `provider_id` now carries a
+catalog id. Renaming it would cost a migration on both sides and change no
+behaviour, so it is deferred. Read `provider_id` as "which catalog this came
+from" everywhere in this protocol.
+
 ## Why `segments` is an array
 
 `/search` returns `segments` as an array of source groups, and `items` as one
