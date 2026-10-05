@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Kadrbox
+Comment=Media player with cross-device progress sync and watch parties
+Type=Application
+Exec=kadrbox
+Icon=kadrbox
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupWMClass=kadrbox
