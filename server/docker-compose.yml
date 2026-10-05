@@ -15,9 +15,6 @@ services:
     image: ghcr.io/edhases/oxide-server:latest
     restart: unless-stopped
     stop_grace_period: 30s
-    depends_on:
-      redis-sysctl:
-        condition: service_completed_successfully
     ports:
       - "8089:8080"
     environment:
@@ -46,6 +43,8 @@ services:
       - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI:-https://film.oxideteam.pp.ua/api/v1/auth/discord/callback}
       - DISABLED_PROVIDERS=${DISABLED_PROVIDERS:-}
     depends_on:
+      redis-sysctl:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
