@@ -40,13 +40,15 @@ uakino\.(biz|best|me|tv)
 eneyida\.(tv|com)
 tortuga\.tw
 hdrezka\.ua
-oxideteam\.pp\.ua
 
 # --- Технічні маркери їхнього anti-bot ---
 data-lebclicks
 dlebclicks
 data-soon-hash
 
-# --- Боти чату, які ми налаштували під них ---
-oxidefilmbot
-oxidebot
+# NOT listed on purpose, even though they contain the old brand:
+#   oxideteam.pp.ua   APP_URL, OAuth redirect URIs, SMTP From
+#   oxidefilmbot      a real Telegram @handle
+#   POSTGRES_DB=oxide_film   the live database
+# These are the owner's infrastructure, not pirate sources. An agent cannot
+# change them and must not try. They are on the owner's rename checklist.
