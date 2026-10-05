@@ -118,13 +118,15 @@ __pycache__/
 /logoapp.png
 /icon.svg
 
-# Scratch scripts and local tooling are ignored, but scripts/ci/ is real
-# infrastructure: the forbidden-terms gate lives there and the workflow calls
-# it, so an untracked gate would mean CI silently stops checking.
+# Scratch scripts and local tooling are ignored, but these two are real
+# infrastructure that must be tracked: the forbidden-terms gate that CI calls,
+# and the icon generator that keeps every platform's sizes consistent.
 # /scripts/*  rather than  /scripts/  so the negations below can work at all.
 /scripts/*
 !/scripts/ci/
 !/scripts/ci/**
+!/scripts/branding/
+!/scripts/branding/**
 
 # Graphify Knowledge Graph output & cache
 graphify-out/
