@@ -959,42 +959,19 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  void _showWatchPartyNameDialog() {
-    final controller = TextEditingController(
-      text: _settings.state.watchPartyName,
-    );
-    showDialog(
+  Future<void> _showWatchPartyNameDialog() async {
+    final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        title: Text(_s.watchPartyName),
-        content: TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            hintText: _s.enterYourName,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-          maxLength: 20,
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(_s.cancel),
-          ),
-          TextButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) {
-                _settings.setWatchPartyName(name);
-              }
-              Navigator.pop(ctx);
-            },
-            child: Text(_s.save),
-          ),
-        ],
+      builder: (_) => _WatchPartyNameDialog(
+        initialValue: _settings.state.watchPartyName,
+        title: _s.watchPartyName,
+        hint: _s.enterYourName,
+        cancelLabel: _s.cancel,
+        saveLabel: _s.save,
       ),
     );
+    if (name == null || !mounted) return;
+    _settings.setWatchPartyName(name);
   }
 
   String _getDeviceTypeName(String? type) {
@@ -1040,6 +1017,79 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Dialog for renaming yourself in watch-party rooms.
+///
+/// Owns its [TextEditingController] so the controller lives exactly as long as
+/// the [TextField] that listens to it. The previous inline version created the
+/// controller in the caller and never disposed it, and disposing it in the
+/// caller instead is not an option either: `showDialog` completes the moment
+/// [Navigator.pop] is called, while the dialog route is still animating out, so
+/// a controller disposed at that point is still being listened to and Flutter
+/// throws "A TextEditingController was used after being disposed" from inside
+/// the exit transition.
+class _WatchPartyNameDialog extends StatefulWidget {
+  const _WatchPartyNameDialog({
+    required this.initialValue,
+    required this.title,
+    required this.hint,
+    required this.cancelLabel,
+    required this.saveLabel,
+  });
+
+  final String initialValue;
+  final String title;
+  final String hint;
+  final String cancelLabel;
+  final String saveLabel;
+
+  @override
+  State<_WatchPartyNameDialog> createState() => _WatchPartyNameDialogState();
+}
+
+class _WatchPartyNameDialogState extends State<_WatchPartyNameDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialValue,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final name = _controller.text.trim();
+    // An empty name means "leave it as it was", which is what the old
+    // inline dialog did: it popped without saving.
+    Navigator.pop(context, name.isEmpty ? null : name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        maxLength: 20,
+        autofocus: true,
+        onSubmitted: (_) => _save(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(widget.cancelLabel),
+        ),
+        TextButton(onPressed: _save, child: Text(widget.saveLabel)),
+      ],
     );
   }
 }

@@ -540,67 +540,124 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _showForgotPasswordDialog() {
-    final emailController = TextEditingController(text: _emailController.text);
-
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkCard,
-        title: const Text('Скинути пароль'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Введіть email, на який буде надіслано посилання для скидання пароля',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: emailController,
-              decoration: InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+      builder: (_) => _ForgotPasswordDialog(
+        initialEmail: _emailController.text,
+        onSubmit: (email) async {
+          try {
+            await _authService.resetPassword(email);
+            return null;
+          } catch (e) {
+            return _authService.error ?? e.toString();
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// The "reset password" dialog.
+///
+/// It owns its [TextEditingController] and stays open while the request is in
+/// flight, so the controller's lifetime is tied to the [TextField] that listens
+/// to it. Creating the controller in the caller (the original version) leaked
+/// it; disposing it after `showDialog` would be worse, because the future
+/// completes while the dialog is still animating out and the still-mounted
+/// TextField would then talk to a disposed controller.
+///
+/// [onSubmit] returns `null` on success or a human-readable error to show
+/// inline, which keeps the retry path inside the dialog.
+class _ForgotPasswordDialog extends StatefulWidget {
+  const _ForgotPasswordDialog({
+    required this.initialEmail,
+    required this.onSubmit,
+  });
+
+  final String initialEmail;
+  final Future<String?> Function(String email) onSubmit;
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.text = widget.initialEmail;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final problem = await widget.onSubmit(_controller.text.trim());
+    // mounted, not this State's `mounted`: the awaits below can outlive the
+    // dialog if the route is popped from elsewhere.
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Якщо акаунт існує, ми надіслали на нього лист для '
+          'скидання пароля.',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.darkCard,
+      title: const Text('Скинути пароль'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Введіть email, на який буде надіслано посилання для скидання пароля',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            enabled: !_busy,
+            decoration: InputDecoration(
+              labelText: 'Email',
+              errorText: _error,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Скасувати'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                await _authService.resetPassword(emailController.text.trim());
-                // context.mounted, not this State's `mounted`: the dialog builds
-                // its own BuildContext, so the State's flag says nothing about
-                // whether the element that owns `context` is still in the tree.
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Якщо акаунт існує, ми надіслали на нього лист для '
-                        'скидання пароля.',
-                      ),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  final err = _authService.error ?? e.toString();
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(SnackBar(content: Text('Помилка: $err')));
-                }
-              }
-            },
-            child: const Text('Надіслати'),
           ),
         ],
       ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('Скасувати'),
+        ),
+        ElevatedButton(
+          onPressed: _busy ? null : _submit,
+          child: const Text('Надіслати'),
+        ),
+      ],
     );
   }
 }

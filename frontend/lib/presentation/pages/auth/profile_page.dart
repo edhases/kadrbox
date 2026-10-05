@@ -176,87 +176,31 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _showChangePasswordDialog() async {
-    final oldPassController = TextEditingController();
-    final newPassController = TextEditingController();
-    final confirmPassController = TextEditingController();
-
-    await showDialog(
+    final passwords = await showDialog<({String old, String fresh})>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkCard,
-        title: const Text('Змінити пароль'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: oldPassController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Старий пароль'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: newPassController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Новий пароль'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: confirmPassController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Підтвердіть пароль',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Скасувати'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (newPassController.text != confirmPassController.text) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Паролі не співпадають')),
-                );
-                return;
-              }
-              try {
-                Navigator.pop(context); // Close dialog first
-                setState(() => _isLoading = true);
-
-                await _authService.changePassword(
-                  oldPassController.text,
-                  newPassController.text,
-                  confirmPassController.text,
-                );
-
-                // context.mounted, not this State's `mounted`: this runs inside
-                // the dialog's builder, so the State's flag says nothing about
-                // whether the element owning `context` is still mounted.
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Пароль успішно змінено')),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Помилка: ${_authService.error ?? e}'),
-                    ),
-                  );
-                }
-              } finally {
-                if (mounted) setState(() => _isLoading = false);
-              }
-            },
-            child: const Text('Змінити'),
-          ),
-        ],
-      ),
+      builder: (_) => const _ChangePasswordDialog(),
     );
+    if (passwords == null || !mounted) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await _authService.changePassword(
+        passwords.old,
+        passwords.fresh,
+        passwords.fresh,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пароль успішно змінено')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Помилка: ${_authService.error ?? e}')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _deleteAccount() async {
@@ -863,5 +807,87 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (_) {
       return '-';
     }
+  }
+}
+
+/// The "change password" dialog.
+///
+/// Owns its three [TextEditingController]s so each one is disposed exactly when
+/// the [TextField] that listens to it leaves the tree. The original inline
+/// version allocated them in the caller and never disposed any of them.
+///
+/// The dialog only hands the values back once the confirmation matches, so the
+/// caller can treat a `null` result as "user cancelled" and never has to
+/// re-check the invariant.
+class _ChangePasswordDialog extends StatefulWidget {
+  const _ChangePasswordDialog();
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _old = TextEditingController();
+  final _fresh = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _mismatch = false;
+
+  @override
+  void dispose() {
+    _old.dispose();
+    _fresh.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_fresh.text != _confirm.text) {
+      setState(() => _mismatch = true);
+      return;
+    }
+    Navigator.pop(context, (old: _old.text, fresh: _fresh.text));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.darkCard,
+      title: const Text('Змінити пароль'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _old,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Старий пароль'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _fresh,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Новий пароль'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _confirm,
+            obscureText: true,
+            onChanged: (_) {
+              if (_mismatch) setState(() => _mismatch = false);
+            },
+            decoration: InputDecoration(
+              labelText: 'Підтвердіть пароль',
+              errorText: _mismatch ? 'Паролі не співпадають' : null,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Скасувати'),
+        ),
+        ElevatedButton(onPressed: _submit, child: const Text('Змінити')),
+      ],
+    );
   }
 }
