@@ -110,6 +110,35 @@ func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 	writeObject(w, details)
 }
 
+// unwrapSelectionRef replaces a series-episode ref envelope with the item URL it
+// carries, filling in the selection the ref encodes.
+//
+// It exists because the SSRF gate only knows one envelope schema: the Bandera
+// `{"source","ref"}` one, which validateJSONEnvelope enforces. A selection ref is
+// a different envelope (`{"item_url","season","episode","voice"}`) with no
+// `source` key, so it failed validation as ErrMissingSource and every episode
+// click came back 400.
+//
+// Unwrapping here means ValidateSafeURL checks the URL that is actually fetched.
+// A Bandera envelope is not a selection ref, so it passes through untouched and
+// keeps its existing validation path.
+func unwrapSelectionRef(itemURL string, season, episode int, voiceID string) (string, int, int, string) {
+	realURL, refSeason, refEpisode, refVoice, ok := provider.DecodeSelectionRef(itemURL)
+	if !ok {
+		return itemURL, season, episode, voiceID
+	}
+	if season <= 0 {
+		season = refSeason
+	}
+	if episode <= 0 {
+		episode = refEpisode
+	}
+	if voiceID == "" {
+		voiceID = refVoice
+	}
+	return realURL, season, episode, voiceID
+}
+
 func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
@@ -122,6 +151,15 @@ func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+	episode, _ := strconv.Atoi(r.URL.Query().Get("episode"))
+	voiceID := r.URL.Query().Get("voice")
+
+	// A series episode arrives as an opaque ref envelope, not a URL. Validating
+	// the envelope as if it were a URL rejected every episode click with a 400,
+	// so unwrap first and validate the real target it carries — otherwise the
+	// SSRF gate would be checking a string nobody fetches.
+	itemURL, season, episode, voiceID = unwrapSelectionRef(itemURL, season, episode, voiceID)
 	if err := ValidateSafeURL(itemURL); err != nil {
 		writeAPIError(w, "invalid or unsafe item url", http.StatusBadRequest)
 		return
@@ -132,10 +170,6 @@ func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 	// /stream URL carries an expiry and a signature ("?expires=...&sig=...").
 	// Caching the response would hand the client a URL that has already
 	// expired, which surfaces as a playback failure, not as a cache error.
-	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
-	episode, _ := strconv.Atoi(r.URL.Query().Get("episode"))
-	voiceID := r.URL.Query().Get("voice")
-
 	resp, err := h.registry.Streams(r.Context(), providerID, itemURL, season, episode, voiceID)
 	if err != nil {
 		if errors.Is(err, provider.ErrUnresolvablePlayer) {

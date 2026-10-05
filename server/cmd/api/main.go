@@ -193,6 +193,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	registry.Register(provider.NewUakinoProvider(tlsClient))
 	registry.Register(provider.NewEneyidaProvider(tlsClient))
 	registry.Register(provider.NewLavakinoProvider(tlsClient))
+	registry.Register(provider.NewUaserialsProvider(tlsClient))
 	registry.Register(provider.NewBanderaProvider())
 	if disabled := cfg.GetDisabledProviders(); len(disabled) > 0 {
 		registry.DisableMany(disabled)

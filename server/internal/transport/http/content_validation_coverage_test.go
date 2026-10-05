@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -155,6 +156,72 @@ func TestCovDetailsRefusesUnsafeItemURLsBeforeCallingTheProvider(t *testing.T) {
 				t.Errorf("an unsafe URL %q reached the provider", fake.gotURL)
 			}
 			assertJSONError(t, rec, "invalid or unsafe item url")
+		})
+	}
+}
+
+// Регресія з живої сесії користувача: клієнт обирав серію і отримував
+// «invalid or unsafe item url (HTTP_400)».
+//
+// Причина: ref серії — це JSON-конверт {"item_url":…,"season":…}, а
+// validateJSONEnvelope знає лише схему Bandera {"source":…} і вимагає
+// source. Конверт без source падав як ErrMissingSource — 400 на кожен
+// клік по серії.
+func TestCovStreamsUnwrapsSelectionRefEnvelope(t *testing.T) {
+	itemURL := "https://uaserials.com/422-velychne-stolittya-roksolana-2011s.html"
+	ref := provider.EncodeSelectionRef(itemURL, "1plus1", 2, 5)
+
+	fake := &covStubProvider{id: "uaserials", streams: &covStreamsFixture}
+	h, _ := covContentHandler(fake)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/content/streams", nil)
+	req.URL.RawQuery = "provider=uaserials&url=" + url.QueryEscape(ref)
+
+	rec := httptest.NewRecorder()
+	h.GetStreams(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 for a selection ref (body %s)", rec.Code, rec.Body.String())
+	}
+
+	// Провайдер мусить отримати справжню адресу сторінки, а не конверт.
+	if fake.gotURL != itemURL {
+		t.Errorf("provider got %q, want the unwrapped %q", fake.gotURL, itemURL)
+	}
+	// Вибір серії теж мусить дійти — інакше клієнт відкриє не ту серію.
+	if fake.gotSeason != 2 || fake.gotEpisode != 5 {
+		t.Errorf("provider got S%02dE%02d, want S02E05 from the ref", fake.gotSeason, fake.gotEpisode)
+	}
+	if fake.gotVoice != "1plus1" {
+		t.Errorf("provider got voice %q, want 1plus1 from the ref", fake.gotVoice)
+	}
+}
+
+// SSRF-фільтр мусить і далі працювати після розкриття конверта: якщо
+// ref несе приватну адресу, її не можна пропустити.
+func TestCovStreamsRejectsUnsafeURLInsideSelectionRef(t *testing.T) {
+	for _, target := range []string{
+		"http://127.0.0.1:8080/admin",
+		"http://169.254.169.254/latest/meta-data/",
+		"file:///etc/passwd",
+	} {
+		t.Run(target, func(t *testing.T) {
+			ref := provider.EncodeSelectionRef(target, "", 1, 1)
+			fake := &covStubProvider{id: "uaserials", streams: &covStreamsFixture}
+			h, _ := covContentHandler(fake)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/content/streams", nil)
+			req.URL.RawQuery = "provider=uaserials&url=" + url.QueryEscape(ref)
+
+			rec := httptest.NewRecorder()
+			h.GetStreams(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400 for an unsafe ref target (body %s)", rec.Code, rec.Body.String())
+			}
+			if fake.gotURL != "" {
+				t.Errorf("an unsafe target %q reached the provider", fake.gotURL)
+			}
 		})
 	}
 }

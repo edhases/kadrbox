@@ -433,10 +433,29 @@ func (e *TortugaExtractor) FetchTortugaEpisode(ctx context.Context, rawURL strin
 	}
 	items = PruneTortugaTrailers(items)
 	streams, subs := TortugaStreamsFromPlaylist(items, playerURL, tortugaPlayerLabel, season, episode, voiceID)
+
+	// Без вибраного сезону/епізоду це «перша серія», а не «всі серії».
+	//
+	// Детальна сторінка відкриває картку і робить getStreams без
+	// сезону. Раніше фільтр пропускав кожен лист, тож клієнт
+	// отримував усі 155 серій Роксолани: «Завантажено 155 потоків»
+	// і 155 однакових рядків «Авто — 1+1» замість трьох якостей
+	// першої серії. FetchTortugaEmbed (деталі) повне дерево бачить
+	// і мусить давати — звужуємо тут, у точці розкрутки однієї серії.
+	if len(streams) > 1 && season <= 0 && episode <= 0 {
+		streams = streams[:1]
+		if len(subs) > 0 {
+			subs = subs[:0]
+		}
+	}
+
 	if len(streams) == 0 && (season > 0 || episode > 0 || voiceID != "") {
 		// Фолбек, як у SelectPlaylistStream: один невірно розпізнаний
 		// номер не повинен робити деталь порожньою.
 		streams, subs = TortugaStreamsFromPlaylist(items, playerURL, tortugaPlayerLabel, 0, 0, "")
+		if len(streams) > 1 {
+			streams = streams[:1]
+		}
 	}
 
 	// Розкриваємо якість із master-плейлиста.
@@ -565,6 +584,10 @@ func TortugaStreamsFromPlaylist(items []playerJSPlaylistItem, playerURL, playerL
 	var subs []domain.SubtitleSource
 	seen := make(map[string]bool)
 
+	// season=0/episode=0 означає «розкажи все дерево», а не «першу
+	// серію»: цим користується FetchTortugaEmbed, який будує деталі
+	// (сезони/озвучки/епізоди) і мусить бачити кожен лист.
+	// Для однієї серії звужує FetchTortugaEpisode.
 	ForEachPlaylistLeaf(items, func(l PlaylistLeaf) {
 		if season > 0 && l.Ctx.Season > 0 && l.Ctx.Season != season {
 			return

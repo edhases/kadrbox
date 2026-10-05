@@ -493,14 +493,24 @@ func BuildVoiceoversFromPlaylist(items []playerJSPlaylistItem) []domain.Voiceove
 // season<=0 або episode<=0 означає «не важливо» — беремо все, що
 // пройшло фільтр. Це потрібно, бо DLE-пошук часто не знає номера
 // серії, і провайдер хоче віддати всі джерела одразу.
+// filterLeavesByDub повертає листи вибраної озвучки. Лист без вказаної
+// озвучки не відкидається: дерева, де назва студії не розпізналася,
+// не повинні зникнути через фільтр.
+func filterLeavesByDub(leaves []PlaylistLeaf, voiceID string) []PlaylistLeaf {
+	out := make([]PlaylistLeaf, 0, len(leaves))
+	for _, l := range leaves {
+		if l.Ctx.Dub == "" || strings.EqualFold(l.Ctx.Dub, voiceID) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func SelectPlaylistStream(items []playerJSPlaylistItem, playerURL, playerLabel string, season, episode int, voiceID string) ([]domain.StreamSource, []domain.SubtitleSource) {
 	var streams []domain.StreamSource
 	var subs []domain.SubtitleSource
 
 	matches := func(l PlaylistLeaf) bool {
-		if voiceID != "" && l.Ctx.Dub != "" && !strings.EqualFold(l.Ctx.Dub, voiceID) {
-			return false
-		}
 		if season > 0 && l.Ctx.Season > 0 && l.Ctx.Season != season {
 			return false
 		}
@@ -510,9 +520,28 @@ func SelectPlaylistStream(items []playerJSPlaylistItem, playerURL, playerLabel s
 		return true
 	}
 
-	ForEachPlaylistLeaf(items, func(l PlaylistLeaf) {
+	// Звузити дерево до вибраної озвучки ДО вибору епізоду: інакше
+	// «перший лист» був би першим листом чужої озвучки.
+	leaves := CollectPlaylistLeaves(items)
+	if voiceID != "" {
+		if filtered := filterLeavesByDub(leaves, voiceID); len(filtered) > 0 {
+			leaves = filtered
+		}
+	}
+
+	// Без вибраного сезону/епізоду віддаємо лише перший лист.
+	//
+	// Раніше фільтр пропускав усе, тож запит із детальної сторінки
+	// (season=0, episode=0) приносив усі 155 серій чотирьох сезонів
+	// замість трьох якостей першої серії — клієнт показував
+	// «Завантажено 155 потоків».
+	if season <= 0 && episode <= 0 && len(leaves) > 0 {
+		leaves = leaves[:1]
+	}
+
+	for _, l := range leaves {
 		if !matches(l) {
-			return
+			continue
 		}
 		_, dubName, _ := ResolveVoiceoverNameNormalised(l.Ctx.Dub)
 		streams = append(streams, parseMultiQualityString(l.File, playerURL, dubName)...)
@@ -522,7 +551,7 @@ func SelectPlaylistStream(items []playerJSPlaylistItem, playerURL, playerLabel s
 		if extra := ApplyTortugaSubtitle(l.File); len(extra) > 0 {
 			subs = append(subs, extra...)
 		}
-	})
+	}
 
 	// Фолбек: віддаємо перший доступний лист, щоб деталь не виглядала
 	// порожньою через один невірно розпізнаний номер.

@@ -150,9 +150,9 @@ func TestReadPumpBroadcastSendsAreAbortable(t *testing.T) {
 	host := mustDial(t, srv, "/?room=WEDGE1&ticket="+ticket(t, h, "u-1", "Host", "WEDGE1", time.Minute))
 	guest := mustDial(t, srv, "/?room=WEDGE1&ticket="+ticket(t, h, "u-2", "Guest", "WEDGE1", time.Minute))
 	waitRoomSize(t, h, "WEDGE1", 2, 2*time.Second)
-	awaitAction(t, host, ActionRoomInfo, 2*time.Second)
-	awaitAction(t, host, ActionUserJoined, 2*time.Second)
-	awaitAction(t, guest, ActionUserJoined, 2*time.Second)
+	// Unordered: roomInfo is built in a goroutine (Redis read) and races userJoined.
+	awaitActions(t, host, []string{ActionRoomInfo, ActionUserJoined}, 5*time.Second)
+	awaitActions(t, guest, []string{ActionUserJoined}, 5*time.Second)
 
 	// Wedge the hub loop so the fan-out queue fills up and producers have to wait.
 	h.mu.Lock()

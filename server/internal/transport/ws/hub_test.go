@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,50 @@ func expectSilence(t *testing.T, conn *websocket.Conn, d time.Duration) {
 	if _, data, err := conn.ReadMessage(); err == nil {
 		t.Fatalf("unexpected frame: %s", data)
 	}
+}
+
+// awaitActions reads frames until every wanted action has been seen once,
+// regardless of the order they arrive in.
+//
+// It exists because awaitAction DISCARDS any frame it was not asked for. Chaining
+// awaitAction calls therefore only works if the order is guaranteed, and the hub
+// does not guarantee one: roomInfo is emitted from a goroutine
+// (emitRoomInfoAsync) because building it does a Redis read, so it races
+// userJoined. A chained pair would consume the userJoined frame while looking for
+// roomInfo and then block until its deadline waiting for a frame already eaten.
+//
+// A read timeout is terminal — gorilla's read deadline is not resumable, so the
+// connection cannot be read again — hence Fatalf rather than looping.
+func awaitActions(t *testing.T, conn *websocket.Conn, want []string, timeout time.Duration) {
+	t.Helper()
+	wantSet := make(map[string]bool, len(want))
+	for _, a := range want {
+		wantSet[a] = true
+	}
+
+	deadline := time.Now().Add(timeout)
+	seen := make(map[string]bool, len(wantSet))
+	for len(seen) < len(wantSet) {
+		_ = conn.SetReadDeadline(deadline)
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("waiting for %v failed, saw %v: %v", keysOf(wantSet), keysOf(seen), err)
+		}
+		var ev domain.WatchPartyEvent
+		if err := json.Unmarshal(data, &ev); err != nil {
+			t.Fatalf("not a WatchPartyEvent: %v (%s)", err, data)
+		}
+		seen[ev.Action] = true
+	}
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // awaitPayload reads chat frames until one carries the wanted payload.

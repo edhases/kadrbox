@@ -374,6 +374,22 @@ func tortugaTreeClean(t *testing.T) []playerJSPlaylistItem {
 	return PruneTortugaTrailers(tortugaTree(t))
 }
 
+// everyEpisode — координати (сезон, серія) кожного листа дерева.
+//
+// Допоміжна функція для тестів, які хочуть перевірити властивість на
+// всьому дереві, перебираючи серії явно.
+func everyEpisode(t *testing.T, items []playerJSPlaylistItem) [][2]int {
+	t.Helper()
+	var out [][2]int
+	for _, l := range CollectPlaylistLeaves(items) {
+		out = append(out, [2]int{l.Ctx.Season, l.Ctx.Episode})
+	}
+	if len(out) == 0 {
+		t.Fatal("fixture tree has no episodes")
+	}
+	return out
+}
+
 // Трейлери приходять тим самим розшифрованим деревом. Без фільтра
 // користувач отримує «Серія 7» у вигляді рекламного ролика.
 func TestTortugaStreamsFromPlaylist_FiltersTrailers(t *testing.T) {
@@ -381,6 +397,9 @@ func TestTortugaStreamsFromPlaylist_FiltersTrailers(t *testing.T) {
 	// бути в самому TortugaStreamsFromPlaylist, а не лише в кроці
 	// попереднього вирізання. Інакше викликач, який передасть дерево
 	// напряму, отримає трейлер у списку стримів.
+	//
+	// season=0/episode=0 тут означає «усе дерево»: цим користується
+	// FetchTortugaEmbed для побудови деталей.
 	streams, _ := TortugaStreamsFromPlaylist(tortugaTree(t), "https://tortuga.tw/embed/66961", "Tortuga", 0, 0, "")
 	if len(streams) == 0 {
 		t.Fatal("expected streams from a real tree")
@@ -736,6 +755,55 @@ func TestFetchTortugaEpisode_SelectsOneEpisode(t *testing.T) {
 		}
 		if streams[i].RequiresProxy {
 			t.Errorf("stream[%d] must not require a proxy", i)
+		}
+	}
+}
+
+// Регресія з живої сесії: детальна сторінка відкриває картку і робить
+// getStreams без season/episode. Раніше це повертало КОЖНУ серію
+// серіалу — клієнт показував «Завантажено 155 потоків» і 155 рядків
+// «Авто — 1+1». Без вибору мусимо віддати першу серію.
+//
+// FetchTortugaEmbed при цьому мусить бачити все дерево — це інший
+// виклик, і він перевіряється TestFetchTortugaEmbed_EndToEnd.
+func TestFetchTortugaEpisode_NoSelectionReturnsOneEpisodeOnly(t *testing.T) {
+	encoded := tortugaFixture(t, "tortuga_encoded_sample.txt")
+	srv := tortugaEmbedServer(t, `<script>new Playerjs({file:"`+encoded+`"})</script>`)
+
+	client, err := NewTLSClient()
+	if err != nil {
+		t.Fatalf("NewTLSClient: %v", err)
+	}
+	ext := NewTortugaExtractor(client)
+
+	// Скільки серій у фікстурі — щоб тест не пройшов на одній.
+	embed, err := ext.FetchTortugaEmbed(context.Background(), srv.URL+"/embed/66961", "")
+	if err != nil {
+		t.Fatalf("FetchTortugaEmbed: %v", err)
+	}
+	seriesTotal := 0
+	for _, v := range embed.Voiceovers {
+		for _, s := range v.Seasons {
+			seriesTotal += len(s.Episodes)
+		}
+	}
+	if seriesTotal < 3 {
+		t.Fatalf("fixture must be a multi-episode series, got %d", seriesTotal)
+	}
+
+	def, _, err := ext.FetchTortugaEpisode(context.Background(), srv.URL+"/embed/66961", 0, 0, "")
+	if err != nil {
+		t.Fatalf("FetchTortugaEpisode: %v", err)
+	}
+	if len(def) == 0 {
+		t.Fatal("no streams for the default episode")
+	}
+	if len(def) != 3 {
+		t.Errorf("no-selection request returned %d streams for a %d-episode series; want one episode's 3 qualities", len(def), seriesTotal)
+	}
+	for i, s := range def {
+		if !strings.Contains(s.URL, "s01e01") {
+			t.Errorf("stream[%d] = %s, want the s01e01 episode", i, s.URL)
 		}
 	}
 }

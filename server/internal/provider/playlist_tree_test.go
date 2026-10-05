@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -301,6 +302,103 @@ func TestSelectPlaylistStream_FiltersByVoice(t *testing.T) {
 }
 
 // --- Реальні дані: Роксолана з Tortuga -------------------------------
+
+// Регресія з живої сесії користувача: детальна сторінка робить
+// getStreams без season/episode, і Tortuga-екстрактор приносив кожну
+// серію серіалу («Завантажено 155 потоків» і 155 однакових рядків
+// «Авто — 1+1») замість якостей першої серії.
+//
+// Фікстура — реальне розшифроване дерево Роксолани: 4 сезони, 8 серій
+// (3+3+1+1).
+//
+// TortugaStreamsFromPlaylist навмисно лишається «покажи все дерево» —
+// ним користується FetchTortugaEmbed для деталей. Звужує до однієї
+// серії FetchTortugaEpisode, тож перевіряємо саме його.
+func TestTortugaStreamsFromPlaylist_NoSelectionReturnsOneEpisode(t *testing.T) {
+	raw := loadFixture(t, "tortuga_roksolana.json")
+	var tree []provider.PlayerJSPlaylistItem
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		t.Fatalf("fixture must be a valid playlist: %v", err)
+	}
+
+	episodes := 0
+	for _, v := range provider.BuildVoiceoversFromPlaylist(tree) {
+		for _, s := range v.Seasons {
+			episodes += len(s.Episodes)
+		}
+	}
+	if episodes < 4 {
+		t.Fatalf("fixture must be a multi-episode series, got only %d episodes", episodes)
+	}
+
+	whole, _ := provider.TortugaStreamsFromPlaylist(tree, "https://tortuga.tw/embed/98", "Tortuga", 0, 0, "")
+	if len(whole) != episodes {
+		t.Fatalf("whole-tree view = %d streams, want one per episode (%d)", len(whole), episodes)
+	}
+
+	one, _ := provider.TortugaStreamsFromPlaylist(tree, "https://tortuga.tw/embed/98", "Tortuga", 1, 1, "")
+	if len(one) != 1 {
+		t.Fatalf("explicit S01E01 = %d streams, want 1", len(one))
+	}
+	if !strings.Contains(one[0].URL, "s01e01") {
+		t.Errorf("S01E01 = %s, want an s01e01 URL", one[0].URL)
+	}
+}
+
+// Те саме для дерева PlayerJS у вигляді, який реально розбирає
+// parseMultiQualityString (прості m3u8, а не Tortuga-формат).
+func TestSelectPlaylistStream_NoSelectionReturnsOneEpisodeForPlainURLs(t *testing.T) {
+	var tree []provider.PlayerJSPlaylistItem
+	for s := 1; s <= 3; s++ {
+		season := provider.PlayerJSPlaylistItem{Title: fmt.Sprintf("Сезон %d", s)}
+		for e := 1; e <= 4; e++ {
+			season.Folder = append(season.Folder, provider.PlayerJSPlaylistItem{
+				Title: fmt.Sprintf("Серія %d", e),
+				File:  json.RawMessage(fmt.Sprintf(`"https://cdn.example/hls/s%de%02d/index.m3u8"`, s, e)),
+			})
+		}
+		tree = append(tree, season)
+	}
+
+	def, _ := provider.SelectPlaylistStream(tree, "https://cdn.example/embed/1", "Ashdi", 0, 0, "")
+	if len(def) != 1 {
+		t.Fatalf("no-selection request returned %d streams, want 1 episode out of 12: %+v", len(def), def)
+	}
+	if !strings.Contains(def[0].URL, "s1e01") {
+		t.Errorf("default episode = %s, want s1e01", def[0].URL)
+	}
+
+	explicit, _ := provider.SelectPlaylistStream(tree, "https://cdn.example/embed/1", "Ashdi", 2, 3, "")
+	if len(explicit) != 1 || !strings.Contains(explicit[0].URL, "s2e03") {
+		t.Errorf("S02E03 = %+v, want the s2e03 stream", explicit)
+	}
+}
+
+// Явний вибір епізоду мусить і далі повертати саме його — на дереві,
+// яке реально розбирає parseMultiQualityString (див. тест вище).
+func TestSelectPlaylistStream_ExplicitEpisodeStillWins(t *testing.T) {
+	var tree []provider.PlayerJSPlaylistItem
+	for s := 1; s <= 3; s++ {
+		season := provider.PlayerJSPlaylistItem{Title: fmt.Sprintf("Сезон %d", s)}
+		for e := 1; e <= 4; e++ {
+			season.Folder = append(season.Folder, provider.PlayerJSPlaylistItem{
+				Title: fmt.Sprintf("Серія %d", e),
+				File:  json.RawMessage(fmt.Sprintf(`"https://cdn.example/hls/s%de%02d/index.m3u8"`, s, e)),
+			})
+		}
+		tree = append(tree, season)
+	}
+
+	first, _ := provider.SelectPlaylistStream(tree, "https://cdn.example/embed/1", "Ashdi", 1, 1, "")
+	third, _ := provider.SelectPlaylistStream(tree, "https://cdn.example/embed/1", "Ashdi", 1, 3, "")
+
+	if len(first) == 0 || len(third) == 0 {
+		t.Fatal("both selections must resolve")
+	}
+	if first[0].URL == third[0].URL {
+		t.Errorf("S01E03 returned the same URL as S01E01: %s", first[0].URL)
+	}
+}
 
 // Це та фікстура, заради якої все затівалося: мультисезонний
 // серіал, якого немає в агрегаторі Bandera.
