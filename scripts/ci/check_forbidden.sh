@@ -16,8 +16,18 @@
 
 set -uo pipefail
 
-PATTERN_FILE="scripts/ci/forbidden.txt"
-SCAN_PATHS=(frontend/lib frontend/test backend contracts .github scripts/ci)
+# Resolve paths from this script's own location rather than the working
+# directory. The relative form only worked when invoked from the repo root,
+# which is exactly the assumption a gate must not have: run it from anywhere,
+# or from a CI step with a different cwd, and it silently finds no pattern
+# list. Combined with the stderr suppression below that was a gate that could
+# report success without checking anything.
+GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$GATE_DIR/../.." && pwd)"
+
+PATTERN_FILE="$GATE_DIR/forbidden.txt"
+SCAN_PATHS=("$REPO_ROOT/frontend/lib" "$REPO_ROOT/frontend/test" "$REPO_ROOT/backend"
+           "$REPO_ROOT/contracts" "$REPO_ROOT/.github" "$REPO_ROOT/scripts/ci")
 
 if [[ ! -f "$PATTERN_FILE" ]]; then
   echo "gate: $PATTERN_FILE is missing — refusing to pass silently" >&2
@@ -32,6 +42,25 @@ fi
 
 failed=0
 
+# Build one alternation instead of passing many patterns as positional args.
+#
+# The earlier form was `grep -E "${PATTERNS[@]}" path`, where only the FIRST
+# entry is read as the regex and every remaining one is treated as a filename.
+# Grep then silently found nothing (stderr was discarded), so the gate
+# reported success while enforcing a single term out of the whole list. Any
+# pattern other than the first was dead. One combined -e expression cannot
+# fail that way: every alternative has to be part of the regex to compile.
+REGEX=$(IFS='|'; echo "${PATTERNS[*]}")
+
+# Inspection seam for the self-test. The original failure mode was a pattern
+# silently dropping out of the matcher, which is exactly what the caller of a
+# black-box run cannot see: the gate reports on whatever it did match and looks
+# perfectly healthy. Printing the matcher makes that observable.
+if [[ "${1:-}" == "--print-regex" ]]; then
+  echo "$REGEX"
+  exit 0
+fi
+
 for path in "${SCAN_PATHS[@]}"; do
   [[ -e "$path" ]] || continue
   # Exclude this script and the pattern list itself, and any build output.
@@ -40,7 +69,8 @@ for path in "${SCAN_PATHS[@]}"; do
     --exclude-dir=.dart_tool \
     --exclude-dir=ephemeral \
     --exclude-dir=ci \
-    "${PATTERNS[@]}" "$path" 2>/dev/null || true)
+    -e "$REGEX" \
+    "$path" 2>/dev/null || true)
 
   if [[ -n "$hits" ]]; then
     echo "gate: forbidden terms under $path" >&2
