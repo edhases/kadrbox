@@ -5,6 +5,8 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
+import '../../../core/utils/image_headers.dart';
+
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/favorites_service.dart';
 import '../../../data/services/download_service.dart';
@@ -298,9 +300,11 @@ class _DetailsPageState extends State<DetailsPage> {
   }
 
   Widget _buildPoster() {
-    if (_details?.item.posterUrl != null) {
+    final safeUrl = sanitizePosterUrl(_details?.item.posterUrl);
+    if (safeUrl != null) {
       return CachedNetworkImage(
-        imageUrl: _details!.item.posterUrl!,
+        imageUrl: safeUrl,
+        httpHeaders: getPosterHeaders(safeUrl),
         fit: BoxFit.contain,
         placeholder: (context, url) => const custom.Skeleton(
           width: double.infinity,
@@ -328,17 +332,17 @@ class _DetailsPageState extends State<DetailsPage> {
   }
 
   Widget _buildPosterBackground() {
-    if (_details?.item.posterUrl != null) {
+    final safeUrl = sanitizePosterUrl(_details?.item.posterUrl);
+    if (safeUrl != null) {
       return Stack(
         fit: StackFit.expand,
         children: [
           Hero(
             tag: 'media_poster_grid_${widget.providerId}_${widget.mediaId}',
             child: CachedNetworkImage(
-              imageUrl: _details!.item.posterUrl!,
+              imageUrl: safeUrl,
+              httpHeaders: getPosterHeaders(safeUrl),
               fit: BoxFit.cover,
-              memCacheHeight: 800,
-              maxWidthDiskCache: 800,
             ),
           ),
           Container(

@@ -224,7 +224,7 @@ func (r *Registry) SearchProvider(ctx context.Context, id, query string) ([]doma
 	if !r.IsEnabled(id) {
 		return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
 	}
-	items, err := p.Search(ctx, query)
+	items, err := safeSearch(p, ctx, query)
 	if err != nil {
 		r.recordError(id, err)
 		return nil, err

@@ -15,6 +15,31 @@ const String _browserUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/// Headers needed to fetch posters from CDNs with Cloudflare / hotlink protections.
+Map<String, String>? getPosterHeaders(String? url) {
+  if (url == null || url.isEmpty) return null;
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.host.isEmpty) return null;
+  return {
+    'User-Agent': _browserUserAgent,
+    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    'Referer': 'https://${uri.host}/',
+  };
+}
+
+/// Normalises poster URLs (rewrites old uakino mirrors, validates http/https scheme).
+/// Returns null for invalid or non-URL identifiers (e.g. raw UUIDs).
+String? sanitizePosterUrl(String? url) {
+  if (url == null || url.trim().isEmpty) return null;
+  final trimmed = url.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return null;
+  }
+  return trimmed
+      .replaceAll('uakino.best', 'uakino.biz')
+      .replaceAll('uakino.me', 'uakino.biz');
+}
+
 /// Shared cache manager for remote poster artwork.
 ///
 /// One instance so the on-disk cache is shared across every poster widget and
@@ -44,8 +69,10 @@ class _PosterImageClient extends http.BaseClient {
     effectiveRequest.headers['User-Agent'] = _browserUserAgent;
     effectiveRequest.headers['Accept'] =
         'image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
-    effectiveRequest.headers['Referer'] =
-        'https://${effectiveRequest.url.host}/';
+    if (effectiveRequest.url.host.isNotEmpty) {
+      effectiveRequest.headers['Referer'] =
+          'https://${effectiveRequest.url.host}/';
+    }
     return _inner.send(effectiveRequest);
   }
 

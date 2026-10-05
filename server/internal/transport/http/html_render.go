@@ -253,6 +253,18 @@ var telegramWidgetTemplate = template.Must(template.New("telegram-widget").Parse
               data-auth-url="{{.AuthURL}}"
               data-request-access="write"></script>
     </div>
+    <div id="tg-notice" style="display:none; margin-top: 16px; padding: 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; font-size: 13px; color: #fca5a5; line-height: 1.4;">
+      Кнопка Telegram не з'явилася? Переконайтеся, що домен сайту прив'язано до бота в <b>@BotFather</b> через команду <code>/setdomain</code>.
+    </div>
+    <script>
+      setTimeout(function() {
+        var container = document.querySelector('.widget-container');
+        if (!container || !container.querySelector('iframe')) {
+          var notice = document.getElementById('tg-notice');
+          if (notice) notice.style.display = 'block';
+        }
+      }, 2500);
+    </script>
   </div>
 </body>
 </html>

@@ -95,13 +95,18 @@ func (p *BanderaProvider) convertSearchItems(rawItems []BanderaSearchItem) []dom
 			}
 		}
 
+		poster := item.Poster.String()
+		if !strings.Contains(poster, ".") && !strings.HasPrefix(poster, "http") {
+			poster = ""
+		}
+
 		payload := BanderaItemPayload{
 			ID:        stableID,
 			Source:    item.Source,
 			Ref:       item.Ref,
 			Type:      mediaType,
 			Title:     item.Title,
-			Poster:    item.Poster.String(),
+			Poster:    poster,
 			Year:      year,
 			IsItemRef: true,
 		}
@@ -116,7 +121,7 @@ func (p *BanderaProvider) convertSearchItems(rawItems []BanderaSearchItem) []dom
 			ProviderID:    p.ID(),
 			Title:         item.Title,
 			OriginalTitle: item.TitleEn.String(),
-			PosterURL:     item.Poster.String(),
+			PosterURL:     poster,
 			Year:          year,
 			Type:          mediaType,
 			URL:           string(payloadBytes),

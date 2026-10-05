@@ -16,7 +16,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/edhases/oxide-server/internal/domain"
@@ -85,10 +87,6 @@ func (h *ContentHandler) runSearch(ctx context.Context, query, providerID string
 	searcher, err := h.resolveMetaSearcher("bandera")
 	if err != nil {
 		if errors.Is(err, provider.ErrProviderNotFound) {
-			// The aggregator is not registered at all. The fan-out is the
-			// correct answer here, and it is wrapped in the same
-			// search.SearchResponse shape, so the endpoint keeps one contract
-			// whether or not the aggregator is present.
 			return h.searchFanout(ctx, query, start), false, nil
 		}
 		return search.SearchResponse{}, false, err
@@ -96,15 +94,13 @@ func (h *ContentHandler) runSearch(ctx context.Context, query, providerID string
 
 	plan := search.BuildQueryPlan(query)
 
-	resp, fromCache, err := cached(ctx, h, "search:"+plan.Hash, searcher.ID(), "search", negativeSearchTTL,
+	resp, fromCache, err := cached(ctx, h, "search:"+plan.Hash, "unified", "search", negativeSearchTTL,
 		func(ctx context.Context) (search.SearchResponse, time.Duration, error) {
-			built, buildErr := buildSearchResponse(ctx, searcher, plan, query, start)
+			built, buildErr := h.buildUnifiedSearchResponse(ctx, searcher, plan, query, start)
 			if buildErr != nil {
 				return search.SearchResponse{}, 0, buildErr
 			}
 			if len(built.Items) == 0 {
-				// An empty result set is worth a much shorter TTL than a full
-				// one: the aggregator is usually still warming up.
 				return built, searchEmptyTTL, nil
 			}
 			return built, searchCacheTTL, nil
@@ -151,6 +147,169 @@ func (h *ContentHandler) searchFanout(ctx context.Context, query string, start t
 		}},
 		Items: scored,
 	}
+}
+
+// buildUnifiedSearchResponse fans out concurrently to Bandera (meta-searcher)
+// and all other registered & enabled providers (e.g. UAKino, Lavakino, Eneyida),
+// scoring, clustering and deduplicating all candidates into a single response.
+func (h *ContentHandler) buildUnifiedSearchResponse(ctx context.Context, searcher metaSearcher, plan *search.QueryPlan, query string, start time.Time) (search.SearchResponse, error) {
+	serial := 0
+	if plan.TypeHint == "series" {
+		serial = 1
+	}
+
+	var (
+		mu               sync.Mutex
+		wg               sync.WaitGroup
+		allCandidates    []search.ScoredSearchItem
+		totalFilteredOut int
+		banderaSegment   *search.SearchSegment
+		otherSegments    []search.SearchSegment
+	)
+
+	// 1. Meta-searcher (Bandera), if registered and enabled
+	if searcher != nil && h.registry.IsEnabled(searcher.ID()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rawResp, bErr := searcher.SearchWithMeta(ctx, plan.Canonical, plan.Year, serial)
+			mu.Lock()
+			defer mu.Unlock()
+			if bErr != nil {
+				log.Printf("[Search] bandera search failed: %v", bErr)
+				banderaSegment = &search.SearchSegment{
+					ID:     searcher.ID(),
+					Status: "error",
+					Count:  0,
+				}
+				return
+			}
+			candidates, filteredOut := scoreCandidates(searcher.ID(), rawResp.Items, plan)
+			allCandidates = append(allCandidates, candidates...)
+			totalFilteredOut += filteredOut
+			segmentStatus, sourceStatuses := summariseSources(rawResp)
+			banderaSegment = &search.SearchSegment{
+				ID:      searcher.ID(),
+				Status:  segmentStatus,
+				Count:   len(rawResp.Items),
+				Sources: sourceStatuses,
+			}
+		}()
+	}
+
+	// 2. Direct providers (Uakino, Lavakino, Eneyida, etc.)
+	for _, prov := range h.registry.List() {
+		if prov.ID() == "bandera" || !h.registry.IsEnabled(prov.ID()) {
+			continue
+		}
+		wg.Add(1)
+		go func(p domain.Provider) {
+			defer wg.Done()
+			items, pErr := h.registry.SearchProvider(ctx, p.ID(), query)
+			if pErr != nil {
+				mu.Lock()
+				otherSegments = append(otherSegments, search.SearchSegment{
+					ID:     p.ID(),
+					Status: "error",
+					Count:  0,
+					Sources: map[string]search.SourceStatusInfo{
+						p.ID(): {Status: "error", Count: 0},
+					},
+				})
+				mu.Unlock()
+				return
+			}
+
+			var pCandidates []search.ScoredSearchItem
+			pFilteredOut := 0
+
+			for _, it := range items {
+				year := it.Year
+				scoreRes := search.CalculateRelevance(plan, it.Title, year, it.Type)
+				if scoreRes.Dropped {
+					pFilteredOut++
+					continue
+				}
+
+				poster := it.PosterURL
+				if strings.Contains(poster, "uakino.best") || strings.Contains(poster, "uakino.me") {
+					poster = strings.ReplaceAll(strings.ReplaceAll(poster, "uakino.best", "uakino.biz"), "uakino.me", "uakino.biz")
+					it.PosterURL = poster
+				}
+				if !strings.HasPrefix(poster, "http://") && !strings.HasPrefix(poster, "https://") {
+					it.PosterURL = ""
+				}
+
+				pCandidates = append(pCandidates, search.ScoredSearchItem{
+					MediaItem: domain.MediaItem{
+						ID:            it.ID,
+						ProviderID:    p.ID(),
+						Title:         it.Title,
+						OriginalTitle: it.OriginalTitle,
+						PosterURL:     it.PosterURL,
+						Year:          it.Year,
+						Type:          it.Type,
+						Rating:        it.Rating,
+						URL:           it.URL,
+					},
+					Score:      scoreRes.Score,
+					MatchedBy:  scoreRes.MatchedBy,
+					ClusterKey: search.GenerateClusterKey(it.Title, year, it.Type),
+					Sources: []search.SearchSourceRef{{
+						ProviderID: p.ID(),
+						SourceKey:  p.ID(),
+						ItemID:     it.ID,
+						URL:        it.URL,
+					}},
+				})
+			}
+
+			status := "ok"
+			if len(items) == 0 {
+				status = "empty"
+			}
+
+			mu.Lock()
+			allCandidates = append(allCandidates, pCandidates...)
+			totalFilteredOut += pFilteredOut
+			otherSegments = append(otherSegments, search.SearchSegment{
+				ID:     p.ID(),
+				Status: status,
+				Count:  len(items),
+				Sources: map[string]search.SourceStatusInfo{
+					p.ID(): {Status: status, Count: len(items)},
+				},
+			})
+			mu.Unlock()
+		}(prov)
+	}
+
+	wg.Wait()
+
+	sort.Slice(otherSegments, func(i, j int) bool {
+		return otherSegments[i].ID < otherSegments[j].ID
+	})
+
+	var finalSegments []search.SearchSegment
+	if banderaSegment != nil {
+		finalSegments = append(finalSegments, *banderaSegment)
+	}
+	finalSegments = append(finalSegments, otherSegments...)
+
+	clustered := search.ClusterAndDeduplicate(allCandidates)
+	if clustered == nil {
+		clustered = []search.ScoredSearchItem{}
+	}
+
+	return search.SearchResponse{
+		Query:       query,
+		Canonical:   plan.Canonical,
+		TookMs:      time.Since(start).Milliseconds(),
+		Segments:    finalSegments,
+		Items:       clustered,
+		FilteredOut: totalFilteredOut,
+		HasMore:     false,
+	}, nil
 }
 
 func (h *ContentHandler) resolveMetaSearcher(id string) (metaSearcher, error) {
@@ -260,13 +419,17 @@ func scoreCandidates(providerID string, items []provider.BanderaSearchItem, plan
 		}
 
 		stableID := provider.GenerateStableContentID(item.Source, item.Title, year, item.Ref)
+		poster := item.Poster.String()
+		if !strings.Contains(poster, ".") && !strings.HasPrefix(poster, "http") {
+			poster = ""
+		}
 		payload := provider.BanderaItemPayload{
 			ID:        stableID,
 			Source:    item.Source,
 			Ref:       item.Ref,
 			Type:      mediaType,
 			Title:     item.Title,
-			Poster:    item.Poster.String(),
+			Poster:    poster,
 			Year:      year,
 			IsItemRef: true,
 		}
@@ -278,7 +441,7 @@ func scoreCandidates(providerID string, items []provider.BanderaSearchItem, plan
 				ProviderID:    providerID,
 				Title:         item.Title,
 				OriginalTitle: item.TitleEn.String(),
-				PosterURL:     item.Poster.String(),
+				PosterURL:     poster,
 				Year:          year,
 				Type:          mediaType,
 				URL:           string(payloadBytes),

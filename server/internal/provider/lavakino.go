@@ -17,6 +17,12 @@ type LavakinoProvider struct {
 }
 
 func NewLavakinoProvider(client *TLSClient) *LavakinoProvider {
+	if client == nil {
+		c, err := NewTLSClient()
+		if err == nil {
+			client = c
+		}
+	}
 	return &LavakinoProvider{
 		client:  client,
 		baseURL: "https://lavakino.net",

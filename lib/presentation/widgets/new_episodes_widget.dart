@@ -382,37 +382,41 @@ class _EpisodeCard extends StatelessWidget {
                 // Poster
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: episode.posterUrl != null
-                      ? CachedNetworkImage(
-                          imageUrl: episode.posterUrl!,
-                          cacheManager: posterCacheManager,
-                          width: 60,
-                          height: 90,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => Container(
-                            width: 60,
-                            height: 90,
-                            color: AppTheme.darkSurface,
-                          ),
-                          errorWidget: (_, __, ___) => Container(
-                            width: 60,
-                            height: 90,
-                            color: AppTheme.darkSurface,
-                            child: const Icon(
-                              Icons.movie,
-                              color: AppTheme.textMuted,
-                            ),
-                          ),
-                        )
-                      : Container(
-                          width: 60,
-                          height: 90,
-                          color: AppTheme.darkSurface,
-                          child: const Icon(
-                            Icons.movie,
-                            color: AppTheme.textMuted,
-                          ),
+                  child: () {
+                    final safeUrl = sanitizePosterUrl(episode.posterUrl);
+                    if (safeUrl == null) {
+                      return Container(
+                        width: 60,
+                        height: 90,
+                        color: AppTheme.darkSurface,
+                        child: const Icon(
+                          Icons.movie,
+                          color: AppTheme.textMuted,
                         ),
+                      );
+                    }
+                    return CachedNetworkImage(
+                      imageUrl: safeUrl,
+                      httpHeaders: getPosterHeaders(safeUrl),
+                      width: 60,
+                      height: 90,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        width: 60,
+                        height: 90,
+                        color: AppTheme.darkSurface,
+                      ),
+                      errorWidget: (_, __, ___) => Container(
+                        width: 60,
+                        height: 90,
+                        color: AppTheme.darkSurface,
+                        child: const Icon(
+                          Icons.movie,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    );
+                  }(),
                 ),
 
                 const SizedBox(width: 12),

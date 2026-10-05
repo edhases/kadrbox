@@ -153,6 +153,8 @@ class _MediaCardState extends State<MediaCard> {
       widget.item.providerId,
     );
 
+    final safeUrl = sanitizePosterUrl(widget.item.posterUrl);
+
     return Hero(
       tag:
           'media_poster_${widget.heroNamespace}_${widget.item.providerId}_${widget.item.id}',
@@ -163,13 +165,12 @@ class _MediaCardState extends State<MediaCard> {
               cacheWidth: 400,
               gaplessPlayback: true,
             )
-          : widget.item.posterUrl != null
+          : safeUrl != null
           ? CachedNetworkImage(
-              imageUrl: widget.item.posterUrl!,
-              cacheManager: posterCacheManager,
+              imageUrl: safeUrl,
+              httpHeaders: getPosterHeaders(safeUrl),
               fit: BoxFit.cover,
               memCacheHeight: 400,
-              maxWidthDiskCache: 400,
               placeholder: (context, url) => const Skeleton(
                 width: double.infinity,
                 height: double.infinity,
