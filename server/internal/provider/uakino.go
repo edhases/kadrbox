@@ -18,9 +18,19 @@ type UakinoProvider struct {
 }
 
 func NewUakinoProvider(client *TLSClient) *UakinoProvider {
+	return NewUakinoProviderWithConfig("https://uakino.biz", client)
+}
+
+func NewUakinoProviderWithConfig(baseURL string, client *TLSClient) *UakinoProvider {
+	if baseURL == "" {
+		baseURL = "https://uakino.biz"
+	}
+	if client == nil {
+		client, _ = NewTLSClient()
+	}
 	return &UakinoProvider{
 		client:  client,
-		baseURL: "https://uakino.biz",
+		baseURL: baseURL,
 	}
 }
 
@@ -138,14 +148,14 @@ func (p *UakinoProvider) fetchCatalog(ctx context.Context, reqURL string) ([]dom
 	// then has to special-case.
 	items := []domain.MediaItem{}
 	doc.Find(".movie-item, .short-story").Each(func(i int, s *goquery.Selection) {
-		linkElem := s.Find(".movie-title a, a.movie-title, h2.title a")
+		linkElem := s.Find(".movie-title a, a.movie-title, h2.title a").First()
 		title := strings.TrimSpace(linkElem.Text())
 		href, exists := linkElem.Attr("href")
 		if !exists || title == "" {
 			return
 		}
 
-		imgElem := s.Find(".movie-img img, .movie-img-1 img, .movie-img-inner img, .movie-poster img, .poster img, img")
+		imgElem := s.Find(".movie-img img, .movie-img-1 img, .movie-img-inner img, .movie-poster img, .poster img, img").First()
 		poster, _ := imgElem.Attr("src")
 		if poster == "" {
 			poster, _ = imgElem.Attr("data-src")

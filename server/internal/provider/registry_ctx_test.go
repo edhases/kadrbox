@@ -222,16 +222,21 @@ func TestRegistryPopularAndCategorySurviveAPanickingProvider(t *testing.T) {
 // With an explicit provider the panic must surface as ErrProviderPanic, so the
 // HTTP layer can still answer 500 with a JSON body.
 func TestRegistryExplicitProviderPanicIsATypedError(t *testing.T) {
-	for _, op := range []string{"popular", "category"} {
+	for _, op := range []string{"popular", "category", "details", "streams"} {
 		t.Run(op, func(t *testing.T) {
 			reg := provider.NewRegistry()
 			reg.Register(&rcPanicProvider{id: "boom", op: op})
 
 			var err error
-			if op == "popular" {
+			switch op {
+			case "popular":
 				_, err = reg.Popular(context.Background(), "boom", "", 1)
-			} else {
+			case "category":
 				_, err = reg.Category(context.Background(), "boom", "x", "", 1)
+			case "details":
+				_, err = reg.Details(context.Background(), "boom", "https://example.com/item")
+			case "streams":
+				_, err = reg.Streams(context.Background(), "boom", "https://example.com/item", 1, 1, "")
 			}
 			if !errors.Is(err, provider.ErrProviderPanic) {
 				t.Errorf("%s: err = %v, want ErrProviderPanic", op, err)

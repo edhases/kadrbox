@@ -34,12 +34,6 @@ const (
 	negativeSearchTTL    = 10 * time.Second
 	negativeDetailsTTL   = 10 * time.Second
 	negativeCatalogueTTL = 10 * time.Second
-
-	// searchFanoutBudget bounds one coalesced upstream search. The work runs on
-	// a context detached from any single caller, so without its own deadline a
-	// hanging aggregator would hold the singleflight key forever and every
-	// later identical search would queue behind it.
-	searchFanoutBudget = 30 * time.Second
 )
 
 // metaSearcher is the capability ContentHandler needs from a provider to answer
@@ -115,7 +109,8 @@ func (h *ContentHandler) runSearch(ctx context.Context, query, providerID string
 // registered. It is not a different contract: the result is assembled into the
 // same search.SearchResponse the unified path returns.
 func (h *ContentHandler) searchFanout(ctx context.Context, query string, start time.Time) search.SearchResponse {
-	items, err := h.registry.SingleFlightSearch(ctx, query)
+	plan := search.BuildQueryPlan(query)
+	items, err := h.registry.SingleFlightSearch(ctx, plan.Canonical)
 	if err != nil {
 		log.Printf("[Content] search fan-out failed: %v", err)
 		items = nil
@@ -134,7 +129,6 @@ func (h *ContentHandler) searchFanout(ctx context.Context, query string, start t
 	if len(scored) == 0 {
 		status = "empty"
 	}
-	plan := search.BuildQueryPlan(query)
 
 	return search.SearchResponse{
 		Query:     query,
@@ -205,7 +199,7 @@ func (h *ContentHandler) buildUnifiedSearchResponse(ctx context.Context, searche
 		wg.Add(1)
 		go func(p domain.Provider) {
 			defer wg.Done()
-			items, pErr := h.registry.SearchProvider(ctx, p.ID(), query)
+			items, pErr := h.registry.SearchProvider(ctx, p.ID(), plan.Canonical)
 			if pErr != nil {
 				mu.Lock()
 				otherSegments = append(otherSegments, search.SearchSegment{

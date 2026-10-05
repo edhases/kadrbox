@@ -346,3 +346,40 @@ func TestUakino_ErrorPaths(t *testing.T) {
 		t.Errorf("expected error on GetStreams 500")
 	}
 }
+
+func TestUakino_MultipleAnchorsInCardTitle(t *testing.T) {
+	html := `<html><body>
+		<div class="movie-item">
+			<div class="movie-title">
+				<a href="https://uakino.biz/123-dune.html">Дюна: Частина друга</a>
+				<a href="/tags/sci-fi">Фантастика</a>
+			</div>
+			<div class="movie-img"><img src="/img/dune.jpg" /></div>
+			<div class="movie-date">2024</div>
+		</div>
+	</body></html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	p := &UakinoProvider{
+		client:  covTLS(t),
+		baseURL: server.URL,
+	}
+
+	items, err := p.Search(context.Background(), "дюна")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Title != "Дюна: Частина друга" {
+		t.Errorf("expected title 'Дюна: Частина друга', got %q", items[0].Title)
+	}
+	if items[0].ID != "https://uakino.biz/123-dune.html" {
+		t.Errorf("expected href 'https://uakino.biz/123-dune.html', got %q", items[0].ID)
+	}
+}

@@ -18,11 +18,12 @@ var ErrProviderDisabled = errors.New("provider disabled")
 // ErrProviderNotFound повертається для невідомого ID провайдера.
 var ErrProviderNotFound = errors.New("unknown provider")
 
-// searchFanoutBudget bounds one coalesced multi-provider fan-out. The work runs
+// SearchFanoutBudget bounds one coalesced multi-provider fan-out. The work runs
 // on a context detached from any single caller, so without its own deadline a
 // scraper that hangs would keep the singleflight key occupied indefinitely and
 // every subsequent identical search would pile up behind it.
-const searchFanoutBudget = 30 * time.Second
+const SearchFanoutBudget = 20 * time.Second
+const searchFanoutBudget = SearchFanoutBudget
 
 // ErrProviderPanic marks an error that came from a recovered provider panic
 // rather than from a returned error. It is a distinct sentinel so the HTTP
@@ -277,6 +278,16 @@ func (r *Registry) SingleFlightSearch(ctx context.Context, query string) ([]doma
 	}
 }
 
+func safeGetDetails(p domain.Provider, ctx context.Context, itemURL string) (details *domain.MediaDetails, err error) {
+	defer recoverProvider("GetDetails", p, &err)
+	return p.GetDetails(ctx, itemURL)
+}
+
+func safeGetStreams(p domain.Provider, ctx context.Context, itemURL string, season, episode int, voiceID string) (resp *domain.ContentStreamsResponse, err error) {
+	defer recoverProvider("GetStreams", p, &err)
+	return p.GetStreams(ctx, itemURL, season, episode, voiceID)
+}
+
 // Details повертає деталі через провайдер з трекінгом здоров'я та kill-switch.
 func (r *Registry) Details(ctx context.Context, id, itemURL string) (*domain.MediaDetails, error) {
 	p, ok := r.Get(id)
@@ -286,7 +297,7 @@ func (r *Registry) Details(ctx context.Context, id, itemURL string) (*domain.Med
 	if !r.IsEnabled(id) {
 		return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
 	}
-	details, err := p.GetDetails(ctx, itemURL)
+	details, err := safeGetDetails(p, ctx, itemURL)
 	if err != nil {
 		r.recordError(id, err)
 		return nil, err
@@ -304,7 +315,7 @@ func (r *Registry) Streams(ctx context.Context, id, itemURL string, season, epis
 	if !r.IsEnabled(id) {
 		return nil, fmt.Errorf("%w: %s", ErrProviderDisabled, id)
 	}
-	resp, err := p.GetStreams(ctx, itemURL, season, episode, voiceID)
+	resp, err := safeGetStreams(p, ctx, itemURL, season, episode, voiceID)
 	if err != nil {
 		r.recordError(id, err)
 		return nil, err

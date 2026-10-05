@@ -73,6 +73,9 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
+	if itemURL == "" {
+		itemURL = r.URL.Query().Get("id")
+	}
 
 	if providerID == "" || itemURL == "" {
 		writeAPIError(w, "provider and url parameters are required", http.StatusBadRequest)
@@ -102,6 +105,9 @@ func (h *ContentHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 func (h *ContentHandler) GetStreams(w http.ResponseWriter, r *http.Request) {
 	providerID := r.URL.Query().Get("provider")
 	itemURL := r.URL.Query().Get("url")
+	if itemURL == "" {
+		itemURL = r.URL.Query().Get("id")
+	}
 
 	if providerID == "" || itemURL == "" {
 		writeAPIError(w, "provider and url parameters are required", http.StatusBadRequest)
@@ -233,7 +239,7 @@ func cached[T any](
 		// that runs the work owns its cancellation. Creating it out here would
 		// mean the first caller's `defer cancel()` tore down the shared fetch
 		// for everyone else the moment that caller disconnected.
-		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchFanoutBudget)
+		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), provider.SearchFanoutBudget)
 		defer cancel()
 
 		loaded, ttl, loadErr := load(shared)
