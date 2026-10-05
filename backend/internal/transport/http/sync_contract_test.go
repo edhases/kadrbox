@@ -306,7 +306,7 @@ func scSeedFavorites(t *testing.T, store *scPagedFavorites, userID uuid.UUID, n 
 		if err := store.AddFavorite(context.Background(), &domain.Favorite{
 			UserID:     userID,
 			MediaID:    fmt.Sprintf("m%02d", i),
-			ProviderID: "uakino",
+			ProviderID: "example-provider",
 			Title:      fmt.Sprintf("Title %02d", i),
 			Year:       &year,
 		}); err != nil {
@@ -571,7 +571,7 @@ type scToggleResult struct {
 
 func scToggle(t *testing.T, h *transporthttp.SyncHandler, userID uuid.UUID) scToggleResult {
 	t.Helper()
-	body := `{"media_id":"m1","provider_id":"uakino","title":"Матриця"}`
+	body := `{"media_id":"m1","provider_id":"example-provider","title":"Матриця"}`
 	req := scWithUser(scAuthed(http.MethodPost, "/api/v1/sync/favorites/toggle", body), userID)
 	rr := httptest.NewRecorder()
 	h.ToggleFavorite(rr, req)
@@ -601,7 +601,7 @@ func TestToggleFavoriteIsIdempotentUnderReplay(t *testing.T) {
 	if !first.Data.IsFavorite {
 		t.Fatalf("first toggle reported is_favorite=false, want true")
 	}
-	if !store.state(user, "m1", "uakino") {
+	if !store.state(user, "m1", "example-provider") {
 		t.Fatal("the first toggle did not commit the favourite")
 	}
 
@@ -613,7 +613,7 @@ func TestToggleFavoriteIsIdempotentUnderReplay(t *testing.T) {
 	want := true
 	for i := 0; i < 3; i++ {
 		got := scToggle(t, h, user)
-		committed := store.state(user, "m1", "uakino")
+		committed := store.state(user, "m1", "example-provider")
 		if got.Data.IsFavorite != committed {
 			t.Fatalf("replay %d reported is_favorite=%v but the store holds %v",
 				i+1, got.Data.IsFavorite, committed)
@@ -678,7 +678,7 @@ func TestToggleFavoriteConcurrentIsWellDefined(t *testing.T) {
 
 	// The final state must be the last commit, not a value some other caller
 	// overwrote after its response was written.
-	if got, want := store.state(user, "m1", "uakino"), history[len(history)-1]; got != want {
+	if got, want := store.state(user, "m1", "example-provider"), history[len(history)-1]; got != want {
 		t.Errorf("final state = %v, last commit = %v", got, want)
 	}
 }

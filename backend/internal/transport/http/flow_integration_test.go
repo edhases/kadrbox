@@ -211,7 +211,7 @@ func TestCovHttpFlowSync(t *testing.T) {
 
 	// SaveProgress РІвЂ вЂ™ РЎвЂ“РЎРѓРЎвЂљР С•РЎР‚РЎвЂ“РЎРЏ.
 	rr = rig.do(t, http.MethodPost, "/api/v1/sync/history", map[string]any{
-		"media_id": "m1", "provider_id": "uakino", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
+		"media_id": "m1", "provider_id": "example-provider", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
 		"position_ms": 50, "duration_ms": 100,
 	}, token)
 	if rr.Code != http.StatusOK {
@@ -232,7 +232,7 @@ func TestCovHttpFlowSync(t *testing.T) {
 
 	// Toggle on РІвЂ вЂ™ favorites Р СРЎвЂ“РЎРѓРЎвЂљР С‘РЎвЂљРЎРЉ; toggle off РІвЂ вЂ™ Р С—Р С•РЎР‚Р С•Р В¶Р Р…РЎРЉР С•.
 	rr = rig.do(t, http.MethodPost, "/api/v1/sync/favorites/toggle", map[string]string{
-		"media_id": "m1", "provider_id": "uakino", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
+		"media_id": "m1", "provider_id": "example-provider", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
 	}, token)
 	on := covFlowDecodeEnvelope[toggleEnvelope](t, rr)
 	if !on.IsFavorite {
@@ -244,7 +244,7 @@ func TestCovHttpFlowSync(t *testing.T) {
 		t.Fatalf("expected 1 favorite, got %+v", favs)
 	}
 	rr = rig.do(t, http.MethodPost, "/api/v1/sync/favorites/toggle", map[string]string{
-		"media_id": "m1", "provider_id": "uakino", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
+		"media_id": "m1", "provider_id": "example-provider", "title": "Р СљР В°РЎвЂљРЎР‚Р С‘РЎвЂ РЎРЏ",
 	}, token)
 	off := covFlowDecodeEnvelope[toggleEnvelope](t, rr)
 	if off.IsFavorite {

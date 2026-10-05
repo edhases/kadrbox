@@ -43,7 +43,7 @@ func TestCtUpsertWatchHistoryIsIdempotentForMovies(t *testing.T) {
 	// Two syncs of the same movie: identical (user, media, provider, NULL
 	// season, NULL episode), different position and a later watched_at.
 	first := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-movie", ProviderID: "uakino", Title: "Матриця",
+		UserID: userID, MediaID: "ct-movie", ProviderID: "example-provider", Title: "Матриця",
 		PositionMs: 50, DurationMs: 100, WatchedAt: base,
 	}
 	if err := repo.UpsertWatchHistory(ctx, first); err != nil {
@@ -51,7 +51,7 @@ func TestCtUpsertWatchHistoryIsIdempotentForMovies(t *testing.T) {
 	}
 
 	second := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-movie", ProviderID: "uakino", Title: "Матриця",
+		UserID: userID, MediaID: "ct-movie", ProviderID: "example-provider", Title: "Матриця",
 		PositionMs: 90, DurationMs: 100, WatchedAt: base.Add(time.Minute),
 	}
 	if err := repo.UpsertWatchHistory(ctx, second); err != nil {
@@ -100,7 +100,7 @@ func TestCtUpsertWatchHistoryDistinctEpisodesDoNotCollapse(t *testing.T) {
 	for _, ep := range []int{1, 2, 3} {
 		season := 1
 		h := &domain.WatchHistory{
-			UserID: userID, MediaID: "ct-series", ProviderID: "uakino", Title: "Серіал",
+			UserID: userID, MediaID: "ct-series", ProviderID: "example-provider", Title: "Серіал",
 			Season: &season, Episode: &ep,
 			PositionMs: 10, DurationMs: 100, WatchedAt: time.Now(),
 		}
@@ -112,7 +112,7 @@ func TestCtUpsertWatchHistoryDistinctEpisodesDoNotCollapse(t *testing.T) {
 	// Re-syncing episode 2 must update it, not add a fourth row.
 	season, ep := 1, 2
 	h := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-series", ProviderID: "uakino", Title: "Серіал",
+		UserID: userID, MediaID: "ct-series", ProviderID: "example-provider", Title: "Серіал",
 		Season: &season, Episode: &ep,
 		PositionMs: 42, DurationMs: 100, WatchedAt: time.Now(),
 	}
@@ -152,7 +152,7 @@ func TestCtUpsertWatchHistoryIsMonotonic(t *testing.T) {
 	older := newer.Add(-2 * time.Hour)
 
 	a := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-mono", ProviderID: "uakino", Title: "t",
+		UserID: userID, MediaID: "ct-mono", ProviderID: "example-provider", Title: "t",
 		PositionMs: 90, DurationMs: 100, WatchedAt: newer,
 	}
 	if err := repo.UpsertWatchHistory(ctx, a); err != nil {
@@ -161,7 +161,7 @@ func TestCtUpsertWatchHistoryIsMonotonic(t *testing.T) {
 
 	// Device B arrives late in wall-clock time but carries an older watched_at.
 	b := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-mono", ProviderID: "uakino", Title: "t",
+		UserID: userID, MediaID: "ct-mono", ProviderID: "example-provider", Title: "t",
 		PositionMs: 10, DurationMs: 100, WatchedAt: older,
 	}
 	if err := repo.UpsertWatchHistory(ctx, b); err != nil {
@@ -198,7 +198,7 @@ func TestCtUpsertWatchHistoryZeroWatchedAtUsesServerClock(t *testing.T) {
 
 	before := time.Now().Add(-time.Second)
 	h := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-clock", ProviderID: "uakino", Title: "t",
+		UserID: userID, MediaID: "ct-clock", ProviderID: "example-provider", Title: "t",
 		PositionMs: 10, DurationMs: 100, // WatchedAt deliberately zero
 	}
 	if err := repo.UpsertWatchHistory(ctx, h); err != nil {
@@ -211,7 +211,7 @@ func TestCtUpsertWatchHistoryZeroWatchedAtUsesServerClock(t *testing.T) {
 	// A future client clock must not be stored verbatim either, or that row
 	// would win every later comparison.
 	future := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-future", ProviderID: "uakino", Title: "t",
+		UserID: userID, MediaID: "ct-future", ProviderID: "example-provider", Title: "t",
 		PositionMs: 10, DurationMs: 100, WatchedAt: time.Now().Add(72 * time.Hour),
 	}
 	if err := repo.UpsertWatchHistory(ctx, future); err != nil {
@@ -241,7 +241,7 @@ func TestCtGetUserHistoryPaginationBoundaries(t *testing.T) {
 	seed := time.Now().Add(-time.Hour)
 	for i := 0; i < total; i++ {
 		h := &domain.WatchHistory{
-			UserID: userID, MediaID: fmt.Sprintf("ct-hist-%d", i), ProviderID: "uakino",
+			UserID: userID, MediaID: fmt.Sprintf("ct-hist-%d", i), ProviderID: "example-provider",
 			Title: fmt.Sprintf("h%d", i), PositionMs: 10, DurationMs: 100,
 			// Deliberately identical timestamps for the first three rows so the
 			// id tiebreak in ORDER BY is what keeps the pages disjoint.
@@ -326,7 +326,7 @@ func TestCtGetUserFavoritesPaginationBoundaries(t *testing.T) {
 	const total = 5
 	for i := 0; i < total; i++ {
 		if err := repo.AddFavorite(ctx, &domain.Favorite{
-			UserID: userID, MediaID: fmt.Sprintf("ct-fav-%d", i), ProviderID: "uakino",
+			UserID: userID, MediaID: fmt.Sprintf("ct-fav-%d", i), ProviderID: "example-provider",
 			Title: fmt.Sprintf("f%d", i), MediaType: "movie",
 		}); err != nil {
 			t.Fatalf("AddFavorite %d failed: %v", i, err)
@@ -421,14 +421,14 @@ func TestCtAddFavoriteTwiceIsIdempotentNotConflict(t *testing.T) {
 	})
 
 	fav := &domain.Favorite{
-		UserID: userID, MediaID: "ct-dup", ProviderID: "uakino", Title: "Дюна", MediaType: "movie",
+		UserID: userID, MediaID: "ct-dup", ProviderID: "example-provider", Title: "Дюна", MediaType: "movie",
 	}
 	if err := repo.AddFavorite(ctx, fav); err != nil {
 		t.Fatalf("first AddFavorite failed: %v", err)
 	}
 	// A changed title on the replay must not overwrite the stored one either.
 	replay := &domain.Favorite{
-		UserID: userID, MediaID: "ct-dup", ProviderID: "uakino", Title: "Дюна: Частина друга", MediaType: "movie",
+		UserID: userID, MediaID: "ct-dup", ProviderID: "example-provider", Title: "Дюна: Частина друга", MediaType: "movie",
 	}
 	if err := repo.AddFavorite(ctx, replay); err != nil {
 		t.Fatalf("a repeated AddFavorite must not error, got %v", err)
@@ -463,16 +463,16 @@ func TestCtRemoveFavoriteTwiceIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
 	if err := repo.AddFavorite(ctx, &domain.Favorite{
-		UserID: userID, MediaID: "ct-rm", ProviderID: "uakino", Title: "t", MediaType: "movie",
+		UserID: userID, MediaID: "ct-rm", ProviderID: "example-provider", Title: "t", MediaType: "movie",
 	}); err != nil {
 		t.Fatalf("AddFavorite failed: %v", err)
 	}
 	for attempt := 1; attempt <= 2; attempt++ {
-		if err := repo.RemoveFavorite(ctx, userID, "ct-rm", "uakino"); err != nil {
+		if err := repo.RemoveFavorite(ctx, userID, "ct-rm", "example-provider"); err != nil {
 			t.Fatalf("RemoveFavorite attempt %d failed: %v", attempt, err)
 		}
 	}
-	isFav, err := repo.IsFavorite(ctx, userID, "ct-rm", "uakino")
+	isFav, err := repo.IsFavorite(ctx, userID, "ct-rm", "example-provider")
 	if err != nil {
 		t.Fatalf("IsFavorite failed: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestCtRemoveFavoriteTwiceIsIdempotent(t *testing.T) {
 	}
 
 	// Removing a row that never existed is also a no-op.
-	if err := repo.RemoveFavorite(ctx, userID, "ct-never-existed", "uakino"); err != nil {
+	if err := repo.RemoveFavorite(ctx, userID, "ct-never-existed", "example-provider"); err != nil {
 		t.Errorf("removing an unknown favourite must be a no-op, got %v", err)
 	}
 }
@@ -782,7 +782,7 @@ func TestCtConcurrentUpsertsCollapseToOneRow(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func(i int) {
 			h := &domain.WatchHistory{
-				UserID: userID, MediaID: "ct-race", ProviderID: "uakino", Title: "t",
+				UserID: userID, MediaID: "ct-race", ProviderID: "example-provider", Title: "t",
 				PositionMs: int64(10 * i), DurationMs: 100,
 				WatchedAt: time.Now().Add(time.Duration(-i) * time.Second),
 			}
@@ -894,31 +894,31 @@ func TestCtCheckConstraintsRejectOutOfRangeValues(t *testing.T) {
 	}{
 		{"negative position_ms",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', -1, 100)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', -1, 100)`},
 		{"negative duration_ms",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 10, -1)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 10, -1)`},
 		{"position beyond duration",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 200, 100)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 200, 100)`},
 		{"rating above 10",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, rating)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 0, 0, 99)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 0, 0, 99)`},
 		{"rating below 0",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, rating)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 0, 0, -1)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 0, 0, -1)`},
 		{"year above 9999",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, year)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 0, 0, 10000)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 0, 0, 10000)`},
 		{"season below 1",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, season, episode)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 0, 0, 0, 1)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 0, 0, 0, 1)`},
 		{"episode below 1",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, season, episode)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 0, 0, 1, 0)`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 0, 0, 1, 0)`},
 		{"media_type that is not a slug",
 			`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, media_type)
-			 VALUES ($1, 'ct-ck', 'uakino', 't', 0, 0, 'Movie With Spaces')`},
+			 VALUES ($1, 'ct-ck', 'example-provider', 't', 0, 0, 'Movie With Spaces')`},
 	}
 	for _, tc := range historyInserts {
 		if _, err := pool.Exec(ctx, tc.query, userID); err == nil {
@@ -931,11 +931,11 @@ func TestCtCheckConstraintsRejectOutOfRangeValues(t *testing.T) {
 		query string
 	}{
 		{"rating above 10",
-			`INSERT INTO favorites (user_id, media_id, provider_id, title, rating) VALUES ($1, 'ct-ck', 'uakino', 't', 11)`},
+			`INSERT INTO favorites (user_id, media_id, provider_id, title, rating) VALUES ($1, 'ct-ck', 'example-provider', 't', 11)`},
 		{"year above 9999",
-			`INSERT INTO favorites (user_id, media_id, provider_id, title, year) VALUES ($1, 'ct-ck', 'uakino', 't', 12345)`},
+			`INSERT INTO favorites (user_id, media_id, provider_id, title, year) VALUES ($1, 'ct-ck', 'example-provider', 't', 12345)`},
 		{"media_type that is not a slug",
-			`INSERT INTO favorites (user_id, media_id, provider_id, title, media_type) VALUES ($1, 'ct-ck', 'uakino', 't', 'TV Show!')`},
+			`INSERT INTO favorites (user_id, media_id, provider_id, title, media_type) VALUES ($1, 'ct-ck', 'example-provider', 't', 'TV Show!')`},
 	}
 	for _, tc := range favoriteInserts {
 		if _, err := pool.Exec(ctx, tc.query, userID); err == nil {
@@ -947,12 +947,12 @@ func TestCtCheckConstraintsRejectOutOfRangeValues(t *testing.T) {
 	// strict and would reject legitimate client payloads.
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, rating, year, season, episode)
-		 VALUES ($1, 'ct-ck-edge', 'uakino', 't', 100, 100, 10, 9999, 1, 1)`, userID); err != nil {
+		 VALUES ($1, 'ct-ck-edge', 'example-provider', 't', 100, 100, 10, 9999, 1, 1)`, userID); err != nil {
 		t.Errorf("the maximum legal value must be accepted, got %v", err)
 	}
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO watch_history (user_id, media_id, provider_id, title, position_ms, duration_ms, rating, year)
-		 VALUES ($1, 'ct-ck-min', 'uakino', 't', 0, 0, 0, 0)`, userID); err != nil {
+		 VALUES ($1, 'ct-ck-min', 'example-provider', 't', 0, 0, 0, 0)`, userID); err != nil {
 		t.Errorf("the minimum legal value (including year 0, the unknown-year sentinel) must be accepted, got %v", err)
 	}
 }
@@ -973,7 +973,7 @@ func TestCtRepositorySanitisesRatherThanRejects(t *testing.T) {
 	outOfRangeRating := 42.0
 	zeroSeason, zeroEpisode := 0, 0
 	h := &domain.WatchHistory{
-		UserID: userID, MediaID: "ct-dirty", ProviderID: "uakino", Title: "t",
+		UserID: userID, MediaID: "ct-dirty", ProviderID: "example-provider", Title: "t",
 		PositionMs: 500, DurationMs: 100, // position beyond duration
 		Year: &outOfRangeYear, Rating: &outOfRangeRating,
 		Season: &zeroSeason, Episode: &zeroEpisode,

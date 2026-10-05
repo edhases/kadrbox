@@ -1,9 +1,12 @@
--- 000005_remove_hdrezka.down.sql
+-- 000005_remove_removed_source_rows.down.sql
 -- NOT REVERSIBLE. The rows deleted by 000005 are gone; nothing in this
 -- repository can reconstruct a favourite, a watch-history position or a cached
--- metadata document. Clients that still carry local hdrezka rows resync them
--- (the client, not the server, is the source of truth for them), but until they
--- do the affected users see those titles missing from their account.
+-- metadata document. Clients that still carry the corresponding local rows
+-- resync them (the client, not the server, is the source of truth for them),
+-- but until they do the affected users see those titles missing from their
+-- account.
 --
--- Applying this file is therefore a no-op: there is nothing to restore, and
--- pretending otherwise would be worse than saying so.
+-- 000005 is itself now a documented no-op (see the up script), so applying this
+-- file has nothing to undo in either direction: there is nothing to restore,
+-- and pretending otherwise would be worse than saying so.
+SELECT 1;

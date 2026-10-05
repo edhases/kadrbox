@@ -183,7 +183,7 @@ func TestPgCheckConstraintsRejectGarbage(t *testing.T) {
 
 	year := 12345
 	h := &domain.WatchHistory{
-		UserID: user.ID, MediaID: "pg-garbage", ProviderID: "uakino", Title: "t",
+		UserID: user.ID, MediaID: "pg-garbage", ProviderID: "example-provider", Title: "t",
 		Year: &year, // out of the range the repository sanitises
 	}
 	// The repository sanitises, so the row must be written with the value
@@ -201,7 +201,7 @@ func TestPgCheckConstraintsRejectGarbage(t *testing.T) {
 	// Direct SQL still cannot write out-of-range data.
 	_, err := pool.Exec(ctx,
 		`INSERT INTO watch_history (user_id, media_id, provider_id, title, rating, position_ms, duration_ms)
-		 VALUES ($1, 'pg-raw', 'uakino', 't', 99, 0, 0)`, user.ID)
+		 VALUES ($1, 'pg-raw', 'example-provider', 't', 99, 0, 0)`, user.ID)
 	if err == nil {
 		t.Error("expected the rating CHECK constraint to reject 99")
 	}
@@ -257,7 +257,7 @@ func TestPgWatchHistoryIsMonotonic(t *testing.T) {
 
 	// Device A watches to 50% and syncs.
 	a := &domain.WatchHistory{
-		UserID: user.ID, MediaID: "pg-mono", ProviderID: "uakino", Title: "t",
+		UserID: user.ID, MediaID: "pg-mono", ProviderID: "example-provider", Title: "t",
 		PositionMs: 50, DurationMs: 100, WatchedAt: newer,
 	}
 	if err := repo.UpsertWatchHistory(ctx, a); err != nil {
@@ -266,7 +266,7 @@ func TestPgWatchHistoryIsMonotonic(t *testing.T) {
 
 	// Device B was offline at 20% and reconnects later in wall-clock time.
 	b := &domain.WatchHistory{
-		UserID: user.ID, MediaID: "pg-mono", ProviderID: "uakino", Title: "t",
+		UserID: user.ID, MediaID: "pg-mono", ProviderID: "example-provider", Title: "t",
 		PositionMs: 20, DurationMs: 100, WatchedAt: older,
 	}
 	if err := repo.UpsertWatchHistory(ctx, b); err != nil {
@@ -301,7 +301,7 @@ func TestPgWatchHistoryNullSeasonEpisodeCollapses(t *testing.T) {
 	// those as one row for the upsert to hit the conflict target.
 	for i, pos := range []int64{10, 20} {
 		h := &domain.WatchHistory{
-			UserID: user.ID, MediaID: "pg-movie", ProviderID: "uakino", Title: "t",
+			UserID: user.ID, MediaID: "pg-movie", ProviderID: "example-provider", Title: "t",
 			PositionMs: pos, DurationMs: 100, WatchedAt: time.Now().Add(time.Duration(-i) * time.Minute),
 		}
 		if err := repo.UpsertWatchHistory(ctx, h); err != nil {
@@ -329,7 +329,7 @@ func TestPgContinueWatchingBounds(t *testing.T) {
 
 	add := func(media string, pos, dur int64) {
 		if err := repo.UpsertWatchHistory(ctx, &domain.WatchHistory{
-			UserID: user.ID, MediaID: media, ProviderID: "uakino", Title: media,
+			UserID: user.ID, MediaID: media, ProviderID: "example-provider", Title: media,
 			PositionMs: pos, DurationMs: dur, WatchedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("upsert %s failed: %v", media, err)
@@ -375,7 +375,7 @@ func TestPgFavoritesPaginationAndCount(t *testing.T) {
 	const total = 7
 	for i := 0; i < total; i++ {
 		if err := repo.AddFavorite(ctx, &domain.Favorite{
-			UserID: user.ID, MediaID: fmt.Sprintf("pg-fav-%d", i), ProviderID: "uakino",
+			UserID: user.ID, MediaID: fmt.Sprintf("pg-fav-%d", i), ProviderID: "example-provider",
 			Title: fmt.Sprintf("fav %d", i), MediaType: "movie",
 		}); err != nil {
 			t.Fatalf("AddFavorite %d failed: %v", i, err)

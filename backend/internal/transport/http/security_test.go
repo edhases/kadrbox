@@ -147,7 +147,6 @@ func resetSecurityState(t *testing.T) {
 	t.Helper()
 	restore := func() {
 		transportHttp.SetUpstreamHostAllowlist(nil)
-		transportHttp.SetUpstreamSourceAllowlist(nil)
 		transportHttp.SetHostResolver(nil)
 		transportHttp.ClearResolveCache()
 	}
@@ -180,9 +179,7 @@ func TestValidateSafeURL(t *testing.T) {
 		// Безпечні посилання
 		{name: "safe public ip literal", raw: "https://93.184.216.34/film/123-dune.html", expectError: false},
 		{name: "safe relative path", raw: "/serials/gra-v-kalmara.html", expectError: false},
-		{name: "safe bandera payload", raw: `{"source":"uaflix","ref":"tt0111161"}`, expectError: false},
-		{name: "safe bandera object ref", raw: `{"source":"filmix","ref":{"id":"abc","slug":"dune"}}`, expectError: false},
-		{name: "safe bandera stream ref", raw: `{"source":"animeon","ref":{"url":"https://cdn.example/x.m3u8"},"is_stream_ref":true}`, expectError: false},
+		{name: "safe catalog url", raw: "https://catalog.example/film/tt0111161", expectError: false},
 
 		// SSRF атаки (IP-літерали)
 		{name: "block 127.0.0.1", raw: "http://127.0.0.1:8080/admin", expectError: true, targetErr: transportHttp.ErrSSRFBlocked},
@@ -205,22 +202,16 @@ func TestValidateSafeURL(t *testing.T) {
 		{name: "block ftp://", raw: "ftp://user:pass@example.com", expectError: true, targetErr: transportHttp.ErrUnsafeURLScheme},
 
 		// Розмір та керуючі символи
-		{name: "block control char", raw: "https://uakino.me/a\r\nHost: evil", expectError: true, targetErr: transportHttp.ErrUnsafeCharInput},
-		{name: "block nul byte", raw: "https://uakino.me/a\x00b", expectError: true, targetErr: transportHttp.ErrUnsafeCharInput},
+		{name: "block control char", raw: "https://catalog.example/a\r\nHost: evil", expectError: true, targetErr: transportHttp.ErrUnsafeCharInput},
+		{name: "block nul byte", raw: "https://catalog.example/a\x00b", expectError: true, targetErr: transportHttp.ErrUnsafeCharInput},
 		{name: "block oversize url", raw: "https://93.184.216.34/" + strings.Repeat("a", maxURLLengthTest), expectError: true, targetErr: transportHttp.ErrURLTooLong},
+		{name: "block oversize relative path", raw: "/" + strings.Repeat("a", maxURLLengthTest), expectError: true, targetErr: transportHttp.ErrURLTooLong},
 
-		// SSRF у JSON payload
-		{name: "block ssrf in json href", raw: `{"source":"uaflix","href":"http://127.0.0.1:8000/internal"}`, expectError: true, targetErr: transportHttp.ErrSSRFBlocked},
-		{name: "block ssrf in json link", raw: `{"source":"uaflix","link":"http://169.254.169.254/latest/meta-data/"}`, expectError: true, targetErr: transportHttp.ErrSSRFBlocked},
-
-		// JSON-схема: без source конверт не проходить (був безумовний pass)
-		{name: "json missing source", raw: `{"id":12345}`, expectError: true, targetErr: transportHttp.ErrMissingSource},
-		{name: "json empty source", raw: `{"source":"","ref":"x"}`, expectError: true, targetErr: transportHttp.ErrMissingSource},
-		{name: "json null source", raw: `{"source":null,"ref":"x"}`, expectError: true, targetErr: transportHttp.ErrMissingSource},
-		{name: "json whitespace source", raw: `{"source":"   ","ref":"x"}`, expectError: true, targetErr: transportHttp.ErrMissingSource},
-		{name: "json malformed", raw: `{"source":`, expectError: true, targetErr: transportHttp.ErrMalformedEnvelope},
-		{name: "json malformed nested", raw: `{"source":"a","ref":"b","x":}`, expectError: true, targetErr: transportHttp.ErrMalformedEnvelope},
-		{name: "json array", raw: `["http://93.184.216.34/"]`, expectError: true},
+		// Рядки, які виглядають як конверт, але більше не приймаються: бекенд
+		// не отримує контентних URL від клієнта, тому це вже не схема, а
+		// просто некоректний URL.
+		{name: "block json object", raw: `{"source":"catalog","ref":"x"}`, expectError: true},
+		{name: "block json array", raw: `["http://93.184.216.34/"]`, expectError: true},
 	}
 
 	for _, tc := range tests {
@@ -240,27 +231,20 @@ func TestValidateSafeURL(t *testing.T) {
 	}
 }
 
-func TestValidateSafeURLRejectsOversizedRef(t *testing.T) {
+func TestValidateSafeURLRejectsOversizedInput(t *testing.T) {
 	resetSecurityState(t)
-	raw := `{"source":"uaflix","ref":"` + strings.Repeat("a", 64<<10) + `"}`
-	err := transportHttp.ValidateSafeURL(raw)
-	if err == nil {
-		t.Fatal("expected error for oversized ref, got nil")
-	}
-	if !errors.Is(err, transportHttp.ErrRefTooLarge) {
-		t.Fatalf("expected ErrRefTooLarge, got %v", err)
-	}
-}
-
-func TestValidateSafeURLRejectsOversizedEnvelope(t *testing.T) {
-	resetSecurityState(t)
-	raw := `{"source":"uaflix","title":"` + strings.Repeat("t", 200<<10) + `"}`
-	err := transportHttp.ValidateSafeURL(raw)
-	if err == nil {
-		t.Fatal("expected error for oversized envelope, got nil")
-	}
-	if !errors.Is(err, transportHttp.ErrURLTooLong) {
-		t.Fatalf("expected ErrURLTooLong, got %v", err)
+	for _, raw := range []string{
+		"https://93.184.216.34/" + strings.Repeat("a", 64<<10),
+		"/" + strings.Repeat("a", 64<<10),
+		// The envelope path is gone, so a JSON-looking body is measured by the
+		// single URL cap like anything else — it must not be silently allowed
+		// just because it is long and no longer parsed.
+		`{"source":"catalog","ref":"` + strings.Repeat("a", 64<<10) + `"}`,
+	} {
+		err := transportHttp.ValidateSafeURL(raw)
+		if !errors.Is(err, transportHttp.ErrURLTooLong) {
+			t.Fatalf("expected ErrURLTooLong for a %d-byte input, got %v", len(raw), err)
+		}
 	}
 }
 
@@ -377,16 +361,18 @@ func TestValidateSafeURLHostAllowlist(t *testing.T) {
 		t.Fatal("empty allow-list must still reject a host resolving to link-local")
 	}
 
-	transportHttp.SetUpstreamHostAllowlist([]string{"UAKINO.me", ".uaflix.net"})
+	transportHttp.SetUpstreamHostAllowlist([]string{"CATALOG.EXAMPLE", ".media.example"})
 	cases := []struct {
 		raw   string
 		valid bool
 	}{
-		{raw: "https://uakino.me/film/1.html", valid: true},
-		{raw: "https://www.uaflix.net/video/1", valid: true},
+		{raw: "https://catalog.example/film/1.html", valid: true},
+		{raw: "https://www.media.example/video/1", valid: true},
 		{raw: "https://public.example/a", valid: false},
 		{raw: "https://evil.example/a", valid: false},
-		{raw: "https://uakino.me.evil.example/a", valid: false},
+		// The classic suffix bypass: a host that merely *ends with* an allowed
+		// name must not inherit the allow-list.
+		{raw: "https://catalog.example.evil.example/a", valid: false},
 		{raw: "http://127.0.0.1/", valid: false},
 	}
 	for _, tc := range cases {
@@ -397,47 +383,9 @@ func TestValidateSafeURLHostAllowlist(t *testing.T) {
 	}
 
 	// Wildcard-запис зірочкою.
-	transportHttp.SetUpstreamHostAllowlist([]string{"*.uakino.me"})
-	if err := transportHttp.ValidateSafeURL("https://film.uakino.me/x.html"); err != nil {
+	transportHttp.SetUpstreamHostAllowlist([]string{"*.catalog.example"})
+	if err := transportHttp.ValidateSafeURL("https://film.catalog.example/x.html"); err != nil {
 		t.Fatalf("wildcard allow-list entry must match, got %v", err)
-	}
-}
-
-func TestValidateSafeURLSourceAllowlist(t *testing.T) {
-	resetSecurityState(t)
-
-	if err := transportHttp.ValidateSafeURL(`{"source":"uaflix","ref":"x"}`); err != nil {
-		t.Fatalf("empty source allow-list must permit any valid key, got %v", err)
-	}
-
-	transportHttp.SetUpstreamSourceAllowlist([]string{"uaflix", "filmix"})
-	if err := transportHttp.ValidateSafeURL(`{"source":"filmix","ref":"x"}`); err != nil {
-		t.Fatalf("allow-listed source must be accepted, got %v", err)
-	}
-	err := transportHttp.ValidateSafeURL(`{"source":"evil-source","ref":"x"}`)
-	if err == nil {
-		t.Fatal("source outside the allow-list must be rejected")
-	}
-	if !errors.Is(err, transportHttp.ErrSourceNotAllowed) {
-		t.Fatalf("expected ErrSourceNotAllowed, got %v", err)
-	}
-}
-
-func TestValidateSafeURLRejectsBadSourceCharset(t *testing.T) {
-	resetSecurityState(t)
-	for _, raw := range []string{
-		`{"source":"../../etc","ref":"x"}`,
-		`{"source":"a/b","ref":"x"}`,
-		`{"source":"a b","ref":"x"}`,
-		`{"source":"' OR 1=1--","ref":"x"}`,
-	} {
-		err := transportHttp.ValidateSafeURL(raw)
-		if err == nil {
-			t.Fatalf("expected rejection of source in %s", raw)
-		}
-		if !errors.Is(err, transportHttp.ErrSourceNotAllowed) {
-			t.Fatalf("expected ErrSourceNotAllowed for %s, got %v", raw, err)
-		}
 	}
 }
 
@@ -458,7 +406,8 @@ func TestValidateSafeURLPublicLiteralNoResolver(t *testing.T) {
 }
 
 // TestValidateSafeURLIsSynchronousAndContextFree — сигнатура заморожена:
-// content_handler.go (не наш файл) викликає її синхронно без context.
+// усі викликачі (auth-редиректи та Watch Party hub) беруть її синхронно,
+// без context.
 func TestValidateSafeURLIsSynchronousAndContextFree(t *testing.T) {
 	var fn func(string) error = transportHttp.ValidateSafeURL
 	resetSecurityState(t)

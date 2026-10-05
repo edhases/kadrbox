@@ -169,7 +169,7 @@ func TestRemoveFavorite(t *testing.T) {
 
 	t.Run("unauthenticated", func(t *testing.T) {
 		s := newSyncRig()
-		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites?media_id=m1&provider_id=uakino",
+		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites?media_id=m1&provider_id=example-provider",
 			context.Background(), nil)
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401", rr.Code)
@@ -180,7 +180,7 @@ func TestRemoveFavorite(t *testing.T) {
 	// sends identifiers in either the query string or a JSON body.
 	t.Run("accepts snake_case query parameters", func(t *testing.T) {
 		s := newSyncRig()
-		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites?media_id=m1&provider_id=uakino",
+		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites?media_id=m1&provider_id=example-provider",
 			ctxWithUserCtx(user), nil)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
@@ -192,7 +192,7 @@ func TestRemoveFavorite(t *testing.T) {
 		if s.favs.removed != 1 {
 			t.Errorf("expected one removal, got %d", s.favs.removed)
 		}
-		if s.favs.lastUser != user || s.favs.lastMedia != "m1" || s.favs.lastProv != "uakino" {
+		if s.favs.lastUser != user || s.favs.lastMedia != "m1" || s.favs.lastProv != "example-provider" {
 			t.Errorf("wrong removal arguments: user=%v media=%q provider=%q",
 				s.favs.lastUser, s.favs.lastMedia, s.favs.lastProv)
 		}
@@ -201,11 +201,11 @@ func TestRemoveFavorite(t *testing.T) {
 	t.Run("falls back to the JSON body", func(t *testing.T) {
 		s := newSyncRig()
 		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites", ctxWithUserCtx(user),
-			map[string]string{"media_id": "m2", "provider_id": "lavakino"})
+			map[string]string{"media_id": "m2", "provider_id": "example-provider-b"})
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
 		}
-		if s.favs.lastMedia != "m2" || s.favs.lastProv != "lavakino" {
+		if s.favs.lastMedia != "m2" || s.favs.lastProv != "example-provider-b" {
 			t.Errorf("body fallback not used: media=%q provider=%q", s.favs.lastMedia, s.favs.lastProv)
 		}
 	})
@@ -213,11 +213,11 @@ func TestRemoveFavorite(t *testing.T) {
 	t.Run("falls back to camelCase body fields", func(t *testing.T) {
 		s := newSyncRig()
 		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites", ctxWithUserCtx(user),
-			map[string]string{"mediaId": "m3", "providerId": "uakino"})
+			map[string]string{"mediaId": "m3", "providerId": "example-provider"})
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
 		}
-		if s.favs.lastMedia != "m3" || s.favs.lastProv != "uakino" {
+		if s.favs.lastMedia != "m3" || s.favs.lastProv != "example-provider" {
 			t.Errorf("camelCase fallback not used: media=%q provider=%q", s.favs.lastMedia, s.favs.lastProv)
 		}
 	})
@@ -226,7 +226,7 @@ func TestRemoveFavorite(t *testing.T) {
 		for _, path := range []string{
 			"/api/v1/sync/favorites",
 			"/api/v1/sync/favorites?media_id=m1",
-			"/api/v1/sync/favorites?provider_id=uakino",
+			"/api/v1/sync/favorites?provider_id=example-provider",
 		} {
 			s := newSyncRig()
 			rr := deleteJSON(t, s.handler.RemoveFavorite, path, ctxWithUserCtx(user), nil)
@@ -253,7 +253,7 @@ func TestRemoveFavorite(t *testing.T) {
 	// always scoped by the authenticated user id.
 	t.Run("always scopes the removal to the caller", func(t *testing.T) {
 		s := newSyncRig()
-		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites?media_id=m1&provider_id=uakino",
+		rr := deleteJSON(t, s.handler.RemoveFavorite, "/api/v1/sync/favorites?media_id=m1&provider_id=example-provider",
 			ctxWithUserCtx(other), nil)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rr.Code)

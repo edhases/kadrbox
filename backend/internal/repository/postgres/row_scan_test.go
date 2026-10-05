@@ -289,7 +289,7 @@ func TestCovScanHistoryRowsMapsFullRows(t *testing.T) {
 	watchedAt := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	entry := domain.WatchHistory{
-		ID: uuid.New(), UserID: userID, MediaID: "m1", ProviderID: "uakino",
+		ID: uuid.New(), UserID: userID, MediaID: "m1", ProviderID: "example-provider",
 		Title: "Title", PosterURL: "https://cdn/p.jpg", Year: &year, MediaType: "series",
 		Season: &season, Episode: &episode, EpisodeTitle: "Ep 5",
 		PositionMs: 900, DurationMs: 1800, LastStreamURL: "https://cdn/s.m3u8",
@@ -313,7 +313,7 @@ func TestCovScanHistoryRowsKeepsNullColumnsNil(t *testing.T) {
 	// A movie row has NULL season/episode; a partially-seen row has NULL
 	// rating and no stream URL. Dereferencing those would panic mid-sync.
 	entry := domain.WatchHistory{
-		ID: uuid.New(), UserID: uuid.New(), MediaID: "m2", ProviderID: "tortuga",
+		ID: uuid.New(), UserID: uuid.New(), MediaID: "m2", ProviderID: "example-provider-c",
 		Title: "Movie", MediaType: "movie", PositionMs: 10, DurationMs: 100,
 		WatchedAt: time.Now(),
 	}

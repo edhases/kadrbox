@@ -180,7 +180,7 @@ func TestCovPgHistoryUpsertGet(t *testing.T) {
 	user := covCreateUser(t, userRepo)
 	yr := 1999
 	h := &domain.WatchHistory{
-		UserID: user.ID, MediaID: "m1", ProviderID: "uakino", Title: "Матриця",
+		UserID: user.ID, MediaID: "m1", ProviderID: "example-provider", Title: "Матриця",
 		Year: &yr, MediaType: "movie", PositionMs: 50, DurationMs: 100,
 	}
 
@@ -211,7 +211,7 @@ func TestCovPgHistoryUpsertGet(t *testing.T) {
 	// Серія серіалу: season/episode заповнені.
 	s, e := 2, 5
 	ep := &domain.WatchHistory{
-		UserID: user.ID, MediaID: "s1", ProviderID: "uakino", Title: "Серіал",
+		UserID: user.ID, MediaID: "s1", ProviderID: "example-provider", Title: "Серіал",
 		MediaType: "series", Season: &s, Episode: &e,
 		PositionMs: 10, DurationMs: 100,
 	}
@@ -233,7 +233,7 @@ func TestCovPgContinueWatching(t *testing.T) {
 	user := covCreateUser(t, userRepo)
 	mk := func(media string, pos, dur int64) {
 		if err := repo.UpsertWatchHistory(ctx, &domain.WatchHistory{
-			UserID: user.ID, MediaID: media, ProviderID: "uakino", Title: media,
+			UserID: user.ID, MediaID: media, ProviderID: "example-provider", Title: media,
 			PositionMs: pos, DurationMs: dur,
 		}); err != nil {
 			t.Fatalf("upsert %s failed: %v", media, err)
@@ -261,11 +261,11 @@ func TestCovPgFavorites(t *testing.T) {
 
 	user := covCreateUser(t, userRepo)
 	fav := &domain.Favorite{
-		UserID: user.ID, MediaID: "m1", ProviderID: "uakino", Title: "Матриця",
+		UserID: user.ID, MediaID: "m1", ProviderID: "example-provider", Title: "Матриця",
 		MediaType: "movie",
 	}
 
-	isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "uakino")
+	isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "example-provider")
 	if err != nil || isFav {
 		t.Fatalf("expected not favorite initially (%v, %v)", isFav, err)
 	}
@@ -276,17 +276,17 @@ func TestCovPgFavorites(t *testing.T) {
 	if err := repo.AddFavorite(ctx, fav); err != nil {
 		t.Fatalf("second AddFavorite failed: %v", err)
 	}
-	if isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "uakino"); err != nil || !isFav {
+	if isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "example-provider"); err != nil || !isFav {
 		t.Fatalf("expected favorite (%v, %v)", isFav, err)
 	}
 	list, err := repo.GetUserFavorites(ctx, user.ID, 50, 0)
 	if err != nil || len(list) != 1 || list[0].Title != "Матриця" {
 		t.Fatalf("unexpected favorites: %+v (%v)", list, err)
 	}
-	if err := repo.RemoveFavorite(ctx, user.ID, "m1", "uakino"); err != nil {
+	if err := repo.RemoveFavorite(ctx, user.ID, "m1", "example-provider"); err != nil {
 		t.Fatalf("RemoveFavorite failed: %v", err)
 	}
-	if isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "uakino"); err != nil || isFav {
+	if isFav, err := repo.IsFavorite(ctx, user.ID, "m1", "example-provider"); err != nil || isFav {
 		t.Fatalf("expected removed (%v, %v)", isFav, err)
 	}
 }
@@ -303,7 +303,7 @@ func TestCovPgCacheSetGet(t *testing.T) {
 	key := fmt.Sprintf("cov_%d", time.Now().UnixNano())
 	want := payload{Title: "Дюна", Year: 2021}
 
-	if err := repo.Set(ctx, key, "uakino", "search", want, time.Hour); err != nil {
+	if err := repo.Set(ctx, key, "example-provider", "search", want, time.Hour); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 	var got payload
@@ -317,7 +317,7 @@ func TestCovPgCacheSetGet(t *testing.T) {
 
 	// Перезапис того самого ключа.
 	want.Year = 2024
-	if err := repo.Set(ctx, key, "uakino", "search", want, time.Hour); err != nil {
+	if err := repo.Set(ctx, key, "example-provider", "search", want, time.Hour); err != nil {
 		t.Fatalf("overwrite failed: %v", err)
 	}
 	var got2 payload
@@ -327,7 +327,7 @@ func TestCovPgCacheSetGet(t *testing.T) {
 
 	// Прострочений запис — cache miss.
 	expKey := key + "_exp"
-	if err := repo.Set(ctx, expKey, "uakino", "search", want, -time.Hour); err != nil {
+	if err := repo.Set(ctx, expKey, "example-provider", "search", want, -time.Hour); err != nil {
 		t.Fatalf("Set expired failed: %v", err)
 	}
 	var dummy payload

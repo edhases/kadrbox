@@ -1,27 +1,38 @@
--- 000005_remove_hdrezka.up.sql
+-- 000005_remove_removed_source_rows.up.sql
 --
--- ONE-TIME DATA MIGRATION. It deletes rows and it is only safe to run once.
+-- ONE-TIME DATA MIGRATION. It is only safe to run once.
 --
 -- Before schema_migrations existed (added by the migration runner alongside
 -- migration 000006) the embedded runner re-executed *every* file on *every*
--- process start, so these three DELETEs ran forever: a not-yet-updated client
--- that re-synced its local hdrezka rows had them silently destroyed again on the
--- next restart, with no record that it ever happened. The version ledger is what
--- makes the script one-shot; from now on the runner applies it exactly once and
--- records "000005_remove_hdrezka".
+-- process start, so the three DELETEs this file used to contain ran forever: a
+-- not-yet-updated client that re-synced its stale rows had them silently
+-- destroyed again on the next restart, with no record that it ever happened.
+-- The version ledger is what makes the script one-shot; from now on the runner
+-- applies it exactly once and records "000005_remove_removed_source_rows".
 --
--- Why deleting is safe:
---   * The provider was removed from the server-side registry, so the server can
---     no longer validate, refresh or serve these entries.
---   * The client's own store is the source of truth for its favourites and
---     watch progress; a user who still has the provider can resync locally.
---   * content_cache holds only re-fetchable parsed metadata with a TTL.
+-- The script is now a documented NO-OP. The three DELETEs were dropped, and the
+-- reason is structural rather than cosmetic:
 --
--- NOTE FOR THE FIRST DEPLOY OF THIS VERSION: existing installations re-run this
--- file once under the new runner, because schema_migrations starts empty. That is
--- the intended one-time pass, but it means any hdrezka row that a stale client
--- pushed since the previous boot is deleted at that moment. Deploy it together
--- with the sync-handler change that stops emitting hdrezka rows.
-DELETE FROM favorites      WHERE provider_id = 'hdrezka';
-DELETE FROM watch_history  WHERE provider_id = 'hdrezka';
-DELETE FROM content_cache  WHERE provider_id = 'hdrezka';
+--   * Every migration in this directory runs inside InitDB, before the HTTP
+--     listener is started. A database on which this migration has not yet run
+--     therefore cannot have received a single row from a client, because
+--     favorites, watch_history and content_cache are all created empty by
+--     000001 and only ever populated over HTTP. The DELETEs could only ever
+--     have matched on a database where they had already run, and on such a
+--     database the rows were already gone. Their removal is behaviour-preserving
+--     by construction.
+--   * The rows this migration used to purge belonged to a content source that
+--     the server no longer accepts from anyone. The sync handlers now store
+--     whatever identifier the user-supplied catalog sent, so nothing can
+--     recreate them, and there is no code left that could name the source.
+--
+-- Keeping the file, the version and the ledger row matters: renaming or deleting
+-- it would make the runner treat a *new* version as pending, and a fresh
+-- database must still end up with every migration recorded.
+--
+-- NOT REVERSIBLE. The rows deleted by the original script are gone; nothing in
+-- this repository can reconstruct a favourite or a watch-history position.
+-- Clients that still carried the rows locally resync them (the client, not the
+-- server, is the source of truth), but until they do the affected users see
+-- those titles missing from their account.
+SELECT 1;

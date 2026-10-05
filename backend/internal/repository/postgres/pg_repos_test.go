@@ -48,7 +48,7 @@ func TestPgLoadEmbeddedMigrations(t *testing.T) {
 	// otherwise a fresh database would be built on a partial schema.
 	for _, want := range []string{
 		"000001_init", "000002_email_verification", "000003_password_resets",
-		"000004_oauth_providers", "000005_remove_hdrezka",
+		"000004_oauth_providers", "000005_remove_removed_source_rows",
 	} {
 		if !seen[want] {
 			t.Errorf("expected original migration %q to still be embedded", want)
@@ -605,10 +605,13 @@ func TestPgEmbeddedMigrationsAreDocumented(t *testing.T) {
 	}
 }
 
-// TestPgHdrezkaMigrationIsMarkedOneShot guards the reason the version ledger
-// exists: 000005 destroys rows and must be recognisable as a one-time script.
-func TestPgHdrezkaMigrationIsMarkedOneShot(t *testing.T) {
-	body, err := fs.ReadFile(MigrationsFS, path.Join(migrationsDir, "000005_remove_hdrezka"+upSuffix))
+// TestPgRemovedSourceRowsMigrationIsMarkedOneShot guards the reason the version
+// ledger exists: 000005 was a one-time data migration and must stay
+// recognisable as such, because that history is exactly why the ledger was
+// introduced. Its three DELETEs are gone (the script is a documented no-op), so
+// this test pins the documentation rather than any row count.
+func TestPgRemovedSourceRowsMigrationIsMarkedOneShot(t *testing.T) {
+	body, err := fs.ReadFile(MigrationsFS, path.Join(migrationsDir, "000005_remove_removed_source_rows"+upSuffix))
 	if err != nil {
 		t.Fatalf("read 000005: %v", err)
 	}

@@ -2,9 +2,9 @@
 --
 -- The client keys favourites and watch history by that URL because it is also
 -- the lookup key for /content/details and /content/streams, so it cannot be
--- replaced by a stable hash without breaking those round trips. Bandera items
--- in particular carry a JSON envelope as their "URL", which routinely exceeds
--- the 255 characters VARCHAR allowed: the sync insert then failed with
+-- replaced by a stable hash without breaking those round trips. Items whose
+-- identifier is a JSON envelope rather than a bare path routinely exceed the
+-- 255 characters VARCHAR allowed: the sync insert then failed with
 -- "value too long for type character varying(255)" and surfaced as HTTP 500.
 --
 -- TEXT is required rather than a wider VARCHAR. The upper bound is enforced by
