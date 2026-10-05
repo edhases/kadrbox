@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../theme/app_theme.dart';
 import '../../../data/models/provider_catalog.dart';
+import '../../../data/services/catalog_client.dart';
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/providers/server_backed_provider.dart';
 import '../../../data/services/settings_service.dart';
@@ -39,23 +40,36 @@ class _PluginsPageState extends State<PluginsPage> {
       _connectError = null;
     });
 
+    CatalogClient? probe;
     try {
-      // Basic scheme check
+      // A catalog may legitimately be on loopback or a private address -- that
+      // is what a self-hosted server on the user's own machine looks like. The
+      // peer-supplied rules in stream_url.dart are stricter on purpose and must
+      // not be reused here.
       final uri = Uri.tryParse(url);
       if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) {
-        throw 'Введіть коректну URL адресу (http або https)';
+        throw const CatalogException(
+          'Введіть коректну URL адресу (http або https)',
+        );
       }
 
-      // Check if already registered
-      final sourceId = 'custom_${uri.host.replaceAll('.', '_')}';
+      // Actually contact the server before registering anything. The previous
+      // version checked the scheme, registered, and reported success without a
+      // single request -- so a source that did not exist looked added.
+      probe = CatalogClient(baseUrl: url);
+      final status = await probe.handshake();
+
+      // Identified by what the server calls itself, not by its host. Deriving
+      // the id from the host collided for two catalogues on one host, and made
+      // every stored item lose its scope the moment the host changed.
+      final sourceId = status.catalogId;
       if (_registry.getById(sourceId) != null) {
-        throw 'Джерело з цієї адреси вже підключено';
+        throw const CatalogException('Цей сервер каталогу вже підключено');
       }
 
-      // Register external provider
       final entry = ProviderCatalogEntry(
         id: sourceId,
-        name: uri.host,
+        name: status.app.isEmpty ? uri.host : status.app,
         baseUrl: url,
         showOnHome: true,
         hasFixedStreams: false,
@@ -69,19 +83,24 @@ class _PluginsPageState extends State<PluginsPage> {
       await _settings.setProviderEnabled(sourceId, true);
 
       _urlController.clear();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Джерело $url успішно додано!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      if (!mounted) return;
+
+      final warning = status.compatibilityWarning;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(warning ?? 'Каталог «${entry.name}» підключено'),
+          backgroundColor: warning == null ? Colors.green : Colors.orange,
+          duration: Duration(seconds: warning == null ? 2 : 5),
+        ),
+      );
+    } on CatalogException catch (e) {
+      if (mounted) setState(() => _connectError = e.message);
     } catch (e) {
-      setState(() {
-        _connectError = e.toString();
-      });
+      if (mounted) setState(() => _connectError = 'Помилка: $e');
     } finally {
+      // The client is kept alive by the registered provider; this probe copy is
+      // only for the handshake.
+      probe?.dispose();
       if (mounted) {
         setState(() {
           _isConnecting = false;
