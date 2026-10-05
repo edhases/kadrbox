@@ -672,7 +672,18 @@ func absolutizeURL(src, base string) string {
 // duplicated an earlier URL. Callers cannot distinguish the two, which is why
 // the caller falls through to the next strategy on nil and accepts a short
 // result as final.
-func parseMultiQualityString(raw, playerURL, playerLabel string) []domain.StreamSource {
+// parseMultiQualityString розбирає значення file: у вигляді
+// "1080p,https://…,[720p,https://…]" або просто URL.
+//
+// voiceLabel — назва озвучальної студії з контексту дерева
+// плейлиста (ctx.Dub, тобто «1+1» чи «Postmodern»). Може бути
+// порожньою: тоді поле Voiceover лишається порожнім.
+//
+// Player НЕ передається — він визначається з playerURL через
+// detectPlayerBalancer. Раніше тут писалося
+// src.Voiceover = playerLabel, тому користувач у переліку озвучки
+// бачив «Ashdi» та «HDVB» — тобто імена CDN замість студій.
+func parseMultiQualityString(raw, playerURL, voiceLabel string) []domain.StreamSource {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -714,8 +725,8 @@ func parseMultiQualityString(raw, playerURL, playerLabel string) []domain.Stream
 		if qLabel != "" {
 			src.Quality = normalizeQualityLabel(qLabel)
 		}
-		src.Player = playerLabel
-		src.Voiceover = playerLabel
+		src.Player = detectPlayerBalancer(playerURL)
+		src.Voiceover = voiceLabel
 		sources = append(sources, src)
 	}
 
@@ -965,9 +976,15 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 				if s.Player == "" {
 					s.Player = playerLabel
 				}
-				if s.Voiceover == "" {
-					s.Voiceover = playerLabel
-				}
+				// Voiceover НЕ підставляється з playerLabel тут.
+				//
+				// playerLabel — це ім'я CDN/балансера («HDVB»,
+				// «Ashdi»), а не студія озвучення. Раніше ми робили
+				// саме це, і користувач у переліку озвучки бачив
+				// хости замість «1+1»/«Postmodern». Тепер назва
+				// озвучки приходить із контексту дерева плейлиста
+				// (ctx.Dub); якщо дерева немає — краще порожнє
+				// поле, ніж брехливе.
 				allStreams = append(allStreams, s)
 			}
 		}
@@ -977,16 +994,23 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 	subs := parseSubtitlesFromPlayerHTML(page)
 	allSubs = append(allSubs, subs...)
 
-	// 2. Strategy A: Check for PlayerJS JSON playlist tree in page or decoded base64
-	for _, jm := range rePlayerJSJSONFile.FindAllStringSubmatch(page, -1) {
-		if len(jm) >= 2 {
-			var playlistItems []playerJSPlaylistItem
-			if err := json.Unmarshal([]byte(jm[1]), &playlistItems); err == nil && len(playlistItems) > 0 {
-				st, sb := extractStreamsFromPlaylistTree(playlistItems, playerURL, playerLabel, season, episode, voiceID)
-				addStreams(st)
-				allSubs = append(allSubs, sb...)
-			}
-		}
+	// 2. Strategy A: дерево плейлиста PlayerJS.
+	//
+	// Раніше тут стояв rePlayerJSJSONFile — регулярка
+	// file\s*:\s*(\[[^"'].*?]). Вона вимагала «[» одразу після
+	// двокрапки та забороняла подвійні лапки всередині, а реальний
+	// HDVB пише file: '[{"title":"1 сезон",…'. Регулярка не
+	// збігалася НІКОЛИ, код падав у чергову стратегію
+	// bare-media-url, яскрав перший-ліпший m3u8 — і клієнт
+	// отримував 1 стрім замість 155 серій чотирьох сезонів.
+	//
+	// Тепер значення file: дістає сканер (playerjs_scan.go), а
+	// дерево обходиться узагальнено (playlist_tree.go), що ще й
+	// дає season/episode/voiceover замість одного потоку.
+	if playlistItems, ok := ParsePlayerJSPlaylist(page); ok {
+		st, sb := SelectPlaylistStream(playlistItems, playerURL, playerLabel, season, episode, voiceID)
+		addStreams(st)
+		allSubs = append(allSubs, sb...)
 	}
 
 	// 3. Strategy B: Base64 PlayerJS payload decode
@@ -994,9 +1018,8 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 		if len(b64m) >= 2 {
 			if decoded, err := decodeBase64Loose(b64m[1]); err == nil {
 				// Try playlist JSON in decoded base64
-				var playlistItems []playerJSPlaylistItem
-				if err := json.Unmarshal([]byte(decoded), &playlistItems); err == nil && len(playlistItems) > 0 {
-					st, sb := extractStreamsFromPlaylistTree(playlistItems, playerURL, playerLabel, season, episode, voiceID)
+				if playlistItems, ok := ParsePlayerJSPlaylist(decoded); ok {
+					st, sb := SelectPlaylistStream(playlistItems, playerURL, playerLabel, season, episode, voiceID)
 					addStreams(st)
 					allSubs = append(allSubs, sb...)
 				}
