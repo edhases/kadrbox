@@ -2,7 +2,7 @@ name: Flutter CI
 
 on:
   push:
-    paths-ignore: ['server/**', 'update.json']
+    paths-ignore: ['backend/**', 'plugins/**', 'MIGRATION_REPORT.md', 'README.md', 'update.json']
   pull_request:
 
 # One run per ref. Without this two pushes in quick succession race to upload
@@ -17,6 +17,9 @@ permissions:
 jobs:
   analyze-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
