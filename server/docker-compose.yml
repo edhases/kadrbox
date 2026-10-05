@@ -1,16 +1,6 @@
 version: '3.8'
 
 services:
-  # Redis needs vm.overcommit_memory=1 or a background save can fail under low
-  # memory, which with the noeviction policy below means failed writes rather
-  # than a silent restart. sysctls is namespaced by Docker, so this does not
-  # touch the host.
-  redis-sysctl:
-    image: busybox:1.36
-    command: ["sysctl", "-w", "vm.overcommit_memory=1"]
-    restart: "no"
-    network_mode: "none"
-
   app:
     image: ghcr.io/edhases/oxide-server:latest
     restart: unless-stopped
@@ -43,8 +33,6 @@ services:
       - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI:-https://film.oxideteam.pp.ua/api/v1/auth/discord/callback}
       - DISABLED_PROVIDERS=${DISABLED_PROVIDERS:-}
     depends_on:
-      redis-sysctl:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
