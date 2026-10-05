@@ -1,0 +1,866 @@
+openapi: 3.1.0
+
+# Kadrbox catalog protocol, version 1.
+#
+# This document is the deliverable. The app ships no parsers and contacts no
+# catalog host of ours: the user points it at a server of their choosing and
+# that server speaks the four endpoints below. Everything in here is written
+# from the client's point of view, because the client is the party that has to
+# stay safe when a server it does not control returns an instruction.
+#
+# Every example host is synthetic (catalog.example, cdn.example,
+# example-provider). This document is public and store reviewers read it, so a
+# real hostname appearing anywhere below — even as a counter-example — would be
+# evidence against the app rather than a warning about it.
+#
+# Normative prose lives in PROTOCOL.md. This file is the machine-readable
+# shape; PROTOCOL.md is where the reasons and the security rules are argued.
+
+info:
+  title: Kadrbox Catalog Protocol
+  version: "1.0.0"
+  summary: Read-only catalog and stream discovery for the Kadrbox client.
+  description: |
+    A catalog server exposes search, metadata and playable stream locations for
+    the client. It is not an authentication or sync service — those remain in
+    the Kadrbox backend — and it never receives a user credential of any kind.
+
+    ## Client obligations
+
+    A conforming client MUST treat every value in every response as untrusted
+    input, including `url` and `headers`. The rules in
+    [PROTOCOL.md](./PROTOCOL.md#client-security-rules) are normative: scheme
+    allow-list, egress-range rejection, header allow-list, header scoping, and
+    graceful degradation on an unknown `protocol_version`.
+
+  license:
+    name: See repository LICENSE
+  contact:
+    name: Kadrbox maintainers
+
+servers:
+  - url: https://catalog.example
+    description: |
+      Synthetic example host. A real deployment is whatever HTTPS origin the user
+      enters in settings; the client does not ship a default.
+
+tags:
+  - name: status
+    description: Capability negotiation. Always safe to call first.
+  - name: catalog
+    description: Search and metadata discovery.
+  - name: playback
+    description: Stream and subtitle locations.
+
+paths:
+  /status:
+    get:
+      tags: [status]
+      operationId: getStatus
+      summary: Report protocol version and capabilities.
+      description: |
+        The handshake. The client calls this before anything else so it can
+        decide which response fields it is allowed to read.
+
+        A `protocol_version` the client does not know is not an error. The
+        client warns once, keeps talking, and ignores fields it does not
+        recognise — a server we cannot update must never be able to break a
+        deployed client by bumping the number.
+      responses:
+        "200":
+          description: Server is reachable and speaks some version of the protocol.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              examples:
+                minimal:
+                  summary: Smallest conforming response
+                  value:
+                    protocol_version: 1
+                    app: "Example Provider"
+                    capabilities: []
+        "404":
+          description: |
+            Not a catalog server. The client shows a clear "not a catalog server"
+            message rather than a generic network error, because pointing the app
+            at the wrong URL is the most likely misconfiguration.
+        default:
+          description: Unexpected status code; treated as a failed handshake.
+
+  /search:
+    get:
+      tags: [catalog]
+      operationId: search
+      summary: Search the catalog.
+      description: |
+        Returns matched items grouped by `segments`.
+
+        `segments` stays an ARRAY, always, even when the server has exactly one
+        source. The app cannot be updated by the people who run these servers,
+        so a shape change here would break every deployed client. An unknown
+        segment is skipped; the items in it are still shown. See PROTOCOL.md,
+        "Why segments is an array".
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Free-text query. An empty query is a browse listing, not an error.
+          schema:
+            type: string
+            maxLength: 512
+          example: "dune"
+        - name: page
+          in: query
+          required: false
+          description: Opaque continuation token from a previous response.
+          schema:
+            type: string
+            maxLength: 2048
+          example: "2"
+        - name: limit
+          in: query
+          required: false
+          description: |
+            Requested page size. The server may return fewer; it must never
+            return more.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+        - name: voiceover
+          in: query
+          required: false
+          description: |
+            ISO 639-1 code. A server that cannot honour it ignores the parameter
+            rather than failing the request.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 8
+          example: "en"
+        - name: kind
+          in: query
+          required: false
+          description: Restrict to a media kind.
+          schema:
+            $ref: "#/components/schemas/MediaKind"
+      responses:
+        "200":
+          description: A page of results. An empty `items` array is a valid answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+              examples:
+                twoSegments:
+                  summary: Two sources, one merged listing
+                  value:
+                    query: "dune"
+                    canonical: "dune"
+                    took_ms: 214
+                    segments:
+                      - id: "example-provider"
+                        label: "Example Provider"
+                        provider: "example-provider"
+                        item_count: 1
+                      - id: "example-provider-alt"
+                        label: "Example Provider (alt)"
+                        provider: "example-provider"
+                        item_count: 0
+                    items:
+                      - id: "example-provider:dune-2021"
+                        segment: "example-provider"
+                        provider: "example-provider"
+                        kind: movie
+                        title: "Example Feature"
+                        original_title: "Example Feature"
+                        year: 2021
+                        rating: 7.8
+                        genres: [science fiction, adventure]
+                        description: "Synthetic example record. Not a real title."
+                        poster_url: "https://cdn.example/posters/dune-2021.jpg"
+                        backdrop_url: "https://cdn.example/backdrops/dune-2021.jpg"
+                        duration_ms: 9300000
+                        external_id: "dune-2021"
+                    filtered_out: 2
+                    next_page: "2"
+                    has_more: true
+        "400":
+          description: Query malformed (over-long `q`, non-integer `limit`).
+        "429":
+          description: Rate limited. The client backs off and retries; it does not clear user state.
+        default:
+          description: Unexpected status code; surfaced as a catalog error.
+
+  /details:
+    get:
+      tags: [catalog]
+      operationId: getDetails
+      summary: Full metadata for one item, its voiceovers, seasons and episodes.
+      description: |
+        One item plus the shapes a details screen needs. Seasons and episodes
+        are nested rather than fetched per episode, because a client may be
+        offline-stale and a screen that needs N round trips to render is a
+        screen nobody waits for.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Opaque item id from `/search`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+          example: "example-provider:dune-2021"
+        - name: voiceover
+          in: query
+          required: false
+          description: Preferred ISO 639-1 code; echoed in the item's `voiceovers`.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 8
+      responses:
+        "200":
+          description: |
+            Metadata for the requested item. A movie may legitimately have empty
+            `seasons` and `episodes` arrays.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailsResponse"
+              examples:
+                movie:
+                  summary: Movie, no seasons
+                  value:
+                    item:
+                      id: "example-provider:dune-2021"
+                      segment: "example-provider"
+                      provider: "example-provider"
+                      kind: movie
+                      title: "Example Feature"
+                      original_title: "Example Feature"
+                      year: 2021
+                      rating: 7.8
+                      genres: [science fiction, adventure]
+                      description: "Synthetic example record. Not a real title."
+                      poster_url: "https://cdn.example/posters/dune-2021.jpg"
+                      backdrop_url: "https://cdn.example/backdrops/dune-2021.jpg"
+                      duration_ms: 9300000
+                      external_id: "dune-2021"
+                    voiceovers:
+                      - id: "en"
+                        label: "English"
+                        lang: "en"
+                        default: true
+                      - id: "uk"
+                        label: "Ukrainian"
+                        lang: "uk"
+                        default: false
+                    seasons: []
+                    episodes: []
+                series:
+                  summary: Series with one season
+                  value:
+                    item:
+                      id: "example-provider:example-show"
+                      segment: "example-provider"
+                      provider: "example-provider"
+                      kind: series
+                      title: "Example Show"
+                      original_title: "Example Show"
+                      year: 2024
+                      rating: 8.1
+                      genres: [drama]
+                      description: "Synthetic example record. Not a real title."
+                      poster_url: "https://cdn.example/posters/example-show.jpg"
+                      backdrop_url: "https://cdn.example/backdrops/example-show.jpg"
+                      duration_ms: null
+                      external_id: "example-show"
+                    voiceovers:
+                      - id: "en"
+                        label: "English"
+                        lang: "en"
+                        default: true
+                    seasons:
+                      - number: 1
+                        label: Season 1
+                        episode_count: 2
+                    episodes:
+                      - id: "example-provider:example-show:1:1"
+                        season: 1
+                        number: 1
+                        title: "Example Episode One"
+                        duration_ms: 3120000
+                        released: "2024-03-01"
+                        voiceovers: ["en"]
+                      - id: "example-provider:example-show:1:2"
+                        season: 1
+                        number: 2
+                        title: "Example Episode Two"
+                        duration_ms: 2980000
+                        released: "2024-03-08"
+                        voiceovers: ["en"]
+        "400":
+          description: Missing or malformed `id`.
+        "404":
+          description: No such item. The client shows an empty details screen, not a crash.
+        default:
+          description: Unexpected status code; surfaced as a catalog error.
+
+  /streams:
+    get:
+      tags: [playback]
+      operationId: getStreams
+      summary: Playable locations for one item or episode.
+      description: |
+        The most security-sensitive endpoint in the protocol: it tells the
+        player where to open a socket and what headers to send while doing it.
+
+        The client applies every rule in PROTOCOL.md#client-security-rules to
+        every `url` here, and again to every redirect target it follows. A
+        server that violates the rules does not get an error page — it gets its
+        stream dropped and a line in the client's log.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Item id from `/search`, or episode id from `/details`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+          example: "example-provider:dune-2021"
+        - name: season
+          in: query
+          required: false
+          description: Season number; required when `id` names a series.
+          schema:
+            type: integer
+            minimum: 1
+        - name: episode
+          in: query
+          required: false
+          description: Episode number; required when `id` names a series.
+          schema:
+            type: integer
+            minimum: 1
+        - name: voiceover
+          in: query
+          required: false
+          description: |
+            Preferred voiceover id from `/details`. The server MAY answer with a
+            different one, and MUST then say which in `voiceover`.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 8
+          example: "en"
+      responses:
+        "200":
+          description: |
+            One or more locations. An empty `streams` array means "nothing
+            playable right now" and is not an error — expiry is normal on these
+            links, so the client retries on demand rather than caching a failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamsResponse"
+              examples:
+                oneStream:
+                  summary: Single quality
+                  value:
+                    streams:
+                      - url: "https://cdn.example/hls/dune-2021/master.m3u8"
+                        quality: "1080p"
+                        voiceover: "en"
+                        headers:
+                          Referer: "https://catalog.example/"
+                          User-Agent: "Kadrbox/1.0"
+                    subtitles:
+                      - url: "https://cdn.example/subs/dune-2021.en.vtt"
+                        label: "English"
+                        lang: "en"
+                        format: vtt
+                        headers:
+                          Referer: "https://catalog.example/"
+        "400":
+          description: Missing or malformed `id`.
+        "404":
+          description: |
+            No streams for this item and voiceover. Common for expired or
+            geo-restricted links; the client reports "no sources" and moves on.
+        default:
+          description: Unexpected status code; surfaced as a playback error.
+
+components:
+  schemas:
+    Status:
+      type: object
+      description: |
+        The handshake response. Kept to three members on purpose: it is the one
+        response a client reads before it knows how strict to be about anything
+        else.
+      required: [protocol_version, app, capabilities]
+      properties:
+        protocol_version:
+          type: integer
+          minimum: 1
+          description: |
+            Version of THIS document the server implements. The client compares
+            it against what it knows: equal or older is the expected path,
+            unknown means warn-and-degrade, and never means crash.
+          example: 1
+        app:
+          type: string
+          description: |
+            Human-readable server name, shown in settings so the user can tell
+            two configured servers apart. Not validated, not interpreted.
+          maxLength: 128
+          example: "Example Provider"
+        capabilities:
+          type: array
+          description: |
+            Optional feature flags. The client reads only the names it knows and
+            ignores the rest, for the same reason `segments` is an array:
+            deployed clients cannot be forced to learn a new flag.
+          items:
+            type: string
+            enum:
+              - search
+              - details
+              - streams
+              - subtitles
+              - voiceovers
+              - paging
+          uniqueItems: true
+          example: [search, details, streams, subtitles, paging]
+
+    SearchResponse:
+      type: object
+      required:
+        - query
+        - canonical
+        - took_ms
+        - segments
+        - items
+        - filtered_out
+        - next_page
+        - has_more
+      properties:
+        query:
+          type: string
+          description: |
+            The query as the server interpreted it, after trimming and case
+            folding. The client shows this instead of the raw input when they
+            differ, so a user who typed a typo sees what was actually searched.
+          maxLength: 512
+          example: "dune"
+        canonical:
+          type: string
+          description: |
+            Server-side normalisation of the query — a slug or canonical form.
+            Purely informational; the client uses it to decide that two queries
+            hit the same result set and can share a cache entry.
+          maxLength: 512
+          example: "dune"
+        took_ms:
+          type: integer
+          minimum: 0
+          description: Server-side duration. Diagnostics only; never a timeout signal.
+          example: 214
+        segments:
+          type: array
+          description: |
+            Source segments contributing to this result set.
+
+            Deliberately an ARRAY and not an object keyed by segment id, even when
+            there is only one source. A keyed object would make "add a second
+            source" a breaking change for every client already deployed; an array
+            lets a server add a segment tomorrow and an old client will simply
+            render items it does not recognise a source for.
+          items:
+            $ref: "#/components/schemas/Segment"
+          example:
+            - id: "example-provider"
+              label: "Example Provider"
+              provider: "example-provider"
+              item_count: 1
+        items:
+          type: array
+          description: |
+            Flat list of matches across all segments. Flat because the client
+            merges, sorts and paginates on its own; a nested-per-segment shape
+            would make global ordering impossible without a protocol change.
+          items:
+            $ref: "#/components/schemas/Item"
+        filtered_out:
+          type: integer
+          minimum: 0
+          description: |
+            How many candidates the server dropped before returning `items`
+            (duplicates, low-quality matches, anything unplayable). Shown as a
+            subtle "N hidden" hint when non-zero, so a short list does not read
+            as "this is everything that exists".
+          example: 2
+        next_page:
+          type: ["string", "null"]
+          description: |
+            Opaque token to pass back as `page`. `null` when there is no next
+            page. Opaque on purpose: the client must not parse it to learn page
+            numbers, or it will break the first server that switches to cursors.
+          example: "2"
+        has_more:
+          type: boolean
+          description: |
+            Whether another page exists. Redundant with `next_page` on purpose —
+            a client that reads one field only must not have to guess.
+          example: true
+
+    Segment:
+      type: object
+      description: One catalog source represented in a result set.
+      required: [id, label, provider, item_count]
+      properties:
+        id:
+          type: string
+          description: |
+            Stable identifier for this segment within this server's catalogue.
+            Unique within a response; referenced by each item's `segment`.
+          maxLength: 128
+          example: "example-provider"
+        label:
+          type: string
+          description: Display name for the segment, shown as a group heading.
+          maxLength: 128
+          example: "Example Provider"
+        provider:
+          type: string
+          description: |
+            Backend provider key, e.g. "example-provider". Namespaced by
+            `segment` when ids could collide; kept separate so a server can
+            rebrand the visible label without changing stored references.
+          maxLength: 64
+          example: "example-provider"
+        item_count:
+          type: integer
+          minimum: 0
+          description: |
+            How many entries of `items` belong to this segment. Lets the client
+            show a per-source count without counting the flat list itself.
+          example: 1
+
+    Item:
+      type: object
+      description: |
+        One catalog entry. Optional members are genuinely optional: the client
+        renders a row from `id`, `title` and `poster_url` alone, and a server
+        that omits the rest gets a plainer card rather than a broken one.
+      required: [id, segment, provider, kind, title]
+      properties:
+        id:
+          type: string
+          description: |
+            Opaque, stable within this server. The only id the client ever sends
+            back, so it must not embed a parseable structure.
+          maxLength: 256
+          example: "example-provider:dune-2021"
+        segment:
+          type: string
+          description: Id of the `Segment` this item came from. Unknown values are skipped, not fatal.
+          maxLength: 128
+          example: "example-provider"
+        provider:
+          type: string
+          description: Provider key, matching the segment's provider.
+          maxLength: 64
+          example: "example-provider"
+        kind:
+          $ref: "#/components/schemas/MediaKind"
+        title:
+          type: string
+          maxLength: 512
+          example: "Example Feature"
+        original_title:
+          type: ["string", "null"]
+          maxLength: 512
+          example: "Example Feature"
+        year:
+          type: ["integer", "null"]
+          description: Release year. `null` when unknown; never a sentinel like 0.
+          example: 2021
+        rating:
+          type: ["number", "null"]
+          description: Source rating on a 0..10 scale. Out-of-range values are clamped by the client.
+          example: 7.8
+        genres:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          example: [science fiction, adventure]
+        description:
+          type: ["string", "null"]
+          description: |
+            Plain text or HTML as the server has it. The client renders it as
+            plain text: a details screen is not worth an HTML injection surface
+            pointed at by an arbitrary server.
+          example: "Synthetic example record. Not a real title."
+        poster_url:
+          type: ["string", "null"]
+          description: Absolute URL. Subject to the same scheme and egress rules as stream `url`.
+          example: "https://cdn.example/posters/dune-2021.jpg"
+        backdrop_url:
+          type: ["string", "null"]
+          example: "https://cdn.example/backdrops/dune-2021.jpg"
+        duration_ms:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Runtime in milliseconds. `null` for a series or an unknown runtime.
+          example: 9300000
+        external_id:
+          type: ["string", "null"]
+          description: |
+            The source site's own identifier. Diagnostic only — the client
+            must not construct URLs from it.
+          maxLength: 256
+          example: "dune-2021"
+
+    DetailsResponse:
+      type: object
+      required: [item, voiceovers, seasons, episodes]
+      properties:
+        item:
+          $ref: "#/components/schemas/Item"
+        voiceovers:
+          type: array
+          description: |
+            Audio tracks available for this item, with one `default: true`
+            unless the server has no opinion. Always present, possibly empty, so
+            the client can distinguish "no audio" from "server did not say".
+          items:
+            $ref: "#/components/schemas/Voiceover"
+        seasons:
+          type: array
+          description: Season summaries. Empty for a movie — not omitted, so the shape never varies.
+          items:
+            $ref: "#/components/schemas/Season"
+        episodes:
+          type: array
+          description: |
+            Episodes across all seasons, flattened and ordered. A details screen
+            that needs a request per episode is a screen nobody waits for, so
+            this ships in one response even when it is large.
+          items:
+            $ref: "#/components/schemas/Episode"
+
+    Voiceover:
+      type: object
+      description: One audio track.
+      required: [id, label, lang, default]
+      properties:
+        id:
+          type: string
+          description: |
+            Track identifier as used in `/streams?voiceover=`. Opaque; matched
+            against `Episode.voiceovers`.
+          maxLength: 16
+          example: "en"
+        label:
+          type: string
+          description: Display name. Free-form, because dubbing quality tags vary by source.
+          maxLength: 64
+          example: "English"
+        lang:
+          type: string
+          description: ISO 639-1 code, used to preselect a track from the device locale.
+          minLength: 2
+          maxLength: 8
+          example: "en"
+        default:
+          type: boolean
+          description: |
+            The server's recommendation when the client expresses no preference.
+            A preference always wins over this.
+          example: true
+
+    Season:
+      type: object
+      required: [number, label, episode_count]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+          description: Season number, ascending. Not an array index.
+          example: 1
+        label:
+          type: string
+          maxLength: 128
+          example: "Season 1"
+        episode_count:
+          type: integer
+          minimum: 0
+          description: Episodes in this season per the server. Advisory; the client counts `episodes` itself.
+          example: 2
+
+    Episode:
+      type: object
+      required: [id, season, number, voiceovers]
+      properties:
+        id:
+          type: string
+          maxLength: 256
+          description: Opaque id, passed to `/streams` together with `season` and `episode`.
+          example: "example-provider:example-show:1:1"
+        season:
+          type: integer
+          minimum: 1
+          example: 1
+        number:
+          type: integer
+          minimum: 1
+          example: 1
+        title:
+          type: ["string", "null"]
+          maxLength: 512
+          example: "Example Episode One"
+        duration_ms:
+          type: ["integer", "null"]
+          minimum: 0
+          example: 3120000
+        released:
+          type: ["string", "null"]
+          format: date
+          example: "2024-03-01"
+        voiceovers:
+          type: array
+          description: Ids from the parent's `voiceovers`. An empty array means the track list is unknown, not "no audio".
+          items:
+            type: string
+          example: ["en"]
+
+    StreamsResponse:
+      type: object
+      required: [streams, subtitles]
+      properties:
+        streams:
+          type: array
+          description: |
+            Playable locations, best first. Empty is a normal answer: links on
+            these sources expire, so the client must be able to say "nothing right
+            now" without treating it as an error.
+          items:
+            $ref: "#/components/schemas/Stream"
+        subtitles:
+          type: array
+          description: |
+            Subtitle files. Always present, possibly empty, for the same
+            structural reason as `streams`.
+          items:
+            $ref: "#/components/schemas/Subtitle"
+
+    Stream:
+      type: object
+      description: |
+        One playable location. Everything on this object is an instruction the
+        client is about to obey, which is why the security rules are stated as
+        client obligations rather than server requests.
+      required: [url, quality, voiceover, headers]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: |
+            Absolute URL the player will open.
+
+            MANDATORY CONSTRAINTS, enforced by the client:
+              * scheme is `http` or `https` only;
+              * host must not be loopback, link-local (including 169.254.169.254),
+                unspecified, multicast, or any RFC1918 / RFC4193 private range;
+              * `file://`, UNC paths and `ftp://` are rejected outright.
+
+            Rationale in PROTOCOL.md#client-security-rules. A `file://` url
+            handed to a player is a local-file read that the server then gets
+            bytes back from, which is the sharp end of this whole protocol.
+          example: "https://cdn.example/hls/dune-2021/master.m3u8"
+        quality:
+          type: string
+          description: |
+            Label for the user, e.g. "1080p", "auto". Display only — the client
+            must not parse it to decide codec or resolution.
+          maxLength: 32
+          example: "1080p"
+        voiceover:
+          type: string
+          description: |
+            Voiceover id actually delivered, which may differ from the one
+            requested. Always set, so the player can label what it is about to
+            play rather than what was asked for.
+          maxLength: 16
+          example: "en"
+        headers:
+          type: object
+          description: |
+            Extra request headers for THIS `url` only.
+
+            MANDATORY CONSTRAINTS, enforced by the client:
+              * allow-list is exactly `Referer`, `User-Agent`, `Origin`; any
+                other header is dropped without being sent;
+              * never send `Authorization`, `Cookie` or any other client
+                credential, even when the server asks for it by name;
+              * these headers are not carried across redirects, and never
+                applied to a different host than this `url`'s host.
+
+            Rationale in PROTOCOL.md#client-security-rules.
+          additionalProperties:
+            type: string
+            maxLength: 2048
+          example:
+            Referer: "https://catalog.example/"
+            User-Agent: "Kadrbox/1.0"
+
+    Subtitle:
+      type: object
+      description: A subtitle file. Same URL and header rules as `Stream`.
+      required: [url, label, lang, format]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Absolute http/https URL, subject to the same scheme and egress restrictions as `Stream.url`.
+          example: "https://cdn.example/subs/dune-2021.en.vtt"
+        label:
+          type: string
+          maxLength: 64
+          example: "English"
+        lang:
+          type: string
+          description: ISO 639-1 code.
+          minLength: 2
+          maxLength: 8
+          example: "en"
+        format:
+          type: string
+          enum: [srt, vtt, ass, ssa]
+          example: vtt
+        headers:
+          type: object
+          description: |
+            Same allow-list, same single-URL scoping, same credential ban as
+            `Stream.headers`.
+          additionalProperties:
+            type: string
+            maxLength: 2048
+          example:
+            Referer: "https://catalog.example/"
+
+    MediaKind:
+      type: string
+      description: |
+        What an item is. A closed enum on purpose: an unknown kind is skipped by
+        the client, whereas an open string would let a server mint shapes the
+        client has no rendering path for.
+      enum: [movie, series, episode, tv_show, anime, documentary, other]
+      example: movie
