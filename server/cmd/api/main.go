@@ -177,7 +177,14 @@ func run(ctx context.Context, cfg *config.Config) error {
 		log.Printf("[RateLimit] trusted proxies configured (%d entries)", len(proxies))
 	}
 
-	tlsClient, err := provider.NewTLSClient()
+	var clientOpts []provider.ClientOption
+	if cfg.WorkerProxyURL != "" {
+		interval := time.Duration(cfg.WorkerMinIntervalMs) * time.Millisecond
+		clientOpts = append(clientOpts, provider.WithWorkerProxy(cfg.WorkerProxyURL, cfg.WorkerProxySecret, interval))
+		log.Printf("[TLS Client] Using Cloudflare Worker Proxy at %s (min interval %v)", cfg.WorkerProxyURL, interval)
+	}
+
+	tlsClient, err := provider.NewTLSClient(clientOpts...)
 	if err != nil {
 		return fmt.Errorf("[TLS Client] failed to initialize: %w", err)
 	}

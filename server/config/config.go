@@ -40,6 +40,9 @@ type Config struct {
 	DiscordClientID     string
 	DiscordClientSecret string
 	DiscordRedirectURI  string
+	WorkerProxyURL      string
+	WorkerProxySecret   string
+	WorkerMinIntervalMs int
 }
 
 func (c *Config) PostgresDSN() string {
@@ -80,6 +83,9 @@ func Load() *Config {
 		DiscordClientID:     getEnv("DISCORD_CLIENT_ID", ""),
 		DiscordClientSecret: getEnv("DISCORD_CLIENT_SECRET", ""),
 		DiscordRedirectURI:  getEnv("DISCORD_REDIRECT_URI", "https://film.oxideteam.pp.ua/api/v1/auth/discord/callback"),
+		WorkerProxyURL:      getEnv("WORKER_PROXY_URL", ""),
+		WorkerProxySecret:   getEnv("WORKER_PROXY_SECRET", ""),
+		WorkerMinIntervalMs: getEnvInt("WORKER_MIN_INTERVAL_MS", 150),
 	}
 }
 
@@ -123,6 +129,9 @@ func (c *Config) Validate() error {
 	}
 	if c.AppURL == "" {
 		errs = append(errs, "APP_URL is required (used for OAuth redirect URIs)")
+	}
+	if c.WorkerProxyURL != "" && c.WorkerProxySecret == "" {
+		errs = append(errs, "WORKER_PROXY_SECRET is required when WORKER_PROXY_URL is set")
 	}
 
 	if len(errs) > 0 {

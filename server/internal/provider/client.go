@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	nethttp "net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	http "github.com/bogdanfinn/fhttp"
@@ -53,11 +56,29 @@ const resolveRedirectTimeout = 2 * time.Second
 var ErrUnsafeUpstreamTarget = errors.New("refusing to follow redirect to unsafe upstream target")
 
 type TLSClient struct {
-	client tls_client.HttpClient
+	client       tls_client.HttpClient
+	workerClient *nethttp.Client
+	workerURL    string
+	workerSecret string
+	pacerMu      sync.Mutex
+	lastReqTime  time.Time
+	minInterval  time.Duration
+}
+
+// ClientOption дозволяє налаштовувати опції TLSClient.
+type ClientOption func(*TLSClient)
+
+// WithWorkerProxy налаштовує перенаправлення запитів через Cloudflare Worker Proxy.
+func WithWorkerProxy(url, secret string, minInterval time.Duration) ClientOption {
+	return func(c *TLSClient) {
+		c.workerURL = strings.TrimRight(url, "/")
+		c.workerSecret = secret
+		c.minInterval = minInterval
+	}
 }
 
 // NewTLSClient створює HTTP-клієнт з емуляцією браузерного TLS (JA3/JA4) для обходу Cloudflare
-func NewTLSClient() (*TLSClient, error) {
+func NewTLSClient(opts ...ClientOption) (*TLSClient, error) {
 	jar := tls_client.NewCookieJar()
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(15),
@@ -76,7 +97,29 @@ func NewTLSClient() (*TLSClient, error) {
 		return nil, fmt.Errorf("failed to create tls client: %w", err)
 	}
 
-	return &TLSClient{client: client}, nil
+	workerHTTP := &nethttp.Client{
+		Timeout: 25 * time.Second,
+		CheckRedirect: func(req *nethttp.Request, via []*nethttp.Request) error {
+			return nethttp.ErrUseLastResponse
+		},
+	}
+
+	c := &TLSClient{
+		client:       client,
+		workerClient: workerHTTP,
+		minInterval:  150 * time.Millisecond,
+	}
+
+	if envURL := os.Getenv("WORKER_PROXY_URL"); envURL != "" {
+		c.workerURL = strings.TrimRight(envURL, "/")
+		c.workerSecret = os.Getenv("WORKER_PROXY_SECRET")
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c, nil
 }
 
 // validateRedirectHop перевіряє кожен наступний хоп редиректа.
@@ -181,6 +224,10 @@ func upstreamBlockedIP(ip net.IP) bool {
 
 // Get виконує GET-запит з підміною реферера та заголовків
 func (c *TLSClient) Get(ctx context.Context, targetURL, referer string) (string, error) {
+	if c.workerURL != "" && c.workerSecret != "" {
+		return c.getViaWorker(ctx, targetURL, referer)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
@@ -285,6 +332,10 @@ func decodeBody(contentType string, body []byte) (string, error) {
 }
 
 func (c *TLSClient) PostForm(ctx context.Context, targetURL, formData, referer string) (string, error) {
+	if c.workerURL != "" && c.workerSecret != "" {
+		return c.postFormViaWorker(ctx, targetURL, formData, referer)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, strings.NewReader(formData))
 	if err != nil {
 		return "", fmt.Errorf("create post request: %w", err)
@@ -317,4 +368,151 @@ func (c *TLSClient) PostForm(ctx context.Context, targetURL, formData, referer s
 	}
 
 	return decodeBody(resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+func (c *TLSClient) waitPacer(ctx context.Context) error {
+	if c.minInterval <= 0 {
+		return nil
+	}
+	c.pacerMu.Lock()
+	defer c.pacerMu.Unlock()
+
+	now := time.Now()
+	if c.lastReqTime.IsZero() {
+		c.lastReqTime = now
+		return nil
+	}
+
+	elapsed := now.Sub(c.lastReqTime)
+	if elapsed < c.minInterval {
+		delay := c.minInterval - elapsed
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	c.lastReqTime = time.Now()
+	return nil
+}
+
+func (c *TLSClient) getViaWorker(ctx context.Context, targetURL, referer string) (string, error) {
+	if err := c.waitPacer(ctx); err != nil {
+		return "", err
+	}
+
+	currentTarget := targetURL
+	for hop := 0; hop <= maxRedirects; hop++ {
+		req, err := nethttp.NewRequestWithContext(ctx, "GET", c.workerURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("create worker request: %w", err)
+		}
+
+		req.Header.Set("X-Proxy-Secret", c.workerSecret)
+		req.Header.Set("X-Target-URL", currentTarget)
+		req.Header.Set("X-Cache-TTL", "900")
+		req.Header.Set("User-Agent", Chrome120UserAgent)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		req.Header.Set("Accept-Language", "uk,en-US;q=0.9,en;q=0.8")
+		if referer != "" {
+			req.Header.Set("Referer", referer)
+		}
+
+		resp, err := c.workerClient.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("do worker request: %w", err)
+		}
+
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			loc := resp.Header.Get("Location")
+			resp.Body.Close()
+			if loc == "" {
+				return "", fmt.Errorf("redirect status %d without Location header", resp.StatusCode)
+			}
+			if hop == maxRedirects {
+				return "", fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			nextURL, err := resolveRedirectURL(currentTarget, loc)
+			if err != nil {
+				return "", err
+			}
+			if err := validateUpstreamURL(nextURL); err != nil {
+				return "", fmt.Errorf("%w: %s: %v", ErrUnsafeUpstreamTarget, nextURL.Redacted(), err)
+			}
+			currentTarget = nextURL.String()
+			continue
+		}
+
+		defer resp.Body.Close()
+
+		bodyBytes, err := readLimitedBody(resp.Body)
+		if err != nil {
+			return "", err
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			snippet := string(bodyBytes)
+			if len(snippet) > 200 {
+				snippet = snippet[:200]
+			}
+			return "", fmt.Errorf("upstream provider returned status %d: %s", resp.StatusCode, snippet)
+		}
+
+		return decodeBody(resp.Header.Get("Content-Type"), bodyBytes)
+	}
+
+	return "", fmt.Errorf("stopped after %d redirects", maxRedirects)
+}
+
+func (c *TLSClient) postFormViaWorker(ctx context.Context, targetURL, formData, referer string) (string, error) {
+	if err := c.waitPacer(ctx); err != nil {
+		return "", err
+	}
+
+	req, err := nethttp.NewRequestWithContext(ctx, "POST", c.workerURL, strings.NewReader(formData))
+	if err != nil {
+		return "", fmt.Errorf("create worker post request: %w", err)
+	}
+
+	req.Header.Set("X-Proxy-Secret", c.workerSecret)
+	req.Header.Set("X-Target-URL", targetURL)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("User-Agent", Chrome120UserAgent)
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	resp, err := c.workerClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("do worker post request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := readLimitedBody(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet := string(bodyBytes)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return "", fmt.Errorf("upstream provider returned status %d: %s", resp.StatusCode, snippet)
+	}
+
+	return decodeBody(resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+func resolveRedirectURL(baseStr, locStr string) (*url.URL, error) {
+	base, err := url.Parse(baseStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse base url: %w", err)
+	}
+	loc, err := url.Parse(locStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse redirect location: %w", err)
+	}
+	return base.ResolveReference(loc), nil
 }

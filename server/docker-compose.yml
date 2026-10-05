@@ -32,6 +32,9 @@ services:
       - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
       - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI:-https://film.oxideteam.pp.ua/api/v1/auth/discord/callback}
       - DISABLED_PROVIDERS=${DISABLED_PROVIDERS:-}
+      - WORKER_PROXY_URL=${WORKER_PROXY_URL:-}
+      - WORKER_PROXY_SECRET=${WORKER_PROXY_SECRET:-}
+      - WORKER_MIN_INTERVAL_MS=${WORKER_MIN_INTERVAL_MS:-150}
     depends_on:
       postgres:
         condition: service_healthy
