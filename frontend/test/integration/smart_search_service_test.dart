@@ -60,6 +60,17 @@ class FakeProviderRegistry extends Fake implements ProviderRegistry {
     }
     return null;
   }
+
+  /// Every registered provider counts as enabled in these tests.
+  ///
+  /// Added alongside the change that made SmartSearchService resolve its
+  /// server-backed provider by capability over `enabled` instead of by a
+  /// hardcoded id. The fake modelled only the seam the old implementation
+  /// happened to use, so a name-agnostic lookup found nothing here -- which is
+  /// the fake being incomplete, not the lookup being wrong. Every provider in
+  /// this suite is registered precisely because it should be used.
+  @override
+  List<ContentProvider> get enabled => List.unmodifiable(_providers);
 }
 
 class FakeSearchHistoryDao extends Fake implements SearchHistoryDao {

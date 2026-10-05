@@ -12,6 +12,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../core/l10n/app_strings.dart';
 import '../../../core/utils/responsive_utils.dart';
+import '../../../core/utils/stream_url.dart';
 
 import '../../../data/providers/provider_registry.dart';
 import '../../../data/services/settings_service.dart';
@@ -29,6 +30,13 @@ import '../../widgets/tv/focusable_card.dart';
 import '../../widgets/home/continue_watching_section.dart';
 import '../../widgets/home/recommendations_section.dart';
 import '../../widgets/home/hero_banner.dart';
+
+/// What the caller wants to do with the URL typed into the stream dialog.
+///
+/// A record rather than a bare string: two outcomes now come out of one dialog,
+/// and a bare String would have needed a sentinel value like 'party' in the
+/// same field as a URL.
+enum _StreamDialogAction { play, watchParty }
 
 /// Intent for Ctrl+K search shortcut
 class SearchIntent extends Intent {
@@ -311,45 +319,84 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openNetworkStream() async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Відкрити мережевий потік'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'https://example.com/stream.m3u8',
-            labelText: 'URL відео або HLS потоку',
-            prefixIcon: Icon(Icons.link),
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Скасувати'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Відтворити'),
-          ),
-        ],
-      ),
-    );
+  final controller = TextEditingController();
+  String? error;
 
-    if (result != null && result.isNotEmpty && mounted) {
-      context.push(
-        '/player',
-        extra: {
-          'url': result,
-          'title': 'Мережевий потік',
-          'subtitle': result,
-          'isOffline': false,
-        },
-      );
-    }
+  final result = await showDialog<({_StreamDialogAction action, String url})>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) {
+        void submit(_StreamDialogAction a) {
+          final problem = validateMediaUrl(controller.text);
+          if (problem != null) {
+            setState(() => error = problem);
+            return;
+          }
+          Navigator.pop(
+            ctx,
+            (action: a, url: controller.text.trim()),
+          );
+        }
+
+        return AlertDialog(
+          title: const Text('Відкрити мережевий потік'),
+          content: TextField(
+            controller: controller,
+            decoration: InputDecoration(
+              hintText: 'https://example.com/stream.m3u8',
+              labelText: 'URL відео або HLS потоку',
+              prefixIcon: const Icon(Icons.link),
+              errorText: error,
+            ),
+            autofocus: true,
+            onChanged: (_) {
+              // Clear the complaint as soon as the user starts fixing it.
+              if (error != null) setState(() => error = null);
+            },
+            onSubmitted: (_) => submit(_StreamDialogAction.play),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Скасувати'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => submit(_StreamDialogAction.watchParty),
+              icon: const Icon(Icons.groups, size: 20),
+              label: const Text('Спільний перегляд'),
+            ),
+            FilledButton(
+              onPressed: () => submit(_StreamDialogAction.play),
+              child: const Text('Відтворити'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  controller.dispose();
+  if (result == null || !mounted) return;
+
+  if (result.action == _StreamDialogAction.watchParty) {
+    // Seed the room with this stream, so the host never has to retype it.
+    context.push(
+      '/watch-party',
+      extra: {'mediaUrl': result.url, 'mediaTitle': 'Мережевий потік'},
+    );
+    return;
   }
+
+  context.push(
+    '/player',
+    extra: {
+      'url': result.url,
+      'title': 'Мережевий потік',
+      'subtitle': result.url,
+      'isOffline': false,
+    },
+  );
+}
 
   @override
   Widget build(BuildContext context) {
