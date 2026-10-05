@@ -586,7 +586,7 @@ func playlistFromItemPage(ctx context.Context, client *TLSClient, siteBaseURL, h
 
 	for _, cand := range candidates {
 		candCtx, cancel := context.WithTimeout(ctx, playerCandidateTimeout)
-		page, err := client.Get(candCtx, cand.URL, siteBaseURL)
+		page, err := client.GetNoCache(candCtx, cand.URL, siteBaseURL)
 		cancel()
 		if err != nil {
 			continue

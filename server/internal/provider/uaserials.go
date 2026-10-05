@@ -200,7 +200,7 @@ func (p *UaserialsProvider) refreshKeyFromBundle(ctx context.Context) string {
 		return ""
 	}
 
-	js, err := p.client.Get(ctx, p.baseURL+uaserialsKeyBundlePath, p.baseURL+"/")
+	js, err := p.client.GetNoCache(ctx, p.baseURL+uaserialsKeyBundlePath, p.baseURL+"/")
 	if err != nil {
 		// Не Fatal: можливо, ключ просто треба оновити вручну. Помилку
 		// про це додасть той, хто не зміг розшифрувати.

@@ -486,7 +486,7 @@ func (e *TortugaExtractor) expandOneQuality(ctx context.Context, src domain.Stre
 		return nil
 	}
 
-	body, err := e.client.Get(ctx, src.URL, src.Headers["Referer"])
+	body, err := e.client.GetNoCache(ctx, src.URL, src.Headers["Referer"])
 	if err != nil {
 		return nil
 	}
@@ -522,7 +522,7 @@ func (e *TortugaExtractor) fetchPlaylist(ctx context.Context, rawURL string) ([]
 
 	// Referer на саму себе: Tortuga не перевіряє, але деякі сторінки
 	// віддають порожній плеєр без Referer.
-	page, err := e.client.Get(ctx, target, target)
+	page, err := e.client.GetNoCache(ctx, target, target)
 	if err != nil {
 		return nil, "", fmt.Errorf("tortuga: fetch %s: %w", target, err)
 	}

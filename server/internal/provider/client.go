@@ -9,7 +9,7 @@ import (
 	"net"
 	nethttp "net/http"
 	"net/url"
-	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,7 +61,7 @@ type TLSClient struct {
 	workerURL    string
 	workerSecret string
 	pacerMu      sync.Mutex
-	lastReqTime  time.Time
+	hostLastReq  map[string]time.Time
 	minInterval  time.Duration
 }
 
@@ -107,12 +107,8 @@ func NewTLSClient(opts ...ClientOption) (*TLSClient, error) {
 	c := &TLSClient{
 		client:       client,
 		workerClient: workerHTTP,
+		hostLastReq:  make(map[string]time.Time),
 		minInterval:  150 * time.Millisecond,
-	}
-
-	if envURL := os.Getenv("WORKER_PROXY_URL"); envURL != "" {
-		c.workerURL = strings.TrimRight(envURL, "/")
-		c.workerSecret = os.Getenv("WORKER_PROXY_SECRET")
 	}
 
 	for _, opt := range opts {
@@ -222,10 +218,20 @@ func upstreamBlockedIP(ip net.IP) bool {
 	return false
 }
 
-// Get виконує GET-запит з підміною реферера та заголовків
+// Get виконує GET-запит з підміною реферера та стандартним кешем для каталогу/пошуку (TTL 900c)
 func (c *TLSClient) Get(ctx context.Context, targetURL, referer string) (string, error) {
+	return c.GetWithTTL(ctx, targetURL, referer, 900)
+}
+
+// GetNoCache виконує GET-запит без кешування (TTL 0) для GetStreams, плейлистів та тимчасових токенів
+func (c *TLSClient) GetNoCache(ctx context.Context, targetURL, referer string) (string, error) {
+	return c.GetWithTTL(ctx, targetURL, referer, 0)
+}
+
+// GetWithTTL виконує GET-запит із заданим TTL кешу в секундах
+func (c *TLSClient) GetWithTTL(ctx context.Context, targetURL, referer string, ttlSeconds int) (string, error) {
 	if c.workerURL != "" && c.workerSecret != "" {
-		return c.getViaWorker(ctx, targetURL, referer)
+		return c.getViaWorker(ctx, targetURL, referer, ttlSeconds)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
@@ -370,39 +376,46 @@ func (c *TLSClient) PostForm(ctx context.Context, targetURL, formData, referer s
 	return decodeBody(resp.Header.Get("Content-Type"), bodyBytes)
 }
 
-func (c *TLSClient) waitPacer(ctx context.Context) error {
+func (c *TLSClient) waitPacer(ctx context.Context, targetURL string) error {
 	if c.minInterval <= 0 {
 		return nil
 	}
+
+	host := ""
+	if u, err := url.Parse(targetURL); err == nil {
+		host = strings.ToLower(u.Hostname())
+	}
+	if host == "" {
+		host = "default"
+	}
+
 	c.pacerMu.Lock()
 	defer c.pacerMu.Unlock()
 
 	now := time.Now()
-	if c.lastReqTime.IsZero() {
-		c.lastReqTime = now
-		return nil
-	}
-
-	elapsed := now.Sub(c.lastReqTime)
-	if elapsed < c.minInterval {
-		delay := c.minInterval - elapsed
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
+	lastTime, exists := c.hostLastReq[host]
+	if exists && !lastTime.IsZero() {
+		elapsed := now.Sub(lastTime)
+		if elapsed < c.minInterval {
+			delay := c.minInterval - elapsed
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
 		}
 	}
-	c.lastReqTime = time.Now()
+	c.hostLastReq[host] = time.Now()
 	return nil
 }
 
-func (c *TLSClient) getViaWorker(ctx context.Context, targetURL, referer string) (string, error) {
-	if err := c.waitPacer(ctx); err != nil {
-		return "", err
-	}
-
+func (c *TLSClient) getViaWorker(ctx context.Context, targetURL, referer string, ttlSeconds int) (string, error) {
 	currentTarget := targetURL
 	for hop := 0; hop <= maxRedirects; hop++ {
+		if err := c.waitPacer(ctx, currentTarget); err != nil {
+			return "", err
+		}
+
 		req, err := nethttp.NewRequestWithContext(ctx, "GET", c.workerURL, nil)
 		if err != nil {
 			return "", fmt.Errorf("create worker request: %w", err)
@@ -410,7 +423,7 @@ func (c *TLSClient) getViaWorker(ctx context.Context, targetURL, referer string)
 
 		req.Header.Set("X-Proxy-Secret", c.workerSecret)
 		req.Header.Set("X-Target-URL", currentTarget)
-		req.Header.Set("X-Cache-TTL", "900")
+		req.Header.Set("X-Cache-TTL", strconv.Itoa(ttlSeconds))
 		req.Header.Set("User-Agent", Chrome120UserAgent)
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "uk,en-US;q=0.9,en;q=0.8")
@@ -465,7 +478,7 @@ func (c *TLSClient) getViaWorker(ctx context.Context, targetURL, referer string)
 }
 
 func (c *TLSClient) postFormViaWorker(ctx context.Context, targetURL, formData, referer string) (string, error) {
-	if err := c.waitPacer(ctx); err != nil {
+	if err := c.waitPacer(ctx, targetURL); err != nil {
 		return "", err
 	}
 

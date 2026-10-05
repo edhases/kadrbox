@@ -165,7 +165,7 @@ func resolvePlayerHTML(ctx context.Context, client *TLSClient, playerURL, siteBa
 		return domain.StreamSource{}, "", ErrUnresolvablePlayer
 	}
 
-	page, err := client.Get(ctx, playerURL, siteBaseURL)
+	page, err := client.GetNoCache(ctx, playerURL, siteBaseURL)
 	if err != nil {
 		return domain.StreamSource{}, "fetch", fmt.Errorf("fetch player page %s: %w", playerURL, err)
 	}
@@ -1047,7 +1047,7 @@ func extractAllStreamsFromPlayer(ctx context.Context, client *TLSClient, playerU
 		return nil, nil, ErrUnresolvablePlayer
 	}
 
-	page, err := client.Get(ctx, playerURL, siteBaseURL)
+	page, err := client.GetNoCache(ctx, playerURL, siteBaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch player page %s: %w", playerURL, err)
 	}
