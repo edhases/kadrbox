@@ -23,6 +23,7 @@ import '../pages/auth/onboarding_page.dart';
 import '../pages/auth/register_page.dart';
 import '../pages/auth/verify_email_page.dart';
 import '../pages/auth/profile_page.dart';
+import '../pages/plugins/plugins_page.dart';
 import '../widgets/player/mini_player_overlay.dart';
 
 /// Application router configuration
@@ -247,6 +248,13 @@ class AppRouter {
             path: '/settings',
             name: 'settings',
             builder: (context, state) => const SettingsPage(),
+          ),
+
+          // Plugins / Sources
+          GoRoute(
+            path: '/plugins',
+            name: 'plugins',
+            builder: (context, state) => const PluginsPage(),
           ),
 
           // Appearance settings

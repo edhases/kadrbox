@@ -49,7 +49,7 @@ class CustomTitleBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Oxide Film',
+                    'Kadrbox',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,

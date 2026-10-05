@@ -153,6 +153,18 @@ class _HomePageState extends State<HomePage> {
       } catch (_) {}
 
       final homeProviders = _registry.homeProviders;
+      if (homeProviders.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _allItems = [];
+            _filteredItems = [];
+            _isLoading = false;
+            _error = null;
+          });
+        }
+        return;
+      }
+
       final providers = _selectedProviderId != null
           ? homeProviders.where((p) => p.id == _selectedProviderId).toList()
           : homeProviders;
@@ -403,12 +415,14 @@ class _HomePageState extends State<HomePage> {
     final location = GoRouterState.of(context).uri.toString();
     final currentIndex = location.startsWith('/search')
         ? 1
-        : location.startsWith('/favorites')
+        : location.startsWith('/plugins')
         ? 2
-        : location.startsWith('/history')
+        : location.startsWith('/favorites')
         ? 3
-        : location.startsWith('/downloads')
+        : location.startsWith('/history')
         ? 4
+        : location.startsWith('/downloads')
+        ? 5
         : 0;
 
     return NavigationRail(
@@ -447,6 +461,11 @@ class _HomePageState extends State<HomePage> {
           label: Text('Пошук'),
         ),
         NavigationRailDestination(
+          icon: Icon(Icons.extension_outlined),
+          selectedIcon: Icon(Icons.extension),
+          label: Text('Плагіни'),
+        ),
+        NavigationRailDestination(
           icon: Icon(Icons.favorite_outline),
           selectedIcon: Icon(Icons.favorite),
           label: Text('Улюблене'),
@@ -472,12 +491,15 @@ class _HomePageState extends State<HomePage> {
             context.go('/search');
             break;
           case 2:
-            context.go('/favorites');
+            context.go('/plugins');
             break;
           case 3:
-            context.go('/history');
+            context.go('/favorites');
             break;
           case 4:
+            context.go('/history');
+            break;
+          case 5:
             context.go('/downloads');
             break;
         }
@@ -582,7 +604,7 @@ class _HomePageState extends State<HomePage> {
           // App bar
           SliverAppBar(
             floating: true,
-            title: const Text('Oxide Film'),
+            title: const Text('Kadrbox'),
             actions: [
               // Filter button
               FilterButton(filter: _filter, onTap: _showFilterSheet),
@@ -920,15 +942,18 @@ class _HomePageState extends State<HomePage> {
     final location = GoRouterState.of(context).uri.toString();
     final currentIndex = location.startsWith('/search')
         ? 1
-        : location.startsWith('/favorites')
+        : location.startsWith('/plugins')
         ? 2
-        : location.startsWith('/history')
+        : location.startsWith('/favorites')
         ? 3
-        : location.startsWith('/downloads')
+        : location.startsWith('/history')
         ? 4
+        : location.startsWith('/downloads')
+        ? 5
         : 0;
     return BottomNavigationBar(
       currentIndex: currentIndex,
+      type: BottomNavigationBarType.fixed,
       items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.home_outlined),
@@ -939,6 +964,11 @@ class _HomePageState extends State<HomePage> {
           icon: Icon(Icons.search_outlined),
           activeIcon: Icon(Icons.search),
           label: 'Пошук',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.extension_outlined),
+          activeIcon: Icon(Icons.extension),
+          label: 'Плагіни',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.favorite_outline),
@@ -966,12 +996,15 @@ class _HomePageState extends State<HomePage> {
             context.go('/search');
             break;
           case 2:
-            context.go('/favorites');
+            context.go('/plugins');
             break;
           case 3:
-            context.go('/history');
+            context.go('/favorites');
             break;
           case 4:
+            context.go('/history');
+            break;
+          case 5:
             context.go('/downloads');
             break;
         }
@@ -1239,7 +1272,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(width: 8),
                     TextButton(
-                      onPressed: () => context.push('/settings'),
+                      onPressed: () => context.push('/plugins'),
                       child: const Text('Налаштувати'),
                     ),
                   ],

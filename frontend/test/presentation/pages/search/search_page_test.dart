@@ -226,11 +226,7 @@ void main() {
     );
     final historyDao = SearchHistoryDao(db);
     smartSearchService = SmartSearchService(registry, historyDao);
-    catalogService = ProviderCatalogService(
-      registry: registry,
-      prefs: prefs,
-      api: apiClient,
-    );
+    catalogService = ProviderCatalogService(registry: registry, prefs: prefs);
 
     // Register dependencies in GetIt
     GetIt.I.registerSingleton<ProviderRegistry>(registry);

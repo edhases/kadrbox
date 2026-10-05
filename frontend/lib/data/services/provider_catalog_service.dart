@@ -1,11 +1,7 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/config/app_config.dart';
-import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
 import '../models/provider_catalog.dart';
 import '../providers/provider_registry.dart';
@@ -34,44 +30,29 @@ class ProviderCatalogService extends ChangeNotifier {
 
   final ProviderRegistry _registry;
   final SharedPreferences _prefs;
-  final ApiClient _api;
 
   int _version = 0;
   bool _isStale = false;
   bool _synced = false;
   DateTime? _lastSync;
 
-  ProviderCatalogService({
-    ProviderRegistry? registry,
-    SharedPreferences? prefs,
-    ApiClient? api,
-  }) : _registry = registry ?? GetIt.instance<ProviderRegistry>(),
-       _prefs = prefs ?? GetIt.instance<SharedPreferences>(),
-       _api = api ?? GetIt.instance<ApiClient>();
+  ProviderCatalogService({ProviderRegistry? registry, SharedPreferences? prefs})
+    : _registry = registry ?? GetIt.instance<ProviderRegistry>(),
+      _prefs = prefs ?? GetIt.instance<SharedPreferences>();
 
   int get version => _version;
   bool get isStale => _isStale;
   bool get synced => _synced;
   DateTime? get lastSync => _lastSync;
 
-  /// Fetch catalog from backend and reconcile the local registry.
-  /// Never throws — falls back to cache on any error.
+  /// Syncs the backend provider catalog into the app.
+  /// Backend no longer serves pirate scrapers.
+  /// Offline / fallback catalog is strictly empty unless external plugin sources are added.
   Future<void> sync({bool force = false}) async {
     if (_synced && !force) return;
-    try {
-      final res = await _api.getJson(
-        '${AppConfig.serverApiUrl}/content/providers',
-      );
-      final catalog = ProviderCatalog.fromJson(res);
-      await _applyCatalog(catalog, stale: false);
-      Logger.i(
-        'Provider catalog synced: v${catalog.version}, ${catalog.providers.length} providers',
-        tag: _tag,
-      );
-    } catch (e) {
-      Logger.w('Catalog sync failed, trying cache: $e', tag: _tag);
-      await _applyCached(stale: true);
-    }
+    // We do NOT fetch /content/providers from the backend anymore.
+    // The backend is purely legitimate (auth, sync, watch party).
+    await _applyCached(stale: false);
   }
 
   /// Apply backend catalog to [ProviderRegistry].
@@ -107,37 +88,22 @@ class ProviderCatalogService extends ChangeNotifier {
     _synced = true;
     _lastSync = DateTime.now();
 
-    if (!stale) {
-      try {
-        await _prefs.setString(_cacheKey, jsonEncode(catalog.toJson()));
-        await _prefs.setInt(_versionKey, catalog.version);
-      } catch (e) {
-        Logger.w('Failed to cache catalog: $e', tag: _tag);
-      }
-    }
     notifyListeners();
   }
 
   Future<void> _applyCached({bool stale = true}) async {
+    // Clear old scraper cache if present
     try {
-      final raw = _prefs.getString(_cacheKey);
-      if (raw != null && raw.isNotEmpty) {
-        final catalog = ProviderCatalog.fromJson(
-          Map<String, dynamic>.from(jsonDecode(raw) as Map),
-        );
-        await _applyCatalog(catalog, stale: stale);
-        return;
-      }
-    } catch (e) {
-      Logger.w('Failed to apply cached catalog: $e', tag: _tag);
-    }
+      await _prefs.remove(_cacheKey);
+      await _prefs.remove(_versionKey);
+    } catch (_) {}
 
-    // Clean default: no hardcoded scraper providers.
-    // Plugins/sources are connected dynamically.
+    // Clean default: zero hardcoded scraper providers.
+    // External plugins / custom sources are connected dynamically.
     final fallbackEntries = <ProviderCatalogEntry>[];
     await _applyCatalog(
       ProviderCatalog(version: 1, providers: fallbackEntries),
-      stale: true,
+      stale: stale,
     );
   }
 }
