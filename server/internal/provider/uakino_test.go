@@ -33,6 +33,8 @@ func TestUakinoProviderBasicAndSearch(t *testing.T) {
 		{"protocol relative", "//uakino.biz/uploads/poster.jpg", "https://uakino.biz/uploads/poster.jpg"},
 		{"absolute https", "https://example.com/poster.jpg", "https://example.com/poster.jpg"},
 		{"absolute http", "http://example.com/poster.jpg", "http://example.com/poster.jpg"},
+		{"legacy uakino.best", "https://uakino.best/uploads/poster.jpg", "https://uakino.biz/uploads/poster.jpg"},
+		{"legacy uakino.me", "https://uakino.me/uploads/poster.jpg", "https://uakino.biz/uploads/poster.jpg"},
 	}
 
 	for _, tc := range tests {

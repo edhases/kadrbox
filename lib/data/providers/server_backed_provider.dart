@@ -243,13 +243,19 @@ class ServerBackedProvider extends ContentProvider {
         queryParameters: {'q': query},
       );
 
-      if (rawData is Map) {
+      final payload = (rawData is Map && rawData['data'] is Map)
+          ? rawData['data']
+          : (rawData is Map && rawData['data'] is List)
+          ? rawData['data']
+          : rawData;
+
+      if (payload is Map) {
         return SearchEnvelope.fromJson(
-          Map<String, dynamic>.from(rawData),
+          Map<String, dynamic>.from(payload),
           _mapItem,
         );
-      } else if (rawData is List) {
-        return _legacyEnvelope(query, rawData);
+      } else if (payload is List) {
+        return _legacyEnvelope(query, payload);
       } else {
         throw FormatException(
           'Unexpected /content/search response: '

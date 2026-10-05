@@ -190,20 +190,23 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 		return nil, fmt.Errorf("parse details html: %w", err)
 	}
 
-	title := strings.TrimSpace(doc.Find("h1.movie-title, .solotitle, h1").First().Text())
-	origTitle := strings.TrimSpace(doc.Find("span.origintitle, [itemprop='alternateName']").First().Text())
+	title := strings.TrimSpace(doc.Find("#dle-content h1, .alltitle h1, h1.movie-title, .solototle, .solotitle, h1").First().Text())
+	origTitle := strings.TrimSpace(doc.Find("#dle-content [itemprop='alternateName'], span.origintitle, [itemprop='alternateName']").First().Text())
 	if origTitle == "" {
 		origTitle, _ = doc.Find("meta[itemprop='alternateName']").Attr("content")
 		origTitle = strings.TrimSpace(origTitle)
 	}
 
-	posterElem := doc.Find(".movie-img img, .movie-img-1 img, .movie-img-inner img, .movie-poster img, .full-poster img, .fposter img, img[itemprop='image']").First()
+	posterElem := doc.Find("#dle-content img[itemprop='image'], img[itemprop='image'], #dle-content .full-poster img, .full-poster img, .fposter img, #dle-content .movie-img img").First()
+	if posterElem.Length() == 0 {
+		posterElem = doc.Find(".movie-img img, .movie-img-1 img, .movie-poster img").First()
+	}
 	poster, _ := posterElem.Attr("src")
 	if poster == "" {
 		poster, _ = posterElem.Attr("data-src")
 	}
 	poster = p.ResolvePosterURL(poster)
-	desc := strings.TrimSpace(doc.Find(".full-text, .movie-desc, .fdesc, [itemprop='description']").First().Text())
+	desc := strings.TrimSpace(doc.Find("#dle-content [itemprop='description'], [itemprop='description'], #dle-content .full-text, .full-text, .fdesc").First().Text())
 
 	var genres []string
 	var countries []string
@@ -212,33 +215,9 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 	var duration string
 	var year int
 
-	// Schema.org metas
-	if g, ok := doc.Find("meta[itemprop='genre']").Attr("content"); ok {
-		for _, part := range strings.Split(g, ",") {
-			if t := strings.TrimSpace(part); t != "" {
-				genres = append(genres, t)
-			}
-		}
-	}
-	if c, ok := doc.Find("meta[itemprop='contentLocation'], meta[itemprop='countryOfOrigin']").Attr("content"); ok {
-		for _, part := range strings.Split(c, ",") {
-			if t := strings.TrimSpace(part); t != "" {
-				countries = append(countries, t)
-			}
-		}
-	}
-	if a, ok := doc.Find("meta[itemprop='actors']").Attr("content"); ok {
-		for _, part := range strings.Split(a, ",") {
-			if t := strings.TrimSpace(part); t != "" {
-				actors = append(actors, t)
-			}
-		}
-	}
-	if d, ok := doc.Find("meta[itemprop='director']").Attr("content"); ok {
-		director = strings.TrimSpace(d)
-	}
-	if yrStr, ok := doc.Find("meta[itemprop='dateCreated']").Attr("content"); ok {
-		year = parseYear(yrStr)
+	// Release year from explicit year links
+	if yrLink := doc.Find("#dle-content a[href*='/find/year/'], a[href*='/find/year/']").First().Text(); yrLink != "" {
+		year = parseYear(yrLink)
 	}
 
 	// .film-info, .flist, .fi-item rows
@@ -297,6 +276,45 @@ func (p *UakinoProvider) GetDetails(ctx context.Context, itemURL string) (*domai
 
 	if year == 0 {
 		year = parseYear(doc.Find(".film-info, .flist").Text())
+	}
+
+	// Schema.org metas fallback
+	if len(genres) == 0 {
+		if g, ok := doc.Find("meta[itemprop='genre']").Attr("content"); ok {
+			for _, part := range strings.Split(g, ",") {
+				if t := strings.TrimSpace(part); t != "" {
+					genres = append(genres, t)
+				}
+			}
+		}
+	}
+	if len(countries) == 0 {
+		if c, ok := doc.Find("meta[itemprop='contentLocation'], meta[itemprop='countryOfOrigin']").Attr("content"); ok {
+			for _, part := range strings.Split(c, ",") {
+				if t := strings.TrimSpace(part); t != "" {
+					countries = append(countries, t)
+				}
+			}
+		}
+	}
+	if len(actors) == 0 {
+		if a, ok := doc.Find("meta[itemprop='actors']").Attr("content"); ok {
+			for _, part := range strings.Split(a, ",") {
+				if t := strings.TrimSpace(part); t != "" {
+					actors = append(actors, t)
+				}
+			}
+		}
+	}
+	if director == "" {
+		if d, ok := doc.Find("meta[itemprop='director']").Attr("content"); ok {
+			director = strings.TrimSpace(d)
+		}
+	}
+	if year == 0 {
+		if yrStr, ok := doc.Find("meta[itemprop='dateCreated']").Attr("content"); ok {
+			year = parseYear(yrStr)
+		}
 	}
 
 	var rating float64
@@ -388,6 +406,9 @@ func (p *UakinoProvider) ResolvePosterURL(poster string) string {
 	if poster == "" {
 		return ""
 	}
+	// Migrate legacy/blocked uakino.best or uakino.me domains to current baseURL
+	poster = strings.ReplaceAll(poster, "uakino.best", "uakino.biz")
+	poster = strings.ReplaceAll(poster, "uakino.me", "uakino.biz")
 	if strings.HasPrefix(poster, "//") {
 		return "https:" + poster
 	}

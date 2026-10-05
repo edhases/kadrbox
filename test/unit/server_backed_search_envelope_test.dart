@@ -87,6 +87,27 @@ void main() {
       });
     });
 
+    test('unwraps server response when wrapped in data property', () async {
+      final provider = await providerReturning({
+        'data': {
+          'query': 'Matrix',
+          'canonical': 'Matrix',
+          'took_ms': 120,
+          'filtered_out': 2,
+          'segments': <dynamic>[],
+          'items': [
+            {'title': 'The Matrix Reloaded', 'url': 'https://x/2'},
+          ],
+        },
+      });
+
+      final envelope = await provider.searchEnvelope('Matrix');
+
+      expect(envelope.items, hasLength(1));
+      expect(envelope.items.first.item.title, 'The Matrix Reloaded');
+      expect(envelope.filteredOut, 2);
+    });
+
     test('does not send a page parameter the backend ignores', () async {
       final provider = await providerReturning({
         'query': 'q',

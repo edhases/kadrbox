@@ -33,10 +33,20 @@ class _PosterImageClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
-    request.headers['User-Agent'] = _browserUserAgent;
-    request.headers['Accept'] =
+    var effectiveRequest = request;
+    if (request.url.host == 'uakino.best' || request.url.host == 'uakino.me') {
+      final newUri = request.url.replace(host: 'uakino.biz');
+      final newReq = http.Request(request.method, newUri);
+      newReq.headers.addAll(request.headers);
+      effectiveRequest = newReq;
+    }
+
+    effectiveRequest.headers['User-Agent'] = _browserUserAgent;
+    effectiveRequest.headers['Accept'] =
         'image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
-    return _inner.send(request);
+    effectiveRequest.headers['Referer'] =
+        'https://${effectiveRequest.url.host}/';
+    return _inner.send(effectiveRequest);
   }
 
   @override
