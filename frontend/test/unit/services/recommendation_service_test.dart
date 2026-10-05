@@ -1,13 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/services/recommendation_service.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/domain/repositories/content_provider.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/database/dao/media_items_dao.dart';
-import 'package:oxide_film/data/database/app_database.dart'; // For WatchHistoryData
+import 'package:kadrbox/data/services/recommendation_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/providers/provider_registry.dart';
+import 'package:kadrbox/domain/repositories/content_provider.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/database/dao/media_items_dao.dart';
+import 'package:kadrbox/data/database/app_database.dart'; // For WatchHistoryData
 
 // --- Manual Mocks ---
 

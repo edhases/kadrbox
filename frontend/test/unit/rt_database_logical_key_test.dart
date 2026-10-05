@@ -8,7 +8,7 @@
 
 import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/database/app_database.dart';
+import 'package:kadrbox/data/database/app_database.dart';
 
 import '../helpers/in_memory_db.dart';
 
@@ -264,14 +264,20 @@ void main() {
       expect(rows.single.title, 'new');
     });
 
-    test('the < 10 hdrezka purge still runs for older databases', () async {
-      await insertHistory(db, mediaId: 'rezka', providerId: 'hdrezka');
+    test('an upgrade from an older schema still reaches the dedup step', () async {
+      await insertHistory(db, mediaId: 'm', providerId: 'p', title: 'old');
       await db.migration.onUpgrade(db.createMigrator(), 9, 11);
 
+      // The pre-10 data cleanup step ran without throwing and did not discard
+      // rows of a provider that is still in the catalog...
       final rows = await db.select(db.watchHistory).get();
-      expect(rows.where((r) => r.providerId == 'hdrezka'), isEmpty);
-      // ...and the dedup step ran on the way through.
-      expect((await db.select(db.favorites).get()), isEmpty);
+      expect(rows.any((r) => r.providerId == 'p'), isTrue);
+      // ...and the dedup step ran on the way through, so the unique index over
+      // the COALESCE'd logical key is enforced.
+      await expectLater(
+        insertHistory(db, mediaId: 'm', providerId: 'p', title: 'new'),
+        throwsA(anything),
+      );
     });
   });
 }

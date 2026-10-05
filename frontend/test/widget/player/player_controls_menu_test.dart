@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart' hide PlayerState;
 import 'package:mocktail/mocktail.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/presentation/pages/player/player_controller.dart';
-import 'package:oxide_film/presentation/pages/player/player_controls.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
+import 'package:kadrbox/presentation/pages/player/player_controller.dart';
+import 'package:kadrbox/presentation/pages/player/player_controls.dart';
 
 // Mocks
 class MockPlayerController extends Mock implements PlayerController {}

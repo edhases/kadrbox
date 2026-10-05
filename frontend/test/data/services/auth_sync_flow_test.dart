@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/services/auth_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/services/auth_service.dart';
 import 'package:get_it/get_it.dart';
 
 // Mock classes using Mocktail

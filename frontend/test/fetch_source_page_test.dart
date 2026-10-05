@@ -50,7 +50,7 @@ Future<void> fetchAndSave(String url, String ua, String filename) async {
 
 void main() async {
   final targetUrl =
-      'https://uafix.net/serials/gra-v-kalmara-viprobuvannja-squid-game-the-challenge/'; // Specific movie
+      'https://src-a.example/serials/gra-v-kalmara-viprobuvannja-squid-game-the-challenge/'; // Specific movie
 
   await fetchAndSave(targetUrl, desktopUA, 'test/desktop_ua_result.html');
   await fetchAndSave(targetUrl, mobileUA, 'test/mobile_ua_result.html');
@@ -58,7 +58,7 @@ void main() async {
   print('\n--- Pagination Test ---');
   // Search for common term "Harry"
   final searchUrlBase =
-      'https://uafix.net/index.php?do=search&subaction=search&story=Harry';
+      'https://src-a.example/index.php?do=search&subaction=search&story=Harry';
 
   await fetchAndSave(
     '$searchUrlBase&search_start=1',

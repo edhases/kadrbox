@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 void main() async {
-  final url = Uri.parse('https://uafix.net/serials/garri-gole/');
+  final url = Uri.parse('https://src-a.example/serials/garri-gole/');
   final headers = {
     'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

@@ -1,7 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/database/dao/settings_dao.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/settings_dao.dart';
 
 import '../../helpers/in_memory_db.dart';
 
@@ -24,23 +24,25 @@ void main() {
       await db.close();
     });
 
-    test('Migration step < 10 purges hdrezka data cleanly', () async {
+    test('Migration step < 10 keeps rows of providers that still exist', () async {
       final db = createTestAppDatabase();
 
-      // Seed rows with hdrezka
+      // The step-10 upgrade is a data-only cleanup of sources the app no longer
+      // ships. It must be narrow: rows belonging to a source that is still in
+      // the catalog have to survive untouched.
       await db
           .into(db.enabledProviders)
           .insert(
-            EnabledProvidersCompanion.insert(providerId: 'hdrezka'),
+            EnabledProvidersCompanion.insert(providerId: 'src_a'),
             mode: InsertMode.insertOrIgnore,
           );
       await db
           .into(db.favorites)
           .insert(
             FavoritesCompanion.insert(
-              mediaId: 'rezka1',
-              providerId: 'hdrezka',
-              title: 'Rezka Movie',
+              mediaId: 'm1',
+              providerId: 'src_a',
+              title: 'Kept Movie',
               mediaType: 'movie',
             ),
             mode: InsertMode.insertOrIgnore,
@@ -49,9 +51,9 @@ void main() {
           .into(db.watchHistory)
           .insert(
             WatchHistoryCompanion.insert(
-              mediaId: 'rezka1',
-              providerId: 'hdrezka',
-              title: 'Rezka History',
+              mediaId: 'm1',
+              providerId: 'src_a',
+              title: 'Kept History',
               mediaType: 'movie',
             ),
             mode: InsertMode.insertOrIgnore,
@@ -60,34 +62,34 @@ void main() {
           .into(db.storedMediaItems)
           .insert(
             StoredMediaItemsCompanion.insert(
-              id: 'rezka1',
-              providerId: 'hdrezka',
-              title: 'Rezka Cache',
+              id: 'm1',
+              providerId: 'src_a',
+              title: 'Kept Cache',
               mediaType: 'movie',
             ),
             mode: InsertMode.insertOrReplace,
           );
 
-      // Verify row exists before upgrade logic
+      // Verify the rows exist before the upgrade logic runs.
       var favs = await db.select(db.favorites).get();
-      expect(favs.any((f) => f.providerId == 'hdrezka'), isTrue);
+      expect(favs.any((f) => f.providerId == 'src_a'), isTrue);
 
       // Execute migration callback for from=9, to=10
       final migrator = db.createMigrator();
       await db.migration.onUpgrade(migrator, 9, 10);
 
-      // Verify hdrezka rows are wiped out completely
+      // Verify every table kept the rows of a source that still exists.
       favs = await db.select(db.favorites).get();
-      expect(favs.any((f) => f.providerId == 'hdrezka'), isFalse);
+      expect(favs.any((f) => f.providerId == 'src_a'), isTrue);
 
       final hist = await db.select(db.watchHistory).get();
-      expect(hist.any((h) => h.providerId == 'hdrezka'), isFalse);
+      expect(hist.any((h) => h.providerId == 'src_a'), isTrue);
 
       final provs = await db.select(db.enabledProviders).get();
-      expect(provs.any((p) => p.providerId == 'hdrezka'), isFalse);
+      expect(provs.any((p) => p.providerId == 'src_a'), isTrue);
 
       final cached = await db.select(db.storedMediaItems).get();
-      expect(cached.any((c) => c.providerId == 'hdrezka'), isFalse);
+      expect(cached.any((c) => c.providerId == 'src_a'), isTrue);
 
       await db.close();
     });

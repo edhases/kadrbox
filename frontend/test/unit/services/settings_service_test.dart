@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/core/l10n/app_strings.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/domain/entities/ui_settings.dart';
+import 'package:kadrbox/core/l10n/app_strings.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/domain/entities/ui_settings.dart';
 
 import '../../helpers/in_memory_db.dart';
 
@@ -180,22 +180,22 @@ void main() {
     });
 
     test('Provider enable and search preferences', () async {
-      await settingsService.setProviderEnabled('uakino', true);
-      await settingsService.setProviderEnabled('lavakino', false);
+      await settingsService.setProviderEnabled('src_a', true);
+      await settingsService.setProviderEnabled('src_c', false);
       await pumpEventQueue();
 
-      expect(settingsService.isProviderEnabled('uakino'), isTrue);
-      expect(settingsService.isProviderEnabled('lavakino'), isFalse);
+      expect(settingsService.isProviderEnabled('src_a'), isTrue);
+      expect(settingsService.isProviderEnabled('src_c'), isFalse);
       expect(
         settingsService.isProviderEnabled('nonexistent'),
         isTrue,
       ); // default
 
       // Search enabled preference per provider
-      await settingsService.setSearchEnabledForProvider('uakino', false);
-      expect(settingsService.isSearchEnabledForProvider('uakino'), isFalse);
+      await settingsService.setSearchEnabledForProvider('src_a', false);
+      expect(settingsService.isSearchEnabledForProvider('src_a'), isFalse);
       expect(
-        settingsService.isSearchEnabledForProvider('lavakino'),
+        settingsService.isSearchEnabledForProvider('src_c'),
         isFalse,
       ); // default is false for separate
     });

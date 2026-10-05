@@ -13,15 +13,15 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/database/dao/history_dao.dart';
-import 'package:oxide_film/data/services/auth_service.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/history_dao.dart';
+import 'package:kadrbox/data/services/auth_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
 
 import '../../helpers/in_memory_db.dart';
 
-class _MockServer extends Mock implements OxideServerService {}
+class _MockServer extends Mock implements KadrboxServerService {}
 
 class _MockAuthService extends Mock implements AuthService {}
 
@@ -117,7 +117,7 @@ void main() {
 
   Future<void> seedLocalRow(String mediaId) => dao.saveProgress(
     mediaId: mediaId,
-    providerId: 'uakino',
+    providerId: 'src_a',
     title: mediaId,
     mediaType: 'movie',
     positionMs: 1,

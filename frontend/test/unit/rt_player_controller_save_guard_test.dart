@@ -10,9 +10,9 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/presentation/pages/player/player_controller.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
+import 'package:kadrbox/presentation/pages/player/player_controller.dart';
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
 import '../helpers/mock_services.dart';
@@ -52,7 +52,7 @@ void main() {
     final c = PlayerController(
       initialUrl: 'https://cdn/video.mkv',
       mediaId: 'm1',
-      providerId: 'uakino',
+      providerId: 'src_a',
       title: 'Movie',
       historyService: history,
       settingsService: settings,

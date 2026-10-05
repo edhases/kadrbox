@@ -3,11 +3,11 @@ import 'dart:io' as io;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dio/dio.dart';
 
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/services/download_service.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/services/download_service.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
@@ -117,7 +117,7 @@ void main() {
     test('downloadContent rejects HLS streams with Ukrainian error', () async {
       final item = MediaItem(
         id: 'hls_1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'HLS Movie',
         type: ContentType.movie,
       );
@@ -139,7 +139,7 @@ void main() {
     test('downloadContent rejects invalid URL schemes', () async {
       final item = MediaItem(
         id: 'bad_url',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Bad URL Movie',
         type: ContentType.movie,
       );
@@ -169,7 +169,7 @@ void main() {
       () async {
         final item = MediaItem(
           id: 'movie_42',
-          providerId: 'uakino',
+          providerId: 'src_a',
           title: 'Тестовий Фільм',
           posterUrl: 'http://127.0.0.1:${server.port}/poster.jpg',
           year: 2024,
@@ -210,15 +210,15 @@ void main() {
 
         // Verify query getters
         expect(
-          downloadService.isAvailableOffline('movie_42', 'uakino'),
+          downloadService.isAvailableOffline('movie_42', 'src_a'),
           isTrue,
         );
         expect(
-          downloadService.getLocalPath('movie_42', 'uakino'),
+          downloadService.getLocalPath('movie_42', 'src_a'),
           download.localPath,
         );
         expect(
-          downloadService.getStatus('movie_42', 'uakino'),
+          downloadService.getStatus('movie_42', 'src_a'),
           DownloadStatus.completed,
         );
         expect(downloadService.completed.length, 1);
@@ -233,7 +233,7 @@ void main() {
       () async {
         final item = MediaItem(
           id: 'movie_dup',
-          providerId: 'uakino',
+          providerId: 'src_a',
           title: 'Dup Movie',
           type: ContentType.movie,
         );
@@ -265,7 +265,7 @@ void main() {
     test('deleteDownload removes file from disk and record from DB', () async {
       final item = MediaItem(
         id: 'movie_to_delete',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Delete Me',
         type: ContentType.movie,
       );
@@ -292,7 +292,7 @@ void main() {
     test('clearAll cleans up all downloads and posters', () async {
       final item = MediaItem(
         id: 'movie_clear',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Clear Me',
         posterUrl: 'http://127.0.0.1:${server.port}/poster.jpg',
         type: ContentType.movie,

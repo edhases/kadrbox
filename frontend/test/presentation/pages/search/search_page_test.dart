@@ -7,38 +7,38 @@ import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/database/dao/search_history_dao.dart';
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/data/services/auth_service.dart';
-import 'package:oxide_film/data/services/download_service.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
-import 'package:oxide_film/data/services/provider_catalog_service.dart';
-import 'package:oxide_film/data/services/search/search_envelope.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/data/services/smart_search/smart_search_service.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/domain/repositories/content_provider.dart';
-import 'package:oxide_film/presentation/pages/search/search_page.dart';
-import 'package:oxide_film/presentation/widgets/common/skeleton.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/search_history_dao.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/provider_registry.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/data/services/auth_service.dart';
+import 'package:kadrbox/data/services/download_service.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
+import 'package:kadrbox/data/services/provider_catalog_service.dart';
+import 'package:kadrbox/data/services/search/search_envelope.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/smart_search/smart_search_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/domain/repositories/content_provider.dart';
+import 'package:kadrbox/presentation/pages/search/search_page.dart';
+import 'package:kadrbox/presentation/widgets/common/skeleton.dart';
 
 import '../../../helpers/in_memory_db.dart';
 
-class _FakeBanderaProvider extends ServerBackedProvider {
+class _FakeServerProvider extends ServerBackedProvider {
   // Not constructor parameters: tests mutate them after construction
-  // (banderaProvider.mockEnvelope = ..., .throwError = true), so a parameter
+  // (serverProvider.mockEnvelope = ..., .throwError = true), so a parameter
   // form would never receive a value.
-  _FakeBanderaProvider()
+  _FakeServerProvider()
     : super(
         const ProviderCatalogEntry(
-          id: 'bandera',
-          name: 'Bandera Online',
-          baseUrl: 'https://test.bandera',
+          id: 'src_d',
+          name: 'Source D',
+          baseUrl: 'https://catalog.example',
           enabled: true,
           healthy: true,
           showOnHome: true,
@@ -84,13 +84,13 @@ class _FakeBanderaProvider extends ServerBackedProvider {
               status: 'ok',
               count: 2,
               sources: {
-                'uakino': const SearchSourceStatus(
-                  key: 'uakino',
+                'src_a': const SearchSourceStatus(
+                  key: 'src_a',
                   status: SourceStatus.ok,
                   count: 1,
                 ),
-                'eneyida': const SearchSourceStatus(
-                  key: 'eneyida',
+                'src_b': const SearchSourceStatus(
+                  key: 'src_b',
                   status: SourceStatus.ok,
                   count: 1,
                 ),
@@ -102,7 +102,7 @@ class _FakeBanderaProvider extends ServerBackedProvider {
               clusterKey: 'cluster_dune_2',
               item: MediaItem(
                 id: 'dune_2',
-                providerId: 'bandera',
+                providerId: 'src_d',
                 title: 'Дюна: Частина друга',
                 originalTitle: 'Dune: Part Two',
                 year: 2024,
@@ -113,9 +113,9 @@ class _FakeBanderaProvider extends ServerBackedProvider {
               matchedBy: 'title',
               sources: const [
                 SearchItemSource(
-                  providerId: 'bandera',
-                  sourceKey: 'uakino',
-                  itemId: 'dune_2_ua',
+                  providerId: 'src_d',
+                  sourceKey: 'src_a',
+                  itemId: 'dune_2_sa',
                 ),
               ],
             ),
@@ -123,7 +123,7 @@ class _FakeBanderaProvider extends ServerBackedProvider {
               clusterKey: 'cluster_oppenheimer',
               item: MediaItem(
                 id: 'oppenheimer',
-                providerId: 'bandera',
+                providerId: 'src_d',
                 title: 'Оппенгеймер',
                 originalTitle: 'Oppenheimer',
                 year: 2023,
@@ -134,15 +134,34 @@ class _FakeBanderaProvider extends ServerBackedProvider {
               matchedBy: 'title',
               sources: const [
                 SearchItemSource(
-                  providerId: 'bandera',
-                  sourceKey: 'eneyida',
-                  itemId: 'oppenheimer_en',
+                  providerId: 'src_d',
+                  sourceKey: 'src_b',
+                  itemId: 'oppenheimer_sb',
                 ),
               ],
             ),
           ],
           filteredOut: 0,
         );
+  }
+}
+
+class _AnySourceRegistry extends ProviderRegistry {
+  /// Exact id matches win; anything else falls back to the registered
+  /// server-backed source.
+  ///
+  /// The search path asks the registry for a server-backed source rather than
+  /// for a source the app knows by name — it must not carry a hardcoded id —
+  /// so this double answers the lookup without pinning one. Everything else
+  /// (enabled list, home providers, catalog overrides) stays the real thing.
+  @override
+  ContentProvider? getById(String id) {
+    final exact = super.getById(id);
+    if (exact != null) return exact;
+    for (final p in all) {
+      if (p is ServerBackedProvider) return p;
+    }
+    return null;
   }
 }
 
@@ -186,9 +205,9 @@ void main() {
 
   late AppDatabase db;
   late ProviderRegistry registry;
-  late _FakeBanderaProvider banderaProvider;
+  late _FakeServerProvider serverProvider;
   late SettingsService settingsService;
-  late OxideServerService serverService;
+  late KadrboxServerService serverService;
   late AuthService authService;
   late FavoritesService favoritesService;
   late DownloadService downloadService;
@@ -202,16 +221,16 @@ void main() {
     prefs = await SharedPreferences.getInstance();
 
     db = createTestAppDatabase();
-    registry = ProviderRegistry();
-    banderaProvider = _FakeBanderaProvider();
-    registry.register(banderaProvider);
+    registry = _AnySourceRegistry();
+    serverProvider = _FakeServerProvider();
+    registry.register(serverProvider);
     registry.register(_DummyProvider());
 
     final dio = Dio();
     final apiClient = ApiClient(prefs: prefs, dio: dio);
 
     settingsService = SettingsService(db);
-    serverService = OxideServerService(prefs, apiClient);
+    serverService = KadrboxServerService(prefs, apiClient);
     authService = AuthService(serverService);
     favoritesService = FavoritesService(
       database: db,
@@ -290,7 +309,7 @@ void main() {
 
       // The aggregator is the only provider the search path queries, so hanging
       // it is what keeps the page in its loading state for the test's duration.
-      banderaProvider.hang = true;
+      serverProvider.hang = true;
 
       await tester.pumpWidget(buildTestWidget(initialQuery: 'Дюна'));
       await tester.pump();
@@ -404,7 +423,7 @@ void main() {
       await tester.pumpWidget(buildTestWidget(initialQuery: 'Дюна'));
       await tester.pumpAndSettle();
 
-      // Results from _FakeBanderaProvider should be displayed
+      // Results from _FakeServerProvider should be displayed
       expect(find.text('Дюна: Частина друга'), findsWidgets);
       expect(find.text('Оппенгеймер'), findsWidgets);
       expect(find.textContaining('2024'), findsWidgets);
@@ -412,8 +431,8 @@ void main() {
 
       // Verify provider filter chips are rendered
       expect(find.text('Усі джерела'), findsOneWidget);
-      expect(find.text('uakino'), findsOneWidget);
-      expect(find.text('eneyida'), findsOneWidget);
+      expect(find.text('src_a'), findsOneWidget);
+      expect(find.text('src_b'), findsOneWidget);
     },
   );
 
@@ -431,13 +450,13 @@ void main() {
       expect(find.text('Дюна: Частина друга'), findsWidgets);
       expect(find.text('Оппенгеймер'), findsWidgets);
 
-      // Filter by 'uakino'
-      final uakinoChip = find.text('uakino');
-      expect(uakinoChip, findsOneWidget);
-      await tester.tap(uakinoChip);
+      // Filter by 'src_a'
+      final sourceChipA = find.text('src_a');
+      expect(sourceChipA, findsOneWidget);
+      await tester.tap(sourceChipA);
       await tester.pumpAndSettle();
 
-      // Only Dune should remain as it was sourced from uakino
+      // Only Dune should remain as it was sourced from src_a
       expect(find.text('Дюна: Частина друга'), findsWidgets);
       expect(find.text('Оппенгеймер'), findsNothing);
 
@@ -473,8 +492,8 @@ void main() {
       await tester.tap(itemCard);
       await tester.pumpAndSettle();
 
-      expect(navigatedRoute, '/details/bandera/dune_2');
-      expect(find.text('Details: bandera / dune_2'), findsOneWidget);
+      expect(navigatedRoute, '/details/src_d/dune_2');
+      expect(find.text('Details: src_d / dune_2'), findsOneWidget);
     },
   );
 
@@ -486,7 +505,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      banderaProvider.mockEnvelope = SearchEnvelope(
+      serverProvider.mockEnvelope = SearchEnvelope(
         query: 'Бетмен',
         canonical: 'Бетмен',
         tookMs: 50,
@@ -496,13 +515,13 @@ void main() {
             status: 'partial',
             count: 1,
             sources: {
-              'uakino': const SearchSourceStatus(
-                key: 'uakino',
+              'src_a': const SearchSourceStatus(
+                key: 'src_a',
                 status: SourceStatus.ok,
                 count: 1,
               ),
-              'lavakino': const SearchSourceStatus(
-                key: 'lavakino',
+              'src_c': const SearchSourceStatus(
+                key: 'src_c',
                 status: SourceStatus.error,
                 count: 0,
               ),
@@ -514,7 +533,7 @@ void main() {
             clusterKey: 'cluster_batman',
             item: MediaItem(
               id: 'batman',
-              providerId: 'bandera',
+              providerId: 'src_d',
               title: 'Бетмен',
               year: 2022,
               type: ContentType.movie,
@@ -523,9 +542,9 @@ void main() {
             matchedBy: 'title',
             sources: const [
               SearchItemSource(
-                providerId: 'bandera',
-                sourceKey: 'uakino',
-                itemId: 'batman_ua',
+                providerId: 'src_d',
+                sourceKey: 'src_a',
+                itemId: 'batman_sa',
               ),
             ],
           ),
@@ -537,9 +556,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Бетмен'), findsWidgets);
-      // Failure banner should mention lavakino
+      // Failure banner should mention src_c
       expect(
-        find.textContaining('Недоступні джерела: lavakino'),
+        find.textContaining('Недоступні джерела: src_c'),
         findsOneWidget,
       );
       expect(find.text('Повторити'), findsOneWidget);
@@ -554,12 +573,12 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      banderaProvider.throwError = true;
+      serverProvider.throwError = true;
       await tester.pumpWidget(buildTestWidget(initialQuery: 'Помилка'));
       await tester.pumpAndSettle();
 
       expect(
-        banderaProvider.searchCalls,
+        serverProvider.searchCalls,
         1,
         reason: 'the initial query should issue exactly one request',
       );
@@ -577,7 +596,7 @@ void main() {
       expect(retryButton, findsOneWidget);
 
       // Fix error and retry
-      banderaProvider.throwError = false;
+      serverProvider.throwError = false;
       await tester.ensureVisible(retryButton);
       await tester.pumpAndSettle();
       (tester.widget(retryButton) as ElevatedButton).onPressed!();
@@ -590,7 +609,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        banderaProvider.searchCalls,
+        serverProvider.searchCalls,
         2,
         reason:
             'the retry must re-issue the request, not replay a cached failure',

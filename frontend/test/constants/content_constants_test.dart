@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/core/constants/content_constants.dart';
+import 'package:kadrbox/core/constants/content_constants.dart';
 
 void main() {
   group('ContentGenres', () {
@@ -34,9 +34,9 @@ void main() {
   });
 
   group('ProviderGenreMappings', () {
-    test('should return correct slug for UAKino', () {
+    test('should return a non-empty slug for a known provider', () {
       final slug = ProviderGenreMappings.getSlugForProvider(
-        'uakino',
+        'src_a',
         'Бойовик',
       );
       expect(slug, isNotEmpty);
@@ -53,7 +53,7 @@ void main() {
 
     test('should return lowercase for unmapped genre', () {
       final slug = ProviderGenreMappings.getSlugForProvider(
-        'uakino',
+        'src_a',
         'Незнаний жанр',
       );
       expect(slug, 'незнаний жанр');

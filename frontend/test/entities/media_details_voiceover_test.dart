@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 /// Domain-level behaviour of [MediaDetails.voiceovers] and of the
 /// `isSeries` heuristic.

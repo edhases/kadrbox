@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 /// Returns a canned body for any GET, so response-shape handling can be
 /// exercised without a live backend.
@@ -27,8 +27,8 @@ class FakeApiClient extends Fake implements ApiClient {
 }
 
 ProviderCatalogEntry entry() => const ProviderCatalogEntry(
-  id: 'bandera',
-  name: 'Bandera',
+  id: 'src_d',
+  name: 'Source D',
   baseUrl: 'http://localhost:8080',
   showOnHome: false,
   hasFixedStreams: false,
@@ -62,11 +62,11 @@ void main() {
         'filtered_out': 7,
         'segments': [
           {
-            'id': 'bandera',
+            'id': 'src_d',
             'status': 'ok',
             'count': 1,
             'sources': {
-              'uaflix': {'status': 'ok', 'count': 1, 'elapsed_ms': 40},
+              'src_e': {'status': 'ok', 'count': 1, 'elapsed_ms': 40},
             },
           },
         ],
@@ -221,11 +221,11 @@ void main() {
         'filtered_out': 3,
         'segments': [
           {
-            'id': 'bandera',
+            'id': 'src_d',
             'status': 'ok',
             'count': 2,
             'sources': {
-              'uaflix': {'status': 'ok', 'count': 2},
+              'src_e': {'status': 'ok', 'count': 2},
             },
           },
         ],

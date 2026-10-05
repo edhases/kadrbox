@@ -3,15 +3,15 @@
 
 import 'package:mocktail/mocktail.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/services/download_service.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/services/recommendation_service.dart';
-import 'package:oxide_film/data/services/episode_update_service.dart';
-import 'package:oxide_film/data/services/user_agent_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/services/download_service.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/services/recommendation_service.dart';
+import 'package:kadrbox/data/services/episode_update_service.dart';
+import 'package:kadrbox/data/services/user_agent_service.dart';
 
 class MockHistoryService extends Mock implements HistoryService {}
 

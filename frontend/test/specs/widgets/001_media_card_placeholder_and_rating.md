@@ -1,7 +1,7 @@
 Title: MediaCard displays placeholder when posterUrl is null and shows RatingBadge when rating is present
 
 Given:
-- A MediaItem with: posterUrl = null, providerId = 'uakino', rating = 8.5, ratingSource = 'Site', year = 2021
+- A MediaItem with: posterUrl = null, providerId = 'src_a', rating = 8.5, ratingSource = 'Site', year = 2021
 - UISettings in SettingsService set to show ratings and years
 
 When:
@@ -13,7 +13,7 @@ Mocks/Helpers:
 Expectations:
 - Placeholder widget (Icon/movie placeholder) is present instead of CachedNetworkImage
 - RatingBadge is present and displays text '8.5' and uses success color (green)
-- Provider badge or small label shows provider id/name as expected (e.g., 'UAKINO')
+- Provider badge or small label shows the provider id uppercased, as expected (e.g. 'SRC_A')
 
 Notes:
 - Also check a case where posterUrl is present to ensure CachedNetworkImage is used and memCacheHeight is set

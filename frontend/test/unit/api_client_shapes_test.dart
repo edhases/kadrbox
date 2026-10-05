@@ -1,14 +1,14 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:oxide_film/core/network/api_client.dart';
+import 'package:kadrbox/core/network/api_client.dart';
 
 class MockDio extends Mock implements Dio {}
 
-/// A body the backend actually sent in production: Eneyida answers popular
-/// with `200` and JSON `null`, which Dio surfaces as a null body. These tests
-/// pin the normalisation contract so a source that went quiet stays an empty
-/// catalogue instead of a crash.
+/// A body the backend actually sent in production: a catalogue source answers
+/// popular with `200` and JSON `null`, which Dio surfaces as a null body. These
+/// tests pin the normalisation contract so a source that went quiet stays an
+/// empty catalogue instead of a crash.
 void main() {
   late MockDio dio;
   late ApiClient api;

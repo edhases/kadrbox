@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/domain/entities/stream_source.dart';
-import 'package:oxide_film/presentation/pages/player/playback_error.dart';
+import 'package:kadrbox/domain/entities/stream_source.dart';
+import 'package:kadrbox/presentation/pages/player/playback_error.dart';
 
 void main() {
   group('PlaybackError.fromMpvMessage classification', () {
@@ -101,7 +101,7 @@ void main() {
     test('carries the full diagnostic context', () {
       final error = PlaybackError.fromMpvMessage(
         'Failed to recognize file format.',
-        providerId: 'uakino',
+        providerId: 'src_a',
         url: 'https://cdn.tv/embed/x',
         httpStatus: 403,
         headersSent: const {
@@ -113,7 +113,7 @@ void main() {
       );
 
       expect(error.kind, PlaybackFailure.unsupportedContainer);
-      expect(error.providerId, 'uakino');
+      expect(error.providerId, 'src_a');
       expect(error.url, 'https://cdn.tv/embed/x');
       expect(error.httpStatus, 403);
       expect(error.headersSent['Referer'], 'https://cdn.tv');
@@ -157,7 +157,7 @@ void main() {
     test('toDiagnosticString includes every debugging field', () {
       final error = PlaybackError.fromMpvMessage(
         'Failed to recognize file format.',
-        providerId: 'uakino',
+        providerId: 'src_a',
         url: 'https://cdn.tv/embed/x',
         httpStatus: 403,
         headersSent: const {'Referer': 'https://cdn.tv'},
@@ -167,7 +167,7 @@ void main() {
 
       final text = error.toDiagnosticString();
       expect(text, contains('unsupportedContainer'));
-      expect(text, contains('uakino'));
+      expect(text, contains('src_a'));
       expect(text, contains('https://cdn.tv/embed/x'));
       expect(text, contains('iframe'));
       expect(text, contains('cdn.tv'));

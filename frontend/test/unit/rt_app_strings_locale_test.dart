@@ -11,7 +11,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/core/l10n/app_strings.dart';
+import 'package:kadrbox/core/l10n/app_strings.dart';
 
 /// Mirrors `app.dart`, but with the delegate hoisted to a single const value —
 /// the refactor the old field made impossible.

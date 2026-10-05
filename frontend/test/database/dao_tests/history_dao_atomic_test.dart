@@ -10,8 +10,8 @@
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/database/dao/history_dao.dart';
-import 'package:oxide_film/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/history_dao.dart';
+import 'package:kadrbox/data/database/app_database.dart';
 
 import '../../helpers/in_memory_db.dart';
 
@@ -39,7 +39,7 @@ void main() {
           for (var i = 1; i <= 8; i++)
             dao.saveProgress(
               mediaId: 'movie-1',
-              providerId: 'uakino',
+              providerId: 'src_a',
               title: 'Movie One',
               mediaType: 'movie',
               positionMs: i * 1000,
@@ -61,7 +61,7 @@ void main() {
         for (var i = 1; i <= 5; i++)
           dao.saveProgress(
             mediaId: 'show-1',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Show One',
             mediaType: 'series',
             positionMs: i * 1000,
@@ -79,7 +79,7 @@ void main() {
 
       await dao.saveProgress(
         mediaId: 'show-1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Show',
         mediaType: 'series',
         positionMs: 1,
@@ -89,7 +89,7 @@ void main() {
       );
       await dao.saveProgress(
         mediaId: 'show-1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Show',
         mediaType: 'series',
         positionMs: 2,
@@ -100,7 +100,7 @@ void main() {
       // Movie key (NULL season/episode) must not collide with the episode rows.
       await dao.saveProgress(
         mediaId: 'show-1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Show',
         mediaType: 'movie',
         positionMs: 3,
@@ -120,7 +120,7 @@ void main() {
         await Future.wait([
           dao.saveProgress(
             mediaId: 'movie-9',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Nine',
             mediaType: 'movie',
             positionMs: 10,
@@ -129,7 +129,7 @@ void main() {
           ),
           dao.saveProgress(
             mediaId: 'movie-9',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Nine',
             mediaType: 'movie',
             positionMs: 20,
@@ -160,7 +160,7 @@ void main() {
           db.watchHistory,
           WatchHistoryCompanion.insert(
             mediaId: 'dupe',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Dupe',
             mediaType: 'movie',
             positionMs: const Value(1000),
@@ -172,7 +172,7 @@ void main() {
           db.watchHistory,
           WatchHistoryCompanion.insert(
             mediaId: 'dupe',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Dupe',
             mediaType: 'movie',
             positionMs: const Value(5000),
@@ -184,7 +184,7 @@ void main() {
           db.watchHistory,
           WatchHistoryCompanion.insert(
             mediaId: 'dupe',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Dupe',
             mediaType: 'movie',
             positionMs: const Value(9000),
@@ -202,19 +202,19 @@ void main() {
       await dao.cleanupDuplicates();
       await createLogicalKeyIndex(db);
 
-      final entry = await dao.getForMedia('dupe', 'uakino');
+      final entry = await dao.getForMedia('dupe', 'src_a');
       expect(entry, isNotNull);
       expect(entry!.positionMs, 5000);
 
       // getLastPosition used to blow up via getSingleOrNull(). It still must not,
       // now that the duplicates are gone and the index is restored.
-      final position = await dao.getLastPosition('dupe', 'uakino');
+      final position = await dao.getLastPosition('dupe', 'src_a');
       expect(position, const Duration(milliseconds: 5000));
     });
 
     test('returns null (not a throw) when nothing matches', () async {
-      expect(await harness.dao.getForMedia('missing', 'uakino'), isNull);
-      expect(await harness.dao.getLastPosition('missing', 'uakino'), isNull);
+      expect(await harness.dao.getForMedia('missing', 'src_a'), isNull);
+      expect(await harness.dao.getLastPosition('missing', 'src_a'), isNull);
     });
   });
 
@@ -237,7 +237,7 @@ void main() {
               .insert(
                 WatchHistoryCompanion.insert(
                   mediaId: mediaId,
-                  providerId: 'uakino',
+                  providerId: 'src_a',
                   title: mediaId,
                   mediaType: 'movie',
                   positionMs: Value(positionMs),
@@ -274,14 +274,14 @@ void main() {
         expect(removed, 2);
         await createLogicalKeyIndex(db);
 
-        final movie = await dao.getForMedia('m', 'uakino');
+        final movie = await dao.getForMedia('m', 'src_a');
         expect(movie!.positionMs, 2);
         expect(
-          await dao.getForMedia('e1', 'uakino', season: 1, episode: 1),
+          await dao.getForMedia('e1', 'src_a', season: 1, episode: 1),
           isNotNull,
         );
         expect(
-          await dao.getForMedia('e2', 'uakino', season: 1, episode: 2),
+          await dao.getForMedia('e2', 'src_a', season: 1, episode: 2),
           isNotNull,
         );
         expect(await dao.getAll(), hasLength(3));
@@ -292,7 +292,7 @@ void main() {
       final dao = harness.dao;
       await dao.saveProgress(
         mediaId: 'clean',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Clean',
         mediaType: 'movie',
         positionMs: 1,

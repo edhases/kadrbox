@@ -7,7 +7,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/core/utils/logger.dart';
+import 'package:kadrbox/core/utils/logger.dart';
 
 void main() {
   late List<String> batches;
@@ -52,9 +52,9 @@ void main() {
           .toList();
 
       expect(lines.length, 200);
-      expect(lines.first, '[INFO][OxideFilm] line 0');
-      expect(lines.last, '[INFO][OxideFilm] line 199');
-      expect(lines, List.generate(200, (i) => '[INFO][OxideFilm] line $i'));
+      expect(lines.first, '[INFO][Kadrbox] line 0');
+      expect(lines.last, '[INFO][Kadrbox] line 199');
+      expect(lines, List.generate(200, (i) => '[INFO][Kadrbox] line $i'));
     });
 
     test('levels and tags reach the sink', () async {
@@ -119,10 +119,10 @@ void main() {
 
       final lines = Logger.recentLines;
       expect(lines.length, Logger.bufferCapacity);
-      expect(lines.last, '[INFO][OxideFilm] n ${overflow - 1}');
+      expect(lines.last, '[INFO][Kadrbox] n ${overflow - 1}');
       expect(
         lines.first,
-        '[INFO][OxideFilm] n ${overflow - Logger.bufferCapacity}',
+        '[INFO][Kadrbox] n ${overflow - Logger.bufferCapacity}',
       );
     });
 
@@ -145,7 +145,7 @@ void main() {
     late Directory tmp;
 
     setUp(() {
-      tmp = Directory.systemTemp.createTempSync('oxide_logger_rt');
+      tmp = Directory.systemTemp.createTempSync('kadrbox_logger_rt');
     });
 
     tearDown(() {

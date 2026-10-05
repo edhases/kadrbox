@@ -5,12 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:media_kit/media_kit.dart';
 
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/presentation/pages/player/player_controller.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/presentation/pages/player/player_controller.dart';
 
 import '../../helpers/mock_services.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
 
 // Local fakes for mocktail fallback registration
 class PlayableFake extends Fake implements Playable {}

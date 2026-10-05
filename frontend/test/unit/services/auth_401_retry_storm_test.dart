@@ -1,19 +1,19 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:oxide_film/core/error/exceptions.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/database/dao/favorites_dao.dart';
-import 'package:oxide_film/data/services/auth_service.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
+import 'package:kadrbox/core/error/exceptions.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/favorites_dao.dart';
+import 'package:kadrbox/data/services/auth_service.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/in_memory_db.dart';
 
-class MockOxideServerService extends Mock implements OxideServerService {}
+class MockKadrboxServerService extends Mock implements KadrboxServerService {}
 
 class MockAuthService extends Mock implements AuthService {}
 
@@ -24,12 +24,12 @@ void main() {
 
   group('401 Retry Storm Prevention', () {
     late AppDatabase db;
-    late MockOxideServerService mockServer;
+    late MockKadrboxServerService mockServer;
     late MockAuthService mockAuth;
 
     setUp(() {
       db = createTestAppDatabase();
-      mockServer = MockOxideServerService();
+      mockServer = MockKadrboxServerService();
       mockAuth = MockAuthService();
 
       when(() => mockAuth.isAuthenticated).thenReturn(true);
@@ -94,7 +94,7 @@ void main() {
         for (int i = 1; i <= 5; i++) {
           await historyService.saveProgress(
             mediaId: 'item_$i',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Movie $i',
             mediaType: 'movie',
             position: Duration(minutes: i),
@@ -157,7 +157,7 @@ void main() {
         for (int i = 1; i <= 5; i++) {
           await favoritesDao.add(
             mediaId: 'fav_$i',
-            providerId: 'uakino',
+            providerId: 'src_a',
             title: 'Favorite $i',
             mediaType: 'movie',
           );
@@ -199,7 +199,7 @@ void main() {
     );
 
     test(
-      'OxideServerService refreshAuth deduplicates concurrent calls (single-flight)',
+      'KadrboxServerService refreshAuth deduplicates concurrent calls (single-flight)',
       () async {
         SharedPreferences.setMockInitialValues({
           'oxide_jwt_access_token': 'old_access',
@@ -223,7 +223,7 @@ void main() {
           return completer.future;
         });
 
-        final serverService = OxideServerService(prefs, mockApi);
+        final serverService = KadrboxServerService(prefs, mockApi);
 
         // Launch 5 concurrent refreshAuth calls
         final futures = Future.wait([

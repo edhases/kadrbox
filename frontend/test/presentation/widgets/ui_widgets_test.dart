@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/presentation/widgets/media_card.dart';
-import 'package:oxide_film/presentation/widgets/rating_badge.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/data/services/download_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/presentation/widgets/media_card.dart';
+import 'package:kadrbox/presentation/widgets/rating_badge.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/download_service.dart';
 import '../../helpers/mock_services.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -48,7 +48,7 @@ void main() {
       (tester) async {
         final item = MediaItem(
           id: '1',
-          providerId: 'uakino',
+          providerId: 'src_a',
           title: 'Test Movie',
           posterUrl: null,
           rating: 8.5,

@@ -3,7 +3,7 @@ import 'package:dio/dio.dart';
 
 void main() async {
   final dio = Dio();
-  final url = 'https://uafix.net/films/nepruyemnosti-z-garri/';
+  final url = 'https://src-a.example/films/nepruyemnosti-z-garri/';
   final filename = 'test/movie_result.html';
 
   print('Fetching $url...');
@@ -27,7 +27,7 @@ void main() async {
 
     final content = response.data.toString();
     if (content.contains('<iframe')) print('FOUND: iframe');
-    if (content.contains('ashdi')) print('FOUND: ashdi');
+    if (content.contains('cdn_beta')) print('FOUND: cdn_beta');
     if (content.contains('AMSP')) print('FOUND: AMSP');
     if (content.contains('playerjs')) print('FOUND: playerjs');
   } catch (e) {

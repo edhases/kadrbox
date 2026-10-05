@@ -5,10 +5,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/data/services/sync_service.dart';
-import 'package:oxide_film/data/database/dao/favorites_dao.dart';
-import 'package:oxide_film/data/database/dao/history_dao.dart';
-import 'package:oxide_film/data/database/dao/settings_dao.dart';
+import 'package:kadrbox/data/services/sync_service.dart';
+import 'package:kadrbox/data/database/dao/favorites_dao.dart';
+import 'package:kadrbox/data/database/dao/history_dao.dart';
+import 'package:kadrbox/data/database/dao/settings_dao.dart';
 
 import '../helpers/in_memory_db.dart';
 import '../helpers/file_system_mocks.dart';
@@ -103,7 +103,7 @@ void main() {
         final service = SyncService(db);
 
         final payload = {
-          'app': 'OxideFilm',
+          'app': 'Kadrbox',
           'version': 1,
           'favorites': [
             {

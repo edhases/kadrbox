@@ -1,16 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 /// Mapping of the `voiceovers` / `seasons` payloads the backend sends for
 /// DLE-style providers.
 ///
 /// The backend was already returning studio names with their own season trees;
 /// `_mapDetails` dropped the field on the floor, so the details page fell back
-/// to grouping streams and rendered CDN names ("HDVB", "Ashdi") where studios
-/// ("1+1", "Postmodern") belong.
+/// to grouping streams and rendered CDN names ("CDN Alpha", "CDN Beta") where
+/// studios ("1+1", "Postmodern") belong.
 void main() {
   late ServerBackedProvider provider;
 
@@ -270,25 +270,25 @@ void main() {
       final stream = provider.mapStreamForTest({
         'url': 'https://cdn.tv/master.m3u8',
         'voiceover': '1+1',
-        'player': 'HDVB',
+        'player': 'CDN Alpha',
         'language': 'uk',
       });
 
       expect(stream.voiceover, '1+1');
-      expect(stream.sourceName, 'HDVB');
+      expect(stream.sourceName, 'CDN Alpha');
       expect(stream.language, 'uk');
     });
 
     test('a CDN name never leaks into voiceover', () {
       // This is the exact bug: DLE streams carry only `player`, and the old
-      // `voiceover ?? player` fallback put "Ashdi" into the studio dropdown.
+      // `voiceover ?? player` fallback put "CDN Beta" into the studio dropdown.
       final stream = provider.mapStreamForTest({
         'url': 'https://cdn.tv/master.m3u8',
-        'player': 'Ashdi',
+        'player': 'CDN Beta',
       });
 
       expect(stream.voiceover, isNull);
-      expect(stream.sourceName, 'Ashdi');
+      expect(stream.sourceName, 'CDN Beta');
     });
 
     test('falls back through audio/dub aliases for the studio only', () {

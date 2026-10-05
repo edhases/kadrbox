@@ -5,17 +5,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/presentation/pages/home/home_page.dart';
-import 'package:oxide_film/presentation/widgets/media_card.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/domain/repositories/content_provider.dart';
-import 'package:oxide_film/data/services/recommendation_service.dart';
-import 'package:oxide_film/data/services/episode_update_service.dart';
-import 'package:oxide_film/data/services/history_service.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/services/download_service.dart';
+import 'package:kadrbox/data/providers/provider_registry.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/presentation/pages/home/home_page.dart';
+import 'package:kadrbox/presentation/widgets/media_card.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/domain/repositories/content_provider.dart';
+import 'package:kadrbox/data/services/recommendation_service.dart';
+import 'package:kadrbox/data/services/episode_update_service.dart';
+import 'package:kadrbox/data/services/history_service.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/services/download_service.dart';
 
 import '../../../helpers/mock_services.dart';
 import 'package:mocktail/mocktail.dart';

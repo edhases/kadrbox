@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
-import 'package:oxide_film/core/error/exceptions.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/core/error/exceptions.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
 
 /// Fake transport with per-route canned behaviour, call counting and an
 /// optional gate so concurrent calls can be forced to overlap.
@@ -77,8 +77,8 @@ class FakeApiClient extends Fake implements ApiClient {
 }
 
 ProviderCatalogEntry entry() => const ProviderCatalogEntry(
-  id: 'bandera',
-  name: 'Bandera',
+  id: 'src_d',
+  name: 'Source D',
   baseUrl: 'http://localhost:8080',
   showOnHome: false,
   hasFixedStreams: false,

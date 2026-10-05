@@ -4,7 +4,7 @@
 // final historyDao = HistoryDao(db);
 
 import 'package:drift/native.dart';
-import 'package:oxide_film/data/database/app_database.dart'
+import 'package:kadrbox/data/database/app_database.dart'
     as appdb
     show AppDatabase;
 

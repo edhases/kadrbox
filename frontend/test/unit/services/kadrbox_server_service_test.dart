@@ -4,10 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 
-import 'package:oxide_film/core/config/app_config.dart';
-import 'package:oxide_film/core/error/exceptions.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
+import 'package:kadrbox/core/config/app_config.dart';
+import 'package:kadrbox/core/error/exceptions.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
 
 class _AllowAllHttpOverrides extends HttpOverrides {
   @override
@@ -24,7 +24,7 @@ void main() {
   late String originalBaseUrl;
   late SharedPreferences prefs;
   late ApiClient apiClient;
-  late OxideServerService service;
+  late KadrboxServerService service;
 
   // Captured requests for assertions
   final capturedRequests = <String, dynamic>{};
@@ -209,7 +209,7 @@ void main() {
             jsonEncode([
               {
                 'media_id': 'm1',
-                'provider_id': 'uakino',
+                'provider_id': 'src_a',
                 'title': 'Test Movie',
                 'position_ms': 120000,
                 'duration_ms': 7200000,
@@ -229,7 +229,7 @@ void main() {
             jsonEncode([
               {
                 'media_id': 'm1',
-                'provider_id': 'uakino',
+                'provider_id': 'src_a',
                 'title': 'Test Movie',
                 'position_ms': 120000,
               },
@@ -243,7 +243,7 @@ void main() {
             jsonEncode([
               {
                 'media_id': 'fav1',
-                'provider_id': 'uakino',
+                'provider_id': 'src_a',
                 'title': 'Fav Film',
                 'media_type': 'movie',
               },
@@ -275,7 +275,7 @@ void main() {
       ),
     );
     apiClient = ApiClient(prefs: prefs, dio: dio);
-    service = OxideServerService(prefs, apiClient);
+    service = KadrboxServerService(prefs, apiClient);
   });
 
   tearDown(() async {
@@ -283,7 +283,7 @@ void main() {
     await server.close(force: true);
   });
 
-  group('OxideServerService Initialization and State Restoration', () {
+  group('KadrboxServerService Initialization and State Restoration', () {
     test('starts unauthenticated when SharedPreferences is empty', () {
       expect(service.isAuthenticated, isFalse);
       expect(service.accessToken, isNull);
@@ -311,7 +311,7 @@ void main() {
       };
       SharedPreferences.setMockInitialValues(initialData);
       final restoredPrefs = await SharedPreferences.getInstance();
-      final restoredService = OxideServerService(restoredPrefs, apiClient);
+      final restoredService = KadrboxServerService(restoredPrefs, apiClient);
 
       expect(restoredService.isAuthenticated, isTrue);
       expect(restoredService.accessToken, 'restored_token');
@@ -329,7 +329,7 @@ void main() {
         'oxide_user_json': '{not-valid-json',
       });
       final restoredPrefs = await SharedPreferences.getInstance();
-      final restoredService = OxideServerService(restoredPrefs, apiClient);
+      final restoredService = KadrboxServerService(restoredPrefs, apiClient);
 
       expect(restoredService.isAuthenticated, isTrue);
       expect(restoredService.user, isNull);
@@ -337,7 +337,7 @@ void main() {
     });
   });
 
-  group('OxideServerService Authentication & Profile', () {
+  group('KadrboxServerService Authentication & Profile', () {
     test('signIn saves tokens, user data, and updates apiClient', () async {
       await service.signIn('valid@user.com', 'secret');
 
@@ -518,7 +518,7 @@ void main() {
     );
   });
 
-  group('OxideServerService refreshAuth & Single-Flight Dedup', () {
+  group('KadrboxServerService refreshAuth & Single-Flight Dedup', () {
     test(
       'refreshAuth returns false and clears session if no refresh_token',
       () async {
@@ -576,7 +576,7 @@ void main() {
     );
   });
 
-  group('OxideServerService Cloud Sync (History & Favorites)', () {
+  group('KadrboxServerService Cloud Sync (History & Favorites)', () {
     setUp(() async {
       await service.signIn('valid@user.com', 'secret');
     });
@@ -591,7 +591,7 @@ void main() {
     test('saveHistoryProgress sends correct payload to server', () async {
       await service.saveHistoryProgress(
         mediaId: 'm123',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Film 123',
         posterUrl: 'https://poster.jpg',
         year: 2024,
@@ -627,7 +627,7 @@ void main() {
     test('toggleFavorite returns new state', () async {
       final isFav = await service.toggleFavorite(
         mediaId: 'fav1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Fav Film',
         mediaType: 'movie',
       );
@@ -635,7 +635,7 @@ void main() {
     });
 
     test('removeFavorite sends delete request', () async {
-      await service.removeFavorite(mediaId: 'fav1', providerId: 'uakino');
+      await service.removeFavorite(mediaId: 'fav1', providerId: 'src_a');
       expect(
         capturedRequests.containsKey('DELETE /api/v1/sync/favorites'),
         isTrue,

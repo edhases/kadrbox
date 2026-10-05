@@ -1,8 +1,8 @@
 // DAO smoke tests using in-memory database helper
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/database/dao/history_dao.dart';
-import 'package:oxide_film/data/database/dao/favorites_dao.dart';
+import 'package:kadrbox/data/database/dao/history_dao.dart';
+import 'package:kadrbox/data/database/dao/favorites_dao.dart';
 
 import '../../helpers/in_memory_db.dart';
 

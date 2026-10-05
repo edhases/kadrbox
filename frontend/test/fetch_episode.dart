@@ -4,7 +4,7 @@ import 'package:dio/dio.dart';
 void main() async {
   final dio = Dio();
   final url =
-      'https://uafix.net/serials/gra-v-kalmara-viprobuvannja-squid-game-the-challenge/season-01-episode-01/';
+      'https://src-a.example/serials/gra-v-kalmara-viprobuvannja-squid-game-the-challenge/season-01-episode-01/';
   final filename = 'test/episode_01_result.html';
 
   print('Fetching $url...');
@@ -25,10 +25,10 @@ void main() async {
     print('Saved to $filename');
 
     final content = response.data.toString();
-    if (content.contains('ashdi')) {
-      print('FOUND: ashdi');
+    if (content.contains('cdn_beta')) {
+      print('FOUND: cdn_beta');
     } else {
-      print('NOT FOUND: ashdi');
+      print('NOT FOUND: cdn_beta');
     }
 
     if (content.contains('<iframe')) {

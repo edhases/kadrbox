@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/presentation/pages/watch_party/watch_party_page.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
+import 'package:kadrbox/presentation/pages/watch_party/watch_party_page.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:oxide_film/core/l10n/app_strings.dart';
+import 'package:kadrbox/core/l10n/app_strings.dart';
 
 // Manual Mock for Service
 class MockWatchPartyService extends ChangeNotifier

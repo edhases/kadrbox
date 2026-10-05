@@ -9,7 +9,7 @@ void main() async {
   try {
     print('Fetching main page with Accept-Language...');
     final response = await dio.get(
-      'https://uafix.net/serials/gra-v-kalmara-viprobuvannja-squid-game-the-challenge/',
+      'https://src-a.example/serials/gra-v-kalmara-viprobuvannja-squid-game-the-challenge/',
       options: Options(
         headers: {
           'User-Agent':
@@ -83,7 +83,7 @@ void main() async {
               headers: {
                 'User-Agent':
                     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://uafix.net/',
+                'Referer': 'https://src-a.example/',
               },
               responseType: ResponseType.plain,
               validateStatus: (status) => true,
@@ -129,8 +129,8 @@ void main() async {
           headers: {
             'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Origin': 'https://uafix.net',
-            'Referer': 'https://uafix.net/',
+            'Origin': 'https://src-a.example',
+            'Referer': 'https://src-a.example/',
           },
           responseType: ResponseType.plain, // expecting JSON probably
         ),

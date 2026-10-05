@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 void main() {
   group('ContentFilter', () {
@@ -211,12 +211,12 @@ void main() {
     test('should create with required parameters', () {
       final item = MediaItem(
         id: '123',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Test Movie',
       );
 
       expect(item.id, '123');
-      expect(item.providerId, 'uakino');
+      expect(item.providerId, 'src_a');
       expect(item.title, 'Test Movie');
       expect(item.type, ContentType.unknown);
     });
@@ -224,7 +224,7 @@ void main() {
     test('should create with all parameters', () {
       final item = MediaItem(
         id: '123',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Test Movie',
         originalTitle: 'Original Title',
         posterUrl: 'https://example.com/poster.jpg',
@@ -242,11 +242,11 @@ void main() {
     });
 
     test('equality should work correctly', () {
-      final item1 = MediaItem(id: '123', providerId: 'uakino', title: 'Test');
+      final item1 = MediaItem(id: '123', providerId: 'src_a', title: 'Test');
 
-      final item2 = MediaItem(id: '123', providerId: 'uakino', title: 'Test');
+      final item2 = MediaItem(id: '123', providerId: 'src_a', title: 'Test');
 
-      final item3 = MediaItem(id: '456', providerId: 'uakino', title: 'Test');
+      final item3 = MediaItem(id: '456', providerId: 'src_a', title: 'Test');
 
       expect(item1, equals(item2));
       expect(item1, isNot(equals(item3)));

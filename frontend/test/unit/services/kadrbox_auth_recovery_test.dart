@@ -1,5 +1,5 @@
 // Regression tests for session-handling defects in `ApiClient` and
-// `OxideServerService`:
+// `KadrboxServerService`:
 //
 //  * no 401 interceptor, so the first 401 after the 15-minute access-token TTL
 //    signed the user out instead of refreshing and replaying;
@@ -19,10 +19,10 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:oxide_film/core/config/app_config.dart';
-import 'package:oxide_film/core/error/exceptions.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
+import 'package:kadrbox/core/config/app_config.dart';
+import 'package:kadrbox/core/error/exceptions.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
 
 class _AllowAllHttpOverrides extends HttpOverrides {
   @override
@@ -39,7 +39,7 @@ void main() {
   late String originalBaseUrl;
   late SharedPreferences prefs;
   late ApiClient apiClient;
-  late OxideServerService service;
+  late KadrboxServerService service;
 
   /// Per-path request counters keyed by `"$method $path"`.
   final hits = <String, int>{};
@@ -120,7 +120,7 @@ void main() {
               req.response.statusCode = HttpStatus.ok;
               req.response.write(
                 jsonEncode([
-                  {'media_id': 'm1', 'provider_id': 'uakino', 'title': 'M1'},
+                  {'media_id': 'm1', 'provider_id': 'src_a', 'title': 'M1'},
                 ]),
               );
             }
@@ -139,7 +139,7 @@ void main() {
     // No `dio:` seam here on purpose: this exercises the real interceptor chain
     // (cookies + retry + 401 refresh/replay).
     apiClient = ApiClient();
-    service = OxideServerService(prefs, apiClient);
+    service = KadrboxServerService(prefs, apiClient);
   });
 
   tearDown(() async {
@@ -320,7 +320,7 @@ void main() {
 
       await service.toggleFavorite(
         mediaId: 'm1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'M1',
         mediaType: 'movie',
       );

@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 void main() {
   group('ServerBackedProvider', () {
@@ -11,9 +11,9 @@ void main() {
     setUp(() {
       provider = ServerBackedProvider(
         const ProviderCatalogEntry(
-          id: 'uakino',
-          name: 'UAKino',
-          baseUrl: 'https://uakino.biz',
+          id: 'src_a',
+          name: 'Source A',
+          baseUrl: 'https://src-a.example',
           showOnHome: true,
           hasFixedStreams: false,
           contentTypes: ['movie', 'series', 'cartoon', 'anime'],
@@ -25,9 +25,9 @@ void main() {
     });
 
     test('should have correct metadata', () {
-      expect(provider.id, 'uakino');
-      expect(provider.name, 'UAKino');
-      expect(provider.baseUrl, 'https://uakino.biz');
+      expect(provider.id, 'src_a');
+      expect(provider.name, 'Source A');
+      expect(provider.baseUrl, 'https://src-a.example');
       expect(provider.supportedTypes, contains(ContentType.movie));
       expect(provider.supportedTypes, contains(ContentType.series));
       expect(provider.supportedTypes, contains(ContentType.cartoon));
@@ -45,9 +45,9 @@ void main() {
     setUp(() {
       provider = ServerBackedProvider(
         const ProviderCatalogEntry(
-          id: 'uakino',
-          name: 'UAKino',
-          baseUrl: 'https://uakino.biz',
+          id: 'src_a',
+          name: 'Source A',
+          baseUrl: 'https://src-a.example',
           showOnHome: true,
           hasFixedStreams: false,
           contentTypes: ['movie'],
@@ -191,9 +191,9 @@ void main() {
     setUp(() {
       provider = ServerBackedProvider(
         const ProviderCatalogEntry(
-          id: 'uakino',
-          name: 'UAKino',
-          baseUrl: 'https://uakino.biz',
+          id: 'src_a',
+          name: 'Source A',
+          baseUrl: 'https://src-a.example',
           showOnHome: true,
           hasFixedStreams: false,
           contentTypes: ['movie'],
@@ -317,7 +317,7 @@ void main() {
               {
                 'number': 1,
                 'title': 'Серія 1',
-                'url': '{"source":"animeon","ref":{"episode_id":60300}}',
+                'url': '{"source":"src_f","ref":{"episode_id":60300}}',
               },
               {
                 'number': 2,
@@ -334,7 +334,7 @@ void main() {
       expect(details.seasons!.first.episodes.length, 3);
 
       final ep1 = details.seasons!.first.episodes[0];
-      expect(ep1.streamRef, '{"source":"animeon","ref":{"episode_id":60300}}');
+      expect(ep1.streamRef, '{"source":"src_f","ref":{"episode_id":60300}}');
 
       final ep2 = details.seasons!.first.episodes[1];
       expect(ep2.streamRef, contains('"episode_id":60301'));

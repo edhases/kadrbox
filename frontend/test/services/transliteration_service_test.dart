@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/services/smart_search/transliteration_service.dart';
+import 'package:kadrbox/data/services/smart_search/transliteration_service.dart';
 
 void main() {
   late TransliterationService service;

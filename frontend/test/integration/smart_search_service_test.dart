@@ -1,14 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/database/dao/search_history_dao.dart';
-import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/data/services/search/search_envelope.dart';
-import 'package:oxide_film/data/services/smart_search/smart_search_service.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/domain/repositories/content_provider.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/search_history_dao.dart';
+import 'package:kadrbox/data/providers/provider_registry.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/data/services/search/search_envelope.dart';
+import 'package:kadrbox/data/services/smart_search/smart_search_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/domain/repositories/content_provider.dart';
 
-/// Stands in for the Bandera provider.
+/// Stands in for the server-backed source the search path talks to.
 ///
 /// Records how many times the client asked it to search, because the central
 /// invariant of this refactor is that one user-initiated search produces
@@ -43,10 +43,20 @@ class FakeProviderRegistry extends Fake implements ProviderRegistry {
 
   final List<ContentProvider> _providers;
 
+  /// Resolves a source id to the registered provider, falling back to the one
+  /// server-backed provider when nothing matches.
+  ///
+  /// The fallback is deliberate: the app must not know which catalogue server
+  /// it talks to, so the search path resolves "a server-backed source" instead
+  /// of a hardcoded id. Pinning a brand here would make these tests assert an
+  /// id the app is not allowed to carry.
   @override
   ContentProvider? getById(String providerId) {
     for (final p in _providers) {
       if (p.id == providerId) return p;
+    }
+    for (final p in _providers) {
+      if (p is ServerBackedProvider) return p;
     }
     return null;
   }
@@ -87,16 +97,16 @@ SearchEnvelope envelopeWith({
   bool withFailure = false,
 }) {
   final sources = <String, SearchSourceStatus>{
-    'uakino': SearchSourceStatus(
-      key: 'uakino',
+    'src_a': SearchSourceStatus(
+      key: 'src_a',
       status: SourceStatus.ok,
       count: items.isEmpty ? 0 : 1,
       elapsedMs: 12,
     ),
   };
   if (withFailure) {
-    sources['eneyida'] = SearchSourceStatus(
-      key: 'eneyida',
+    sources['src_b'] = SearchSourceStatus(
+      key: 'src_b',
       status: SourceStatus.timeout,
       count: 0,
       elapsedMs: 3000,
@@ -128,7 +138,7 @@ void main() {
 
     setUp(() {
       searches = [];
-      provider = FakeServerProvider('bandera', searches);
+      provider = FakeServerProvider('src_d', searches);
       service = SmartSearchService(
         FakeProviderRegistry([provider]),
         FakeSearchHistoryDao(),
@@ -167,7 +177,7 @@ void main() {
             id: 'a',
             title: 'A',
             type: ContentType.movie,
-            providerId: 'bandera',
+            providerId: 'src_d',
           ),
           score: 0.91,
           matchedBy: 'title_exact',
@@ -179,7 +189,7 @@ void main() {
             id: 'b',
             title: 'B',
             type: ContentType.movie,
-            providerId: 'bandera',
+            providerId: 'src_d',
           ),
           score: 0.42,
           matchedBy: 'partial_tokens',
@@ -212,7 +222,7 @@ void main() {
       final result = await service.search('q').first;
 
       expect(result.hasError, isFalse);
-      expect(result.failedSources.map((s) => s.key), ['eneyida']);
+      expect(result.failedSources.map((s) => s.key), ['src_b']);
     });
 
     test('reports a backend failure instead of an empty result', () async {

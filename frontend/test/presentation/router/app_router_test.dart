@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/presentation/router/app_router.dart';
+import 'package:kadrbox/presentation/router/app_router.dart';
 
 void main() {
   group('AppRouter.safeDecodeMediaId', () {
@@ -13,8 +13,8 @@ void main() {
 
     test('decodes valid percent-encoded components', () {
       expect(
-        AppRouter.safeDecodeMediaId('%7B%22source%22%3A%22uaflix%22%7D'),
-        equals('{"source":"uaflix"}'),
+        AppRouter.safeDecodeMediaId('%7B%22source%22%3A%22src_e%22%7D'),
+        equals('{"source":"src_e"}'),
       );
       expect(
         AppRouter.safeDecodeMediaId('hello%20world'),
@@ -33,7 +33,7 @@ void main() {
 
     test('tolerates already decoded JSON strings containing percent', () {
       const jsonPayload =
-          '{"source":"animeon","ref":{"id":123},"title":"100% Pass"}';
+          '{"source":"src_f","ref":{"id":123},"title":"100% Pass"}';
       expect(AppRouter.safeDecodeMediaId(jsonPayload), equals(jsonPayload));
     });
   });

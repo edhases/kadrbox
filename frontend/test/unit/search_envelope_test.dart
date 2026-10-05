@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/data/services/search/search_envelope.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/data/services/search/search_envelope.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
 
 /// Wire format captured from `GET /content/search` on the Go backend.
 ///
@@ -51,8 +51,8 @@ void main() {
             'status': 'ok',
             'count': 12,
             'sources': {
-              'uakino': {'status': 'ok', 'count': 8, 'elapsed_ms': 120},
-              'eneyida': {'status': 'timeout', 'count': 0, 'elapsed_ms': 3000},
+              'src_a': {'status': 'ok', 'count': 8, 'elapsed_ms': 120},
+              'src_b': {'status': 'timeout', 'count': 0, 'elapsed_ms': 3000},
             },
           },
         ],
@@ -65,8 +65,8 @@ void main() {
             'cluster': 'the matrix|1999|movie',
             'sources': [
               {
-                'provider_id': 'bandera',
-                'source_key': 'uakino',
+                'provider_id': 'src_d',
+                'source_key': 'src_a',
                 'item_id': 'tt0133093',
               },
             ],
@@ -84,7 +84,7 @@ void main() {
       expect(envelope.segments, hasLength(1));
       final segment = envelope.segments.first;
       expect(segment.id, 'main');
-      expect(segment.sources.keys, containsAll(['uakino', 'eneyida']));
+      expect(segment.sources.keys, containsAll(['src_a', 'src_b']));
 
       expect(envelope.items, hasLength(1));
       final scored = envelope.items.first;
@@ -92,7 +92,7 @@ void main() {
       expect(scored.score, 1.0);
       expect(scored.matchedBy, 'title_exact');
       expect(scored.clusterKey, 'the matrix|1999|movie');
-      expect(scored.sources.single.sourceKey, 'uakino');
+      expect(scored.sources.single.sourceKey, 'src_a');
       expect(scored.sources.single.itemId, 'tt0133093');
     });
 
@@ -105,9 +105,9 @@ void main() {
             'status': 'partial',
             'count': 0,
             'sources': {
-              'uakino': {'status': 'ok', 'count': 0},
-              'eneyida': {'status': 'timeout', 'count': 0},
-              'lavakino': {'status': 'error', 'count': 0},
+              'src_a': {'status': 'ok', 'count': 0},
+              'src_b': {'status': 'timeout', 'count': 0},
+              'src_c': {'status': 'error', 'count': 0},
             },
           },
         ],
@@ -117,11 +117,11 @@ void main() {
       final segment = envelope.segments.first;
       expect(
         segment.failures.map((s) => s.key),
-        containsAll(['eneyida', 'lavakino']),
+        containsAll(['src_b', 'src_c']),
       );
       expect(
         segment.emptySources.map((s) => s.key),
-        ['uakino'],
+        ['src_a'],
         reason: 'a source that answered with nothing is "empty", not "failed"',
       );
     });
@@ -135,8 +135,8 @@ void main() {
             'status': 'partial',
             'count': 3,
             'sources': {
-              'uakino': {'status': 'ok', 'count': 3},
-              'eneyida': {'status': 'timeout', 'count': 0},
+              'src_a': {'status': 'ok', 'count': 3},
+              'src_b': {'status': 'timeout', 'count': 0},
             },
           },
         ],
@@ -157,7 +157,7 @@ void main() {
     });
 
     test('treats an unrecognised status string as "answered"', () {
-      // The status string comes from Bandera's `meta.statuses` and is passed
+      // The status string comes from Source D's `meta.statuses` and is passed
       // through by the backend without validation. A value this client version
       // has never seen must not be misread as a failure — that would show a
       // scary "sources unavailable" banner over a perfectly good search.
@@ -169,7 +169,7 @@ void main() {
             'status': 'whatever-they-invent-next',
             'count': 4,
             'sources': {
-              'uakino': {'status': 'brand_new_status', 'count': 4},
+              'src_a': {'status': 'brand_new_status', 'count': 4},
             },
           },
         ],
@@ -191,7 +191,7 @@ void main() {
             'status': 'ok',
             'count': 0,
             'sources': {
-              'uakino': {'status': 'ok', 'count': 0},
+              'src_a': {'status': 'ok', 'count': 0},
             },
           },
         ],
@@ -199,7 +199,7 @@ void main() {
       }, buildItem);
 
       expect(envelope.segments.first.emptySources.map((s) => s.key), [
-        'uakino',
+        'src_a',
       ]);
       expect(
         envelope.segments.first.emptySources.single.hasResults,
@@ -244,24 +244,24 @@ void main() {
       'preserves provider_id and id without overwriting them with aggregator defaults',
       () {
         final entry = ProviderCatalogEntry.fromJson({
-          'id': 'bandera',
-          'name': 'Bandera',
+          'id': 'src_d',
+          'name': 'Source D',
           'baseUrl': 'https://example.com',
         });
         final provider = ServerBackedProvider(entry);
 
         final item = provider.mapItemForTest({
-          'provider_id': 'uakino',
+          'provider_id': 'src_a',
           'id': 'abc',
-          'url': 'https://uakino.biz/item-123.html',
+          'url': 'https://src-a.example/item-123.html',
           'title': 'Sample Title',
           'type': 'movie',
         });
 
-        expect(item.providerId, 'uakino');
-        expect(item.id, 'https://uakino.biz/item-123.html');
-        expect(item.url, 'https://uakino.biz/item-123.html');
-        expect(item.uniqueId, 'uakino:https://uakino.biz/item-123.html');
+        expect(item.providerId, 'src_a');
+        expect(item.id, 'https://src-a.example/item-123.html');
+        expect(item.url, 'https://src-a.example/item-123.html');
+        expect(item.uniqueId, 'src_a:https://src-a.example/item-123.html');
       },
     );
 
@@ -269,8 +269,8 @@ void main() {
       'SearchEnvelope.fromJson with real mapping maps multi-provider items correctly',
       () {
         final entry = ProviderCatalogEntry.fromJson({
-          'id': 'bandera',
-          'name': 'Bandera',
+          'id': 'src_d',
+          'name': 'Source D',
           'baseUrl': 'https://example.com',
         });
         final provider = ServerBackedProvider(entry);
@@ -279,16 +279,16 @@ void main() {
           'query': 'Dune',
           'items': [
             {
-              'provider_id': 'uakino',
-              'id': 'uakino-dune-1',
-              'url': 'https://uakino.biz/dune.html',
+              'provider_id': 'src_a',
+              'id': 'src-a-dune-1',
+              'url': 'https://src-a.example/dune.html',
               'title': 'Dune',
               'score': 1.0,
             },
             {
-              'provider_id': 'eneyida',
-              'id': 'eneyida-dune-2',
-              'url': 'https://eneyida.tv/dune.html',
+              'provider_id': 'src_b',
+              'id': 'src-b-dune-2',
+              'url': 'https://src-b.example/dune.html',
               'title': 'Dune',
               'score': 0.9,
             },
@@ -302,18 +302,18 @@ void main() {
         // Dart mapping of a multi-provider payload, which is what the bug was
         // about; the clustering contract itself is asserted server-side.
         expect(envelope.items.length, 2);
-        expect(envelope.items[0].item.providerId, 'uakino');
-        expect(envelope.items[0].item.id, 'https://uakino.biz/dune.html');
+        expect(envelope.items[0].item.providerId, 'src_a');
+        expect(envelope.items[0].item.id, 'https://src-a.example/dune.html');
         expect(
           envelope.items[0].item.uniqueId,
-          'uakino:https://uakino.biz/dune.html',
+          'src_a:https://src-a.example/dune.html',
         );
 
-        expect(envelope.items[1].item.providerId, 'eneyida');
-        expect(envelope.items[1].item.id, 'https://eneyida.tv/dune.html');
+        expect(envelope.items[1].item.providerId, 'src_b');
+        expect(envelope.items[1].item.id, 'https://src-b.example/dune.html');
         expect(
           envelope.items[1].item.uniqueId,
-          'eneyida:https://eneyida.tv/dune.html',
+          'src_b:https://src-b.example/dune.html',
         );
       },
     );
@@ -324,20 +324,20 @@ void main() {
       // remaining path that could mislabel an item, so it needs its own case.
       final provider = ServerBackedProvider(
         ProviderCatalogEntry.fromJson({
-          'id': 'uakino',
-          'name': 'Uakino',
+          'id': 'src_a',
+          'name': 'Source A',
           'baseUrl': 'https://example.com',
         }),
       );
 
       final item = provider.mapItemForTest({
-        'id': 'https://uakino.biz/dune.html',
+        'id': 'https://src-a.example/dune.html',
         'title': 'Dune',
         'type': 'movie',
       });
 
-      expect(item.providerId, 'uakino');
-      expect(item.uniqueId, 'uakino:https://uakino.biz/dune.html');
+      expect(item.providerId, 'src_a');
+      expect(item.uniqueId, 'src_a:https://src-a.example/dune.html');
     });
 
     test('an empty provider_id string also falls back, not blank', () {
@@ -346,20 +346,20 @@ void main() {
       // a real id would put a nameless provider into the DB key.
       final provider = ServerBackedProvider(
         ProviderCatalogEntry.fromJson({
-          'id': 'uakino',
-          'name': 'Uakino',
+          'id': 'src_a',
+          'name': 'Source A',
           'baseUrl': 'https://example.com',
         }),
       );
 
       final item = provider.mapItemForTest({
         'provider_id': '',
-        'id': 'https://uakino.biz/dune.html',
+        'id': 'https://src-a.example/dune.html',
         'title': 'Dune',
         'type': 'movie',
       });
 
-      expect(item.providerId, 'uakino');
+      expect(item.providerId, 'src_a');
     });
   });
 }

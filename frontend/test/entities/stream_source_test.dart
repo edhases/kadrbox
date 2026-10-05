@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:oxide_film/domain/entities/stream_source.dart';
+import 'package:kadrbox/domain/entities/stream_source.dart';
 
 void main() {
   group('StreamQuality', () {

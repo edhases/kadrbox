@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:oxide_film/data/services/user_agent_service.dart';
+import 'package:kadrbox/data/services/user_agent_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {

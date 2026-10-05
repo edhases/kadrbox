@@ -1,11 +1,11 @@
 // Tests for WatchPartyService using a fake backend to simulate incoming messages
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
 
-class MockOxideServerService extends Fake implements OxideServerService {}
+class MockKadrboxServerService extends Fake implements KadrboxServerService {}
 
 class MockSettingsService extends Fake implements SettingsService {
   @override
@@ -56,7 +56,7 @@ void main() {
     test('client reacts to play and pause messages from backend', () async {
       final fake = _FakeBackend();
       final service = WatchPartyService(
-        server: MockOxideServerService(),
+        server: MockKadrboxServerService(),
         settings: MockSettingsService(),
         backendFactory: (_) => fake,
       );
@@ -101,7 +101,7 @@ void main() {
       () async {
         final fake = _FakeBackend();
         final service = WatchPartyService(
-          server: MockOxideServerService(),
+          server: MockKadrboxServerService(),
           settings: MockSettingsService(),
           backendFactory: (_) => fake,
         );

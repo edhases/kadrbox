@@ -5,17 +5,17 @@ import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/data/services/auth_service.dart';
-import 'package:oxide_film/data/services/download_service.dart';
-import 'package:oxide_film/data/services/favorites_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
-import 'package:oxide_film/domain/entities/entities.dart';
-import 'package:oxide_film/domain/repositories/content_provider.dart';
-import 'package:oxide_film/presentation/pages/details/details_page.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/providers/provider_registry.dart';
+import 'package:kadrbox/data/services/auth_service.dart';
+import 'package:kadrbox/data/services/download_service.dart';
+import 'package:kadrbox/data/services/favorites_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
+import 'package:kadrbox/domain/entities/entities.dart';
+import 'package:kadrbox/domain/repositories/content_provider.dart';
+import 'package:kadrbox/presentation/pages/details/details_page.dart';
 
 import '../../../helpers/in_memory_db.dart';
 
@@ -123,7 +123,7 @@ void main() {
   late ProviderRegistry registry;
   late _TestContentProvider provider;
   late SettingsService settingsService;
-  late OxideServerService serverService;
+  late KadrboxServerService serverService;
   late AuthService authService;
   late FavoritesService favoritesService;
   late DownloadService downloadService;
@@ -142,7 +142,7 @@ void main() {
     final apiClient = ApiClient(prefs: prefs, dio: dio);
 
     settingsService = SettingsService(db);
-    serverService = OxideServerService(prefs, apiClient);
+    serverService = KadrboxServerService(prefs, apiClient);
     authService = AuthService(serverService);
     favoritesService = FavoritesService(
       database: db,
@@ -365,17 +365,17 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       // Two DLE streams whose only distinguishing label is the CDN. The old
-      // selector grouped by `stream.voiceover`, so this rendered "HDVB" and
-      // "Ashdi" as the dubbing options.
+      // selector grouped by `stream.voiceover`, so this rendered "CDN Alpha" and
+      // "CDN Beta" as the dubbing options.
       provider.customStreams = const [
         StreamSource(
-          url: 'https://cdn.tv/hdvb/master.m3u8',
-          sourceName: 'HDVB',
+          url: 'https://cdn.tv/alpha/master.m3u8',
+          sourceName: 'CDN Alpha',
           type: StreamType.hls,
         ),
         StreamSource(
-          url: 'https://cdn.tv/ashdi/master.m3u8',
-          sourceName: 'Ashdi',
+          url: 'https://cdn.tv/beta/master.m3u8',
+          sourceName: 'CDN Beta',
           type: StreamType.hls,
         ),
       ];
@@ -422,8 +422,8 @@ void main() {
       expect(find.text('Postmodern'), findsOneWidget);
 
       // The CDN names must not have been offered as dubbing studios.
-      expect(find.text('HDVB'), findsNothing);
-      expect(find.text('Ashdi'), findsNothing);
+      expect(find.text('CDN Alpha'), findsNothing);
+      expect(find.text('CDN Beta'), findsNothing);
     },
   );
 
@@ -436,7 +436,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     provider.customStreams = const [
-      StreamSource(url: 'https://cdn.tv/a.m3u8', sourceName: 'HDVB'),
+      StreamSource(url: 'https://cdn.tv/a.m3u8', sourceName: 'CDN Alpha'),
     ];
 
     provider.customDetails = MediaDetails(
@@ -589,7 +589,10 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       provider.customStreams = const [
-        StreamSource(url: 'https://cdn.tv/default.m3u8', sourceName: 'HDVB'),
+        StreamSource(
+          url: 'https://cdn.tv/default.m3u8',
+          sourceName: 'CDN Alpha',
+        ),
       ];
       provider.customDetails = MediaDetails(
         item: MediaItem(
@@ -619,7 +622,7 @@ void main() {
       provider.episodeStreams['ref-e2'] = [
         StreamSource(
           url: 'https://cdn.tv/episode2.m3u8',
-          sourceName: 'Ashdi',
+          sourceName: 'CDN Beta',
           type: StreamType.hls,
         ),
       ];

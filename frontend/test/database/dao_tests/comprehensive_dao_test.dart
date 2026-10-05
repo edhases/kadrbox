@@ -1,12 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/database/app_database.dart';
-import 'package:oxide_film/data/database/dao/downloads_dao.dart';
-import 'package:oxide_film/data/database/dao/favorites_dao.dart';
-import 'package:oxide_film/data/database/dao/history_dao.dart';
-import 'package:oxide_film/data/database/dao/media_items_dao.dart';
-import 'package:oxide_film/data/database/dao/search_history_dao.dart';
-import 'package:oxide_film/data/database/dao/settings_dao.dart';
-import 'package:oxide_film/domain/entities/media_item.dart';
+import 'package:kadrbox/data/database/app_database.dart';
+import 'package:kadrbox/data/database/dao/downloads_dao.dart';
+import 'package:kadrbox/data/database/dao/favorites_dao.dart';
+import 'package:kadrbox/data/database/dao/history_dao.dart';
+import 'package:kadrbox/data/database/dao/media_items_dao.dart';
+import 'package:kadrbox/data/database/dao/search_history_dao.dart';
+import 'package:kadrbox/data/database/dao/settings_dao.dart';
+import 'package:kadrbox/domain/entities/media_item.dart';
 
 import '../../helpers/in_memory_db.dart';
 
@@ -39,7 +39,7 @@ void main() {
     test('add, getByMediaId, isDownloaded, and getAll', () async {
       final id = await downloadsDao.add(
         mediaId: 'm100',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Інтерстеллар',
         posterUrl: 'https://cdn/poster.jpg',
         year: 2014,
@@ -48,14 +48,14 @@ void main() {
         localPath: '/storage/100.mp4',
         quality: '1080p',
         voiceover: 'Дубляж',
-        headers: {'User-Agent': 'TestUA', 'Referer': 'https://uakino.club/'},
+        headers: {'User-Agent': 'TestUA', 'Referer': 'https://catalog.example/'},
         localPosterPath: '/storage/poster.jpg',
         duration: 10140,
       );
 
       expect(id, isPositive);
 
-      final dl = await downloadsDao.getByMediaId('m100', 'uakino');
+      final dl = await downloadsDao.getByMediaId('m100', 'src_a');
       expect(dl, isNotNull);
       expect(dl!.title, 'Інтерстеллар');
       expect(dl.quality, '1080p');
@@ -65,7 +65,7 @@ void main() {
       // Initial status is pending, not completed
       final downloadedBefore = await downloadsDao.isDownloaded(
         'm100',
-        'uakino',
+        'src_a',
       );
       expect(downloadedBefore, isFalse);
 
@@ -76,7 +76,7 @@ void main() {
     test('updateStatus and updateProgress', () async {
       final id = await downloadsDao.add(
         mediaId: 's1',
-        providerId: 'lavakino',
+        providerId: 'src_c',
         title: 'Гра престолів',
         mediaType: 'series',
         season: 1,
@@ -97,7 +97,7 @@ void main() {
 
       var dl = await downloadsDao.getByMediaId(
         's1',
-        'lavakino',
+        'src_c',
         season: 1,
         episode: 1,
       );
@@ -113,7 +113,7 @@ void main() {
       await downloadsDao.updateStatus(id, DownloadStatus.completed);
       dl = await downloadsDao.getByMediaId(
         's1',
-        'lavakino',
+        'src_c',
         season: 1,
         episode: 1,
       );
@@ -122,7 +122,7 @@ void main() {
 
       final isDl = await downloadsDao.isDownloaded(
         's1',
-        'lavakino',
+        'src_c',
         season: 1,
         episode: 1,
       );
@@ -202,7 +202,7 @@ void main() {
     test('add, get, isFavorite, getByType, and count', () async {
       await favoritesDao.add(
         mediaId: 'fav1',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Дюна',
         posterUrl: 'https://cdn/dune.jpg',
         year: 2021,
@@ -212,7 +212,7 @@ void main() {
       );
       await favoritesDao.add(
         mediaId: 'fav2',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Аркейн',
         year: 2021,
         rating: 9.0,
@@ -220,10 +220,10 @@ void main() {
       );
 
       expect(await favoritesDao.count(), 2);
-      expect(await favoritesDao.isFavorite('fav1', 'uakino'), isTrue);
-      expect(await favoritesDao.isFavorite('nonexistent', 'uakino'), isFalse);
+      expect(await favoritesDao.isFavorite('fav1', 'src_a'), isTrue);
+      expect(await favoritesDao.isFavorite('nonexistent', 'src_a'), isFalse);
 
-      final fav1 = await favoritesDao.get('fav1', 'uakino');
+      final fav1 = await favoritesDao.get('fav1', 'src_a');
       expect(fav1, isNotNull);
       expect(fav1!.title, 'Дюна');
       expect(fav1.rating, 8.2);
@@ -242,22 +242,22 @@ void main() {
       // Toggle ON
       final added = await favoritesDao.toggle(
         mediaId: 'tog1',
-        providerId: 'lavakino',
+        providerId: 'src_c',
         title: 'Оппенгеймер',
         mediaType: 'movie',
       );
       expect(added, isTrue);
-      expect(await favoritesDao.isFavorite('tog1', 'lavakino'), isTrue);
+      expect(await favoritesDao.isFavorite('tog1', 'src_c'), isTrue);
 
       // Toggle OFF
       final removed = await favoritesDao.toggle(
         mediaId: 'tog1',
-        providerId: 'lavakino',
+        providerId: 'src_c',
         title: 'Оппенгеймер',
         mediaType: 'movie',
       );
       expect(removed, isFalse);
-      expect(await favoritesDao.isFavorite('tog1', 'lavakino'), isFalse);
+      expect(await favoritesDao.isFavorite('tog1', 'src_c'), isFalse);
     });
 
     test('remove and clearAll', () async {
@@ -309,18 +309,18 @@ void main() {
     test('saves and reads back a movie by logical key', () async {
       await historyDao.saveProgress(
         mediaId: 'lotr',
-        providerId: 'uakino',
+        providerId: 'src_a',
         title: 'Володар Перснів',
         mediaType: 'movie',
         positionMs: 42_000,
         durationMs: 178_000,
       );
 
-      final entry = await historyDao.getForMedia('lotr', 'uakino');
+      final entry = await historyDao.getForMedia('lotr', 'src_a');
       expect(entry, isNotNull);
       expect(entry!.positionMs, 42_000);
       expect(
-        await historyDao.getLastPosition('lotr', 'uakino'),
+        await historyDao.getLastPosition('lotr', 'src_a'),
         const Duration(seconds: 42),
       );
     });
@@ -330,7 +330,7 @@ void main() {
       () async {
         await historyDao.saveProgress(
           mediaId: 'dup',
-          providerId: 'uakino',
+          providerId: 'src_a',
           title: 'Dup',
           mediaType: 'movie',
           positionMs: 1_000,
@@ -338,7 +338,7 @@ void main() {
         );
         await historyDao.saveProgress(
           mediaId: 'dup',
-          providerId: 'uakino',
+          providerId: 'src_a',
           title: 'Dup',
           mediaType: 'movie',
           positionMs: 9_000,
@@ -348,7 +348,7 @@ void main() {
         final all = await historyDao.getAll();
         expect(all.where((e) => e.mediaId == 'dup'), hasLength(1));
         expect(
-          (await historyDao.getForMedia('dup', 'uakino'))!.positionMs,
+          (await historyDao.getForMedia('dup', 'src_a'))!.positionMs,
           9_000,
         );
       },
@@ -358,7 +358,7 @@ void main() {
       for (final ep in [1, 2, 3]) {
         await historyDao.saveProgress(
           mediaId: 'show',
-          providerId: 'uakino',
+          providerId: 'src_a',
           title: 'Show',
           mediaType: 'series',
           season: 1,
@@ -371,14 +371,14 @@ void main() {
       final all = await historyDao.getAll();
       expect(all.where((e) => e.mediaId == 'show'), hasLength(3));
       expect(
-        await historyDao.getForMedia('show', 'uakino', season: 1, episode: 2),
+        await historyDao.getForMedia('show', 'src_a', season: 1, episode: 2),
         isNotNull,
       );
     });
 
     test('missing media resolves to null rather than throwing', () async {
-      expect(await historyDao.getForMedia('nope', 'uakino'), isNull);
-      expect(await historyDao.getLastPosition('nope', 'uakino'), isNull);
+      expect(await historyDao.getForMedia('nope', 'src_a'), isNull);
+      expect(await historyDao.getLastPosition('nope', 'src_a'), isNull);
     });
   });
 
@@ -386,7 +386,7 @@ void main() {
     test('upsert and get media item cache', () async {
       const item = MediaItem(
         id: 'meta1',
-        providerId: 'bandera',
+        providerId: 'src_d',
         title: 'Володар Перснів',
         originalTitle: 'The Lord of the Rings',
         posterUrl: 'https://cdn/lotr.jpg',
@@ -400,7 +400,7 @@ void main() {
 
       await mediaItemsDao.upsert(item);
 
-      final retrieved = await mediaItemsDao.get('meta1', 'bandera');
+      final retrieved = await mediaItemsDao.get('meta1', 'src_d');
       expect(retrieved, isNotNull);
       expect(retrieved!.id, 'meta1');
       expect(retrieved.originalTitle, 'The Lord of the Rings');
@@ -409,7 +409,7 @@ void main() {
       expect(retrieved.type, ContentType.movie);
 
       // Non-existent returns null
-      expect(await mediaItemsDao.get('404', 'bandera'), isNull);
+      expect(await mediaItemsDao.get('404', 'src_d'), isNull);
     });
   });
 
@@ -506,27 +506,27 @@ void main() {
     });
 
     test('provider settings and priorities', () async {
-      await settingsDao.setProviderEnabled('uakino', true);
-      await settingsDao.setProviderPriority('uakino', 1);
+      await settingsDao.setProviderEnabled('src_a', true);
+      await settingsDao.setProviderPriority('src_a', 1);
 
-      await settingsDao.setProviderEnabled('lavakino', false);
-      await settingsDao.setProviderPriority('lavakino', 2);
+      await settingsDao.setProviderEnabled('src_c', false);
+      await settingsDao.setProviderPriority('src_c', 2);
 
-      expect(await settingsDao.isProviderEnabled('uakino'), isTrue);
-      expect(await settingsDao.isProviderEnabled('lavakino'), isFalse);
+      expect(await settingsDao.isProviderEnabled('src_a'), isTrue);
+      expect(await settingsDao.isProviderEnabled('src_c'), isFalse);
       expect(await settingsDao.isProviderEnabled('unknown'), isTrue); // default
 
       final providers = await settingsDao.getEnabledProviders();
       expect(providers.length, 2);
-      expect(providers[0].providerId, 'uakino');
+      expect(providers[0].providerId, 'src_a');
       expect(providers[0].priority, 1);
-      expect(providers[1].providerId, 'lavakino');
+      expect(providers[1].providerId, 'src_c');
       expect(providers[1].priority, 2);
 
       // Watch provider states map
       final states = await settingsDao.watchProviderStates().first;
-      expect(states['uakino'], isTrue);
-      expect(states['lavakino'], isFalse);
+      expect(states['src_a'], isTrue);
+      expect(states['src_c'], isFalse);
     });
   });
 

@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
-import 'package:oxide_film/data/services/watch_party_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
-import 'package:oxide_film/data/services/settings_service.dart';
+import 'package:kadrbox/data/services/watch_party_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
+import 'package:kadrbox/data/services/settings_service.dart';
 
 // Manual Mocks
 class MockWatchPartyBackend implements WatchPartyBackend {
@@ -54,20 +54,20 @@ class MockSettingsService extends Fake implements SettingsService {
   }
 }
 
-class MockOxideServerService extends Fake implements OxideServerService {}
+class MockKadrboxServerService extends Fake implements KadrboxServerService {}
 
 void main() {
   late WatchPartyService service;
   late MockWatchPartyBackend mockBackend;
   late MockSettingsService mockSettings;
-  late MockOxideServerService mockServer;
+  late MockKadrboxServerService mockServer;
 
   setUp(() {
     GetIt.I.reset();
     mockSettings = MockSettingsService();
-    mockServer = MockOxideServerService();
+    mockServer = MockKadrboxServerService();
     GetIt.I.registerSingleton<SettingsService>(mockSettings);
-    GetIt.I.registerSingleton<OxideServerService>(mockServer);
+    GetIt.I.registerSingleton<KadrboxServerService>(mockServer);
 
     mockBackend = MockWatchPartyBackend();
 

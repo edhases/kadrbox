@@ -4,8 +4,8 @@ Given:
 - Empty Favorites table in in-memory DB
 
 When:
-- Call FavoritesDao.add(mediaId: '1', providerId: 'uakino', title: 'A', mediaType: 'movie')
-- Then call FavoritesDao.isFavorite('1','uakino')
+- Call FavoritesDao.add(mediaId: '1', providerId: 'src_a', title: 'A', mediaType: 'movie')
+- Then call FavoritesDao.isFavorite('1','src_a')
 - Then call FavoritesDao.toggle same item (or remove)
 
 Mocks/Helpers:

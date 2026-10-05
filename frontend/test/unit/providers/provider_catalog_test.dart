@@ -1,16 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:oxide_film/data/models/provider_catalog.dart';
-import 'package:oxide_film/data/providers/provider_registry.dart';
-import 'package:oxide_film/data/providers/server_backed_provider.dart';
-import 'package:oxide_film/domain/entities/media_item.dart';
+import 'package:kadrbox/data/models/provider_catalog.dart';
+import 'package:kadrbox/data/providers/provider_registry.dart';
+import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/domain/entities/media_item.dart';
 
 const _catalogJson = {
   'version': 7,
   'providers': [
     {
-      'id': 'uakino',
-      'name': 'UAKino',
-      'baseUrl': 'https://uakino.best',
+      'id': 'src_a',
+      'name': 'Source A',
+      'baseUrl': 'https://src-a.example',
       'showOnHome': true,
       'hasFixedStreams': false,
       'contentTypes': ['movie', 'series'],
@@ -40,12 +40,12 @@ void main() {
       expect(catalog.version, 7);
       expect(catalog.providers, hasLength(2));
 
-      final uakino = catalog.providers.first;
-      expect(uakino.id, 'uakino');
-      expect(uakino.showOnHome, isTrue);
-      expect(uakino.enabled, isTrue);
+      final sourceA = catalog.providers.first;
+      expect(sourceA.id, 'src_a');
+      expect(sourceA.showOnHome, isTrue);
+      expect(sourceA.enabled, isTrue);
       expect(
-        uakino.supportedTypes,
+        sourceA.supportedTypes,
         containsAll([ContentType.movie, ContentType.series]),
       );
     });

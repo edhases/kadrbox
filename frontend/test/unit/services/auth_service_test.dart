@@ -4,10 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 
-import 'package:oxide_film/core/config/app_config.dart';
-import 'package:oxide_film/core/network/api_client.dart';
-import 'package:oxide_film/data/services/auth_service.dart';
-import 'package:oxide_film/data/services/oxide_server_service.dart';
+import 'package:kadrbox/core/config/app_config.dart';
+import 'package:kadrbox/core/network/api_client.dart';
+import 'package:kadrbox/data/services/auth_service.dart';
+import 'package:kadrbox/data/services/kadrbox_server_service.dart';
 
 class _AllowAllHttpOverrides extends HttpOverrides {
   @override
@@ -24,7 +24,7 @@ void main() {
   late String originalBaseUrl;
   late SharedPreferences prefs;
   late ApiClient apiClient;
-  late OxideServerService serverService;
+  late KadrboxServerService serverService;
   late AuthService authService;
 
   setUp(() async {
@@ -197,7 +197,7 @@ void main() {
       ),
     );
     apiClient = ApiClient(prefs: prefs, dio: dio);
-    serverService = OxideServerService(prefs, apiClient);
+    serverService = KadrboxServerService(prefs, apiClient);
     authService = AuthService(serverService);
   });
 
@@ -235,7 +235,7 @@ void main() {
           }),
         });
         final p = await SharedPreferences.getInstance();
-        final s = OxideServerService(p, apiClient);
+        final s = KadrboxServerService(p, apiClient);
         final a = AuthService(s);
 
         expect(a.isAuthenticated, isTrue);
