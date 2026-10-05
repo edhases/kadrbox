@@ -1,7 +1,6 @@
 import 'package:equatable/equatable.dart';
 
 /// Type of media content
-/// Type of media content
 enum ContentType { movie, series, cartoon, anime, dorama, unknown }
 
 /// Extension to get display name for content type

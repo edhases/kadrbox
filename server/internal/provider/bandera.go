@@ -249,6 +249,10 @@ func (p *BanderaProvider) GetPopular(ctx context.Context, contentType string, pa
 	var err error
 
 	if serial > 0 || contentType == "series" || contentType == "movie" {
+		// The fallback is a retry of the SAME endpoint with the serial
+		// constraint dropped, not a different backend: the aggregator rejects
+		// some serial=1 queries outright, and a plain search still answers.
+		// So a failure here is worth one more attempt.
 		resp, sErr := p.SearchWithMeta(ctx, q, 0, serial)
 		if sErr == nil && resp != nil && len(resp.Items) > 0 {
 			items = p.convertSearchItems(resp.Items)
@@ -289,6 +293,8 @@ func (p *BanderaProvider) GetNew(ctx context.Context, contentType string, page i
 		return rankAndSortMediaItems(items, contentType), nil
 	}
 
+	// A failed year query is retried as a plain popular search, which is a
+	// genuinely different query, so the fallback stays.
 	return p.GetPopular(ctx, contentType, page)
 }
 
@@ -312,6 +318,8 @@ func (p *BanderaProvider) GetByCategory(ctx context.Context, category, contentTy
 	if err == nil && resp != nil && len(resp.Items) > 0 {
 		items = p.convertSearchItems(resp.Items)
 	} else {
+		// Same-endpoint retry with the serial constraint dropped: the aggregator
+		// rejects some serial=1 category queries that a plain search answers.
 		items, err = p.Search(ctx, category)
 		if err != nil {
 			return nil, err
@@ -557,11 +565,22 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 		}
 
 		if len(contentResp.Streams) > 0 {
-			// Якщо це фільм
+			// voiceID обирає одне джерело. Розбирається ОДИН раз і до обох
+			// гілок: раніше кожна гілка мала власний strconv.Atoi, тому
+			// нечисловий voiceID мовчки лишав streamIdx = 0 — клієнт обрав
+			// дуб №2, а отримував джерело №1.
 			streamIdx := 0
+			voiceSelected := false
 			if voiceID != "" {
-				if idx, err := strconv.Atoi(voiceID); err == nil && idx >= 0 && idx < len(contentResp.Streams) {
+				idx, convErr := strconv.Atoi(strings.TrimSpace(voiceID))
+				switch {
+				case convErr != nil:
+					return nil, fmt.Errorf("invalid voiceID %q: expected a source index", voiceID)
+				case idx < 0 || idx >= len(contentResp.Streams):
+					return nil, fmt.Errorf("voiceID %d out of range: content has %d source(s)", idx, len(contentResp.Streams))
+				default:
 					streamIdx = idx
+					voiceSelected = true
 				}
 			}
 			st := contentResp.Streams[streamIdx]
@@ -571,10 +590,8 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 				var directStreams []domain.StreamSource
 				var allSubs []BanderaSubtitleItem
 				for i, sItem := range contentResp.Streams {
-					if voiceID != "" {
-						if idx, err := strconv.Atoi(voiceID); err == nil && idx != i {
-							continue
-						}
+					if voiceSelected && streamIdx != i {
+						continue
 					}
 					if sItem.URL.String() == "" {
 						continue
@@ -638,7 +655,9 @@ func (p *BanderaProvider) GetStreams(ctx context.Context, itemURL string, season
 	// Це запобігає надсиланню невалідного запиту в мережу та поверненню 400 MISSING_URL.
 	meta := sourcesMeta[targetSource]
 	if err := ValidateStreamRef(meta, targetStreamRef); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnresolvablePlayer, err)
+		// Both sentinels are wrapped so errors.Is works for the transport layer;
+		// the sibling DLE resolver does the same (resolve.go).
+		return nil, fmt.Errorf("%w: %w", ErrUnresolvablePlayer, err)
 	}
 
 	// 5. Запитуємо /stream (ніколи не мемоізується, бо URL можуть бути підписаними)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 
@@ -22,8 +23,12 @@ var ErrProviderNotFound = errors.New("unknown provider")
 // on a context detached from any single caller, so without its own deadline a
 // scraper that hangs would keep the singleflight key occupied indefinitely and
 // every subsequent identical search would pile up behind it.
+//
+// It sits below the client's receiveTimeout (30s, lib/core/config/app_config.dart)
+// on purpose. When the two were equal, a hung scraper made the client give up at
+// the same instant the server did, so the client never saw the 503 + Retry-After
+// the handler had produced, and retried a search that was already failing.
 const SearchFanoutBudget = 20 * time.Second
-const searchFanoutBudget = SearchFanoutBudget
 
 // ErrProviderPanic marks an error that came from a recovered provider panic
 // rather than from a returned error. It is a distinct sentinel so the HTTP
@@ -37,10 +42,30 @@ var ErrProviderPanic = errors.New("provider panicked")
 // not be able to take down the request that happened to trigger it — nor, in
 // the fan-out case, every concurrent request coalesced behind it.
 func recoverProvider(op string, p domain.Provider, err *error) {
-	if rec := recover(); rec != nil {
-		log.Printf("[PANIC RECOVER] Provider %s crashed in %s: %v", p.ID(), op, rec)
-		*err = fmt.Errorf("%w: %s during %s: %v", ErrProviderPanic, p.ID(), op, rec)
+	rec := recover()
+	if rec == nil {
+		return
 	}
+
+	// The ID is read defensively: a provider whose ID() itself panics would
+	// otherwise re-panic out of this deferred function and take the request with
+	// it, which is the exact outcome this exists to prevent.
+	id := "<unknown>"
+	if p != nil {
+		func() {
+			defer func() { _ = recover() }()
+			id = p.ID()
+		}()
+	}
+
+	// The stack is what makes a recovered third-party-parser panic diagnosable
+	// at all. Without it the log line says which provider crashed and nothing
+	// about where.
+	stack := make([]byte, 8<<10)
+	stack = stack[:runtime.Stack(stack, false)]
+
+	log.Printf("[PANIC RECOVER] Provider %s crashed in %s: %v\n%s", id, op, rec, stack)
+	*err = fmt.Errorf("%w: %s during %s: %v", ErrProviderPanic, id, op, rec)
 }
 
 type providerHealth struct {
@@ -235,7 +260,6 @@ func (r *Registry) SearchProvider(ctx context.Context, id, query string) ([]doma
 }
 
 // SingleFlightSearch запобігає дублюванню однакових одночасних пошукових запитів від багатьох клієнтів
-// SingleFlightSearch запобігає дублюванню однакових одночасних пошукових запитів від багатьох клієнтів
 func (r *Registry) SingleFlightSearch(ctx context.Context, query string) ([]domain.MediaItem, error) {
 	key := fmt.Sprintf("search:%s", query)
 
@@ -253,7 +277,7 @@ func (r *Registry) SingleFlightSearch(ctx context.Context, query string) ([]doma
 		// WithoutCancel drops the first caller's deadline and values are kept;
 		// the budget bounds the work so a hanging scraper cannot hold the key
 		// forever.
-		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchFanoutBudget)
+		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), SearchFanoutBudget)
 		defer cancel()
 		return r.SearchAll(shared, query), nil
 	})

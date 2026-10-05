@@ -33,6 +33,51 @@ func TestGenerateStableContentID_CaseAndJSONInvariance(t *testing.T) {
 	}
 }
 
+// TestGenerateStableContentID_GoldenValue pins the exact output. The ID is
+// persisted client-side as MediaItem.uniqueId and as the server's
+// (media_id, provider_id) key, so a change to the hash input, the separator or
+// the truncation length silently re-keys every favourites and history row that
+// was written before the change. The invariance test above cannot catch that —
+// it only proves the inputs agree with each other, not that the output is
+// unchanged. Changing this value is therefore a data migration, not a refactor.
+func TestGenerateStableContentID_GoldenValue(t *testing.T) {
+	ref := json.RawMessage(`{"id":"123","season":1,"source":"uaserials"}`)
+
+	got := provider.GenerateStableContentID("uaserials", "Дюна", 2021, ref)
+	const want = "bo_uaserials_ac862563e6"
+
+	if got != want {
+		t.Errorf("stable content ID changed.\n got: %s\nwant: %s\n"+
+			"this ID is persisted in MediaItem.uniqueId and in the server's "+
+			"(media_id, provider_id) key; changing it orphans existing rows and "+
+			"requires a data migration", got, want)
+	}
+}
+
+// TestGenerateStableContentID_DistinguishesRealInputs guards the opposite
+// failure: a golden value alone would also pass if the hash stopped
+// discriminating between two genuinely different items.
+func TestGenerateStableContentID_DistinguishesRealInputs(t *testing.T) {
+	ref := json.RawMessage(`{"id":"123","season":1,"source":"uaserials"}`)
+	other := json.RawMessage(`{"id":"124","season":1,"source":"uaserials"}`)
+
+	base := provider.GenerateStableContentID("uaserials", "Дюна", 2021, ref)
+	cases := []struct {
+		name string
+		got  string
+	}{
+		{"different source", provider.GenerateStableContentID("uakino", "Дюна", 2021, ref)},
+		{"different title", provider.GenerateStableContentID("uaserials", "Дюна 2", 2021, ref)},
+		{"different year", provider.GenerateStableContentID("uaserials", "Дюна", 2022, ref)},
+		{"different ref", provider.GenerateStableContentID("uaserials", "Дюна", 2021, other)},
+	}
+	for _, tc := range cases {
+		if tc.got == base {
+			t.Errorf("%s produced the same ID as the base item: %s", tc.name, tc.got)
+		}
+	}
+}
+
 func TestBanderaPagination_Bounded(t *testing.T) {
 	p := provider.NewBanderaProvider()
 	ctx := context.Background()

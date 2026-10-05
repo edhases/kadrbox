@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 
 	"github.com/edhases/oxide-server/internal/domain"
@@ -13,9 +14,26 @@ import (
 	transportHttp "github.com/edhases/oxide-server/internal/transport/http"
 )
 
+// dleTrapProvider stands in for the DLE scrapers (uakino, eneyida, lavakino).
+// Its Search panics, and it records the call before doing so.
+//
+// The recording is the point. The registry recovers a provider panic into
+// ErrProviderPanic and the pipeline turns that into an "error" segment, so a
+// test that only registers this provider and then checks the response shape
+// passes whether or not the DLE providers were ever reached. Counting the calls
+// is what makes the assertion mean something.
 type dleTrapProvider struct {
 	id string
 	t  *testing.T
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *dleTrapProvider) searchCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
 }
 
 func (p *dleTrapProvider) ID() string      { return p.id }
@@ -25,7 +43,10 @@ func (p *dleTrapProvider) Describe() domain.ProviderInfo {
 	return domain.ProviderInfo{ID: p.id, Name: p.Name(), SearchEnabledDefault: true}
 }
 func (p *dleTrapProvider) Search(ctx context.Context, query string) ([]domain.MediaItem, error) {
-	panic("INVARIANT 3 VIOLATION: call to DLE provider during search (ban surface exposed!)")
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+	panic("DLE provider " + p.id + " was called during search")
 }
 func (p *dleTrapProvider) GetPopular(ctx context.Context, contentType string, page int) ([]domain.MediaItem, error) {
 	return nil, nil
@@ -139,11 +160,17 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 	banderaProv := provider.NewBanderaProviderWithConfig(banderaMock.URL, "", banderaMock.Client())
 	registry.Register(banderaProv)
 
-	// Реєструємо DLE-пастки: якщо /search звернеться до будь-якої з них — буде panic і тест гарантовано впаде!
-	registry.Register(&dleTrapProvider{id: "dle-trap", t: t})
-	registry.Register(&dleTrapProvider{id: "uakino", t: t})
-	registry.Register(&dleTrapProvider{id: "eneyida", t: t})
-	registry.Register(&dleTrapProvider{id: "lavakino", t: t})
+	// Реєструємо DLE-пастки: кожна панікує на Search і рахує виклики, щоб
+	// інваріант 3 міряв факт звернення, а не лише відсутність падіння.
+	dleTraps := []*dleTrapProvider{
+		{id: "dle-trap", t: t},
+		{id: "uakino", t: t},
+		{id: "eneyida", t: t},
+		{id: "lavakino", t: t},
+	}
+	for _, trap := range dleTraps {
+		registry.Register(trap)
+	}
 
 	handler := transportHttp.NewContentHandler(registry, nil)
 
@@ -165,8 +192,9 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 		Canonical   string `json:"canonical"`
 		FilteredOut int    `json:"filtered_out"`
 		Segments    []struct {
-			ID    string `json:"id"`
-			Count int    `json:"count"`
+			ID     string `json:"id"`
+			Count  int    `json:"count"`
+			Status string `json:"status"`
 		} `json:"segments"`
 		Items []struct {
 			ID      string   `json:"id"`
@@ -215,13 +243,41 @@ func TestSearchInvariants_CutoffSegmentSumAndZeroDLE(t *testing.T) {
 		t.Fatalf("expected 2 aggregated sources in clustered item, got %d", len(resp.Items[0].Sources))
 	}
 
-	// Інваріант 3: DLE-пастки не викликалися (перевірено відсутністю паніки від dleTrapProvider)
-	// Додатково переконуємося, що dleTrapProvider реально панікує при прямому виклику Search:
+	// Інваріант 3: DLE-пастки реально викликаються, і їхня паніка не руйнує
+	// відповідь. Раніше тут стояв лише recover-тест самої пастки, який нічого не
+	// доводив про конвеєр: safeSearch ковтав паніку в error-сегмент, тож тест
+	// проходив однаково — викликали DLE-провайдери чи ні.
+	for _, trap := range dleTraps {
+		if n := trap.searchCalls(); n != 1 {
+			t.Errorf("INVARIANT 3 FAILED: expected the search to fan out to DLE provider %q exactly once, got %d calls", trap.ID(), n)
+		}
+	}
+	for _, trap := range dleTraps {
+		if n := trap.searchCalls(); n != 1 {
+			t.Errorf("INVARIANT 3 FAILED: expected the search to fan out to DLE provider %q exactly once, got %d calls", trap.ID(), n)
+		}
+	}
+
+	// Кожен викликаний DLE-провайдер має з'явитися окремим error-сегментом: саме
+	// це і є «паніка ізольована, решта пошуку жива».
+	gotErrorSegments := map[string]bool{}
+	for _, seg := range resp.Segments {
+		if seg.Status == "error" {
+			gotErrorSegments[seg.ID] = true
+		}
+	}
+	for _, trap := range dleTraps {
+		if !gotErrorSegments[trap.ID()] {
+			t.Errorf("INVARIANT 3 FAILED: expected an error segment for panicking provider %q, got segments %+v", trap.ID(), resp.Segments)
+		}
+	}
+
+	// І сам виклик Search у пастки справді панікує — інакше лічильник викликів
+	// вимірював би не те.
 	trap := &dleTrapProvider{id: "dle-trap", t: t}
 	func() {
 		defer func() {
-			r := recover()
-			if r == nil {
+			if r := recover(); r == nil {
 				t.Fatalf("expected dleTrapProvider.Search to panic, but it did not")
 			}
 		}()

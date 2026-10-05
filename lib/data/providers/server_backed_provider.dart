@@ -345,13 +345,41 @@ class ServerBackedProvider extends ContentProvider {
     ContentType? type,
     int page = 1,
   }) async {
-    // Legacy per-provider path. Kept for callers that genuinely need one
-    // provider; the search UI uses [searchEnvelope] instead.
+    // Per-provider path. The search UI uses [searchEnvelope] instead; this stays
+    // for callers that genuinely need exactly one source.
+    //
+    // The endpoint answers the search ENVELOPE even with ?provider= — the server
+    // deliberately serves one shape for both — so this must unwrap it rather
+    // than hand the object to getJsonList, which would find no list and return
+    // an empty result: a search that silently finds nothing, with no error.
     final items = await _coalesce('search-one:$id:$query', () async {
-      final list = await _api.getJsonList(
+      final rawData = await _api.getRawJson(
         '$_base/search',
         queryParameters: {'q': query, 'provider': id},
       );
+
+      final payload = (rawData is Map && rawData['data'] is Map)
+          ? rawData['data']
+          : (rawData is Map && rawData['data'] is List)
+          ? rawData['data']
+          : rawData;
+
+      final List<dynamic> list;
+      if (payload is Map) {
+        list = SearchEnvelope.fromJson(
+          Map<String, dynamic>.from(payload),
+          _mapItem,
+        ).items.map((s) => s.item).toList();
+      } else if (payload is List) {
+        list = payload;
+      } else {
+        throw FormatException(
+          'Unexpected /content/search response for provider $id: '
+          '${rawData.runtimeType}',
+          query,
+        );
+      }
+
       return list
           .whereType<Map>()
           .map((e) => _mapItem(Map<String, dynamic>.from(e)))

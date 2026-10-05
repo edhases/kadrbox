@@ -1,0 +1,90 @@
+<!-- Catalog page fixture for the uakino scraper.
+
+     Every card here exists to pin one selector in uakino.go fetchCatalog. If a
+     selector changes, the field asserted for that card in
+     uakino_fixture_test.go goes empty and the test fails. This is the point of
+     a real fixture: an inline HTML string in a test is only ever checked
+     against markup the same author wrote to satisfy the same selector.
+
+     Card 1  .movie-item / .movie-title a            -> title, href
+     Card 2  two anchors inside .movie-title          -> .First() must win, so the
+                                                       title is not the
+                                                       concatenation of both
+     Card 3  poster only in data-src                  -> lazy-loaded images
+     Card 4  /serials/ in the href                    -> type = series
+     Card 5  /cartoon/ in the href                   -> type = cartoon
+     Card 6  no href at all                          -> card is skipped
+
+     Card 5 uses /cartoon/ rather than /multfilmy/ on purpose: the catalog
+     branch (uakino.go fetchCatalog) matches the token "cartoon" or the title
+     word "мультфільм", while the details branch matches "mult" or "мультфільм".
+     The two ladders disagree, so a real site path of /multfilmy/ lands as
+     "movie" in a catalog listing and as "cartoon" on its own page. That
+     divergence is a separate, still-open defect; this fixture pins what the
+     catalog branch actually does today so the day it is fixed, the change is a
+     deliberate edit rather than an accident.
+-->
+<html>
+  <body>
+    <div class="movie-item">
+      <div class="movie-title">
+        <a href="https://uakino.biz/1-sample-movie.html">Sample Movie</a>
+      </div>
+      <div class="movie-img">
+        <img src="/uploads/posts/sample.jpg" alt="Sample Movie"/>
+      </div>
+      <div class="movie-date">2021</div>
+    </div>
+
+    <div class="movie-item">
+      <div class="movie-title">
+        <a href="https://uakino.biz/123-dune-chastyna-druha.html">Дюна: Частина друга</a>
+        <a href="https://uakino.biz/tags/фантастика">Фантастика</a>
+      </div>
+      <div class="movie-img">
+        <img src="/uploads/posts/dune-2.jpg" alt="Дюна: Частина друга"/>
+      </div>
+      <div class="movie-date">2024</div>
+    </div>
+
+    <div class="movie-item">
+      <div class="movie-title">
+        <a href="https://uakino.biz/456-ataka-titanov.html">Атака титанів</a>
+      </div>
+      <div class="movie-img">
+        <img data-src="/uploads/posts/shingeki.jpg" alt="Атака титанів"/>
+      </div>
+      <div class="movie-date">2013</div>
+    </div>
+
+    <div class="movie-item">
+      <div class="movie-title">
+        <a href="https://uakino.biz/serials/789-gravity-falls.html">Гравіті Фоллз</a>
+      </div>
+      <div class="movie-img">
+        <img src="/uploads/posts/gravity-falls.jpg" alt="Гравіті Фоллз"/>
+      </div>
+      <div class="movie-date">2012</div>
+    </div>
+
+    <div class="movie-item">
+      <div class="movie-title">
+        <a href="https://uakino.biz/cartoon/890-spiderman.html">Людина-паук</a>
+      </div>
+      <div class="movie-img">
+        <img src="/uploads/posts/spiderman.jpg" alt="Людина-паук"/>
+      </div>
+      <div class="movie-date">2018</div>
+    </div>
+
+    <div class="movie-item">
+      <div class="movie-title">
+        <span>Без посилання</span>
+      </div>
+      <div class="movie-img">
+        <img src="/uploads/posts/no-href.jpg" alt="Без посилання"/>
+      </div>
+      <div class="movie-date">2020</div>
+    </div>
+  </body>
+</html>

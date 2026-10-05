@@ -11,6 +11,19 @@ import 'package:oxide_film/domain/entities/entities.dart';
 /// These tests pin the exact shapes the server emits, including the awkward
 /// cases: scalar-or-object coercion and the `content` field that is a string
 /// for one source and a list for another.
+///
+/// The "ServerBackedProvider real mapping" group below uses
+/// [ServerBackedProvider.mapItemForTest] — the production mapping — rather than
+/// a local builder. A hand-rolled mapper is what let the `providerId` defect
+/// survive: the test read `provider_id` correctly while the real mapper threw it
+/// away, so both were green.
+
+/// The envelope shape tests below still use a local mapper, because they are
+/// about `SearchEnvelope.fromJson` in isolation and the mapper is a parameter.
+/// They deliberately assert the envelope's own fields rather than MediaItem
+/// attributes, so a divergence between this stub and the production mapper
+/// cannot make them pass or fail for the wrong reason. The production mapping is
+/// pinned separately, in the "ServerBackedProvider real mapping" group below.
 MediaItem buildItem(Map<String, dynamic> json) {
   return MediaItem(
     id: json['id']?.toString() ?? '',
@@ -282,6 +295,12 @@ void main() {
           ],
         }, provider.mapItemForTest);
 
+        // NOTE: two separate items both titled "Dune" with no year is NOT a
+        // shape the server can produce. The Go clusterer
+        // (search.GenerateClusterKey) keys on title+year+type, so it would
+        // collapse these into ONE item carrying two sources. This test pins the
+        // Dart mapping of a multi-provider payload, which is what the bug was
+        // about; the clustering contract itself is asserted server-side.
         expect(envelope.items.length, 2);
         expect(envelope.items[0].item.providerId, 'uakino');
         expect(envelope.items[0].item.id, 'https://uakino.biz/dune.html');
@@ -298,5 +317,49 @@ void main() {
         );
       },
     );
+
+    test('falls back to the aggregator id when provider_id is absent', () {
+      // A per-provider endpoint that omits provider_id must still label items
+      // with this provider, not leave them unattributed. This is the only
+      // remaining path that could mislabel an item, so it needs its own case.
+      final provider = ServerBackedProvider(
+        ProviderCatalogEntry.fromJson({
+          'id': 'uakino',
+          'name': 'Uakino',
+          'baseUrl': 'https://example.com',
+        }),
+      );
+
+      final item = provider.mapItemForTest({
+        'id': 'https://uakino.biz/dune.html',
+        'title': 'Dune',
+        'type': 'movie',
+      });
+
+      expect(item.providerId, 'uakino');
+      expect(item.uniqueId, 'uakino:https://uakino.biz/dune.html');
+    });
+
+    test('an empty provider_id string also falls back, not blank', () {
+      // The server emits provider_id without omitempty, so it is always present
+      // — but "" is what an unregistered provider looks like. Treating that as
+      // a real id would put a nameless provider into the DB key.
+      final provider = ServerBackedProvider(
+        ProviderCatalogEntry.fromJson({
+          'id': 'uakino',
+          'name': 'Uakino',
+          'baseUrl': 'https://example.com',
+        }),
+      );
+
+      final item = provider.mapItemForTest({
+        'provider_id': '',
+        'id': 'https://uakino.biz/dune.html',
+        'title': 'Dune',
+        'type': 'movie',
+      });
+
+      expect(item.providerId, 'uakino');
+    });
   });
 }

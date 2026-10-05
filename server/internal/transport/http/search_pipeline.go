@@ -322,7 +322,34 @@ func (h *ContentHandler) resolveMetaSearcher(id string) (metaSearcher, error) {
 // search.SearchResponse shape as the unified path, so the endpoint has one
 // contract rather than two depending on a query parameter.
 func (h *ContentHandler) searchSingleProvider(ctx context.Context, providerID, query string, start time.Time) (search.SearchResponse, bool, error) {
-	items, err := h.registry.SearchProvider(ctx, providerID, query)
+	plan := search.BuildQueryPlan(query)
+
+	// An empty plan means normalisation stripped everything (e.g. q="??"). The
+	// unified path and the fan-out both pass plan.Canonical upstream, so doing
+	// the same here keeps ?provider=<id> on the same query string as the
+	// multi-provider path — previously this sent the RAW query here, so the same
+	// search hit different upstreams depending on the query parameter.
+	// Dispatching an empty title upstream would return every catalogue entry.
+	upstreamQuery := plan.Canonical
+	if upstreamQuery == "" {
+		return search.SearchResponse{
+			Query:     query,
+			Canonical: "",
+			TookMs:    time.Since(start).Milliseconds(),
+			Segments: []search.SearchSegment{{
+				ID:     providerID,
+				Status: "empty",
+				Count:  0,
+				Sources: map[string]search.SourceStatusInfo{
+					providerID: {Status: "empty", Count: 0},
+				},
+			}},
+			Items:   []search.ScoredSearchItem{},
+			HasMore: false,
+		}, false, nil
+	}
+
+	items, err := h.registry.SearchProvider(ctx, providerID, upstreamQuery)
 	if err != nil {
 		return search.SearchResponse{}, false, err
 	}
@@ -343,7 +370,6 @@ func (h *ContentHandler) searchSingleProvider(ctx context.Context, providerID, q
 	if len(scored) == 0 {
 		status = "empty"
 	}
-	plan := search.BuildQueryPlan(query)
 
 	return search.SearchResponse{
 		Query:     query,

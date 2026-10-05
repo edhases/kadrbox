@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -189,6 +190,7 @@ type SourceMeta struct {
 
 type BanderaSearchResponse struct {
 	OK    bool                       `json:"ok"`
+	Error FlexibleString             `json:"error,omitempty"`
 	Items []BanderaSearchItem        `json:"items"`
 	Meta  *BanderaSearchMetaResponse `json:"meta,omitempty"`
 }
@@ -257,6 +259,7 @@ type BanderaContentRequest struct {
 
 type BanderaContentResponse struct {
 	OK       bool                `json:"ok"`
+	Error    FlexibleString      `json:"error,omitempty"`
 	Source   string              `json:"source"`
 	Type     string              `json:"type"`
 	Info     *BanderaContentInfo `json:"info"`
@@ -359,54 +362,125 @@ type BanderaSeason struct {
 
 type FlexibleSeasons []BanderaSeason
 
+// UnmarshalJSON приймає seasons у чотирьох форматах, які трапляються в
+// відповідях агрегатора: масив об'єктів, масив чисел, об'єкт-ключ->сезон, або
+// скаляр (кількість сезонів без корисного навантаження).
+//
+// Інваріант вихідного порядку: seasons мають бути ВІДСОРТОВАНІ за номером.
+// GetDetails нумерує сезони позиційно (ParseSeasonNumber(s.Title, sIdx+1)), тому
+// недетермінований порядок із map-форми означав би, що season 2 може отримати
+// номер 1, а запит season=2 — "no matching stream found". Ключі map-форми
+// одночасно є номером сезону, тому вони не лише сортуються, а й підставляються
+// у Title, коли той відсутній.
 func (f *FlexibleSeasons) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 || string(b) == "null" {
 		*f = nil
 		return nil
 	}
-	// 1. Звичайний масив об'єктів []BanderaSeason
+
+	// 1. Масив об'єктів — канонічна форма. Перевіряється першим, бо жодна
+	// інша форма не має розмірності масиву об'єктів.
 	var seasons []BanderaSeason
 	if err := json.Unmarshal(b, &seasons); err == nil {
-		*f = seasons
+		*f = normaliseSeasonOrder(seasons)
 		return nil
 	}
-	// 2. Число (наприклад 0 або кількість сезонів від агрегатора)
-	var num float64
-	if err := json.Unmarshal(b, &num); err == nil {
-		*f = nil
-		return nil
-	}
-	// 3. Рядок
-	var str string
-	if err := json.Unmarshal(b, &str); err == nil {
-		*f = nil
-		return nil
-	}
-	// 4. Масив чисел [1, 2, 3]
+
+	// 2. Масив чисел [1, 2, 3] — номер сезону без об'єкта.
 	var nums []int
 	if err := json.Unmarshal(b, &nums); err == nil {
-		var res []BanderaSeason
+		res := make([]BanderaSeason, 0, len(nums))
 		for _, n := range nums {
-			titleBytes, _ := json.Marshal(n)
-			res = append(res, BanderaSeason{
-				Title: titleBytes,
-			})
+			res = append(res, BanderaSeason{Title: rawInt(n)})
 		}
-		*f = res
+		*f = normaliseSeasonOrder(res)
 		return nil
 	}
-	// 5. Об'єкт (map) замість масиву
-	var seasonMap map[string]BanderaSeason
+
+	// 3. Об'єкт-ключ->сезон. Ключ = номер сезону, значення = сам сезон.
+	var seasonMap map[string]json.RawMessage
 	if err := json.Unmarshal(b, &seasonMap); err == nil {
-		var res []BanderaSeason
-		for _, s := range seasonMap {
-			res = append(res, s)
+		keys := make([]string, 0, len(seasonMap))
+		for k := range seasonMap {
+			keys = append(keys, k)
 		}
-		*f = res
+		sortNumericStrings(keys)
+		res := make([]BanderaSeason, 0, len(seasonMap))
+		for _, k := range keys {
+			var season BanderaSeason
+			if err := json.Unmarshal(seasonMap[k], &season); err != nil {
+				// Значення, яке не є об'єктом сезону, все одно дає корисний
+				// seasons: номер береться з ключа.
+				season = BanderaSeason{}
+			}
+			if len(season.Title) == 0 || string(season.Title) == "null" {
+				season.Title = rawSeasonKey(k)
+			}
+			res = append(res, season)
+		}
+		*f = normaliseSeasonOrder(res)
 		return nil
 	}
+
+	// 4. Скаляр (число або рядок) — агрегатор не віддав жодного сезону.
+	// Не помилка: seasons просто немає.
 	*f = nil
 	return nil
+}
+
+// normaliseSeasonOrder сортує сезони за номером, щоб позиційна нумерація в
+// GetDetails/SelectEpisodeRef була стабільною між запитами.
+func normaliseSeasonOrder(seasons []BanderaSeason) []BanderaSeason {
+	if len(seasons) < 2 {
+		return seasons
+	}
+	sort.SliceStable(seasons, func(i, j int) bool {
+		return ParseSeasonNumber(seasons[i].Title, i+1) < ParseSeasonNumber(seasons[j].Title, j+1)
+	})
+	return seasons
+}
+
+// rawInt серіалізує число у raw JSON, щоб заповнити Title тим самим типом, який
+// приходить від агрегатора (int), а не рядком.
+func rawInt(n int) json.RawMessage {
+	b, err := json.Marshal(n)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// rawSeasonKey перетворює ключ об'єкта на raw JSON-номер. Ключ, який не є
+// числом, повертається як nil — тоді ParseSeasonNumber коректно відкатиться на
+// позиційний індекс.
+func rawSeasonKey(k string) json.RawMessage {
+	if _, err := strconv.Atoi(strings.TrimSpace(k)); err != nil {
+		return nil
+	}
+	b, err := json.Marshal(strings.TrimSpace(k))
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// sortNumericStrings сортує рядки як числа, коли це можливо ("2" перед "10"),
+// а не-числові ключі — лексикографічно після. Порядок стабільний.
+func sortNumericStrings(keys []string) {
+	sort.SliceStable(keys, func(i, j int) bool {
+		a, aErr := strconv.Atoi(strings.TrimSpace(keys[i]))
+		b, bErr := strconv.Atoi(strings.TrimSpace(keys[j]))
+		switch {
+		case aErr == nil && bErr == nil:
+			return a < b
+		case aErr == nil:
+			return true
+		case bErr == nil:
+			return false
+		default:
+			return keys[i] < keys[j]
+		}
+	})
 }
 
 type FlexibleEpisodes []BanderaEpisode
@@ -416,32 +490,66 @@ func (f *FlexibleEpisodes) UnmarshalJSON(b []byte) error {
 		*f = nil
 		return nil
 	}
+	// 1. Масив об'єктів — канонічна форма.
 	var episodes []BanderaEpisode
 	if err := json.Unmarshal(b, &episodes); err == nil {
-		*f = episodes
+		*f = normaliseEpisodeOrder(episodes)
 		return nil
 	}
-	var num float64
-	if err := json.Unmarshal(b, &num); err == nil {
-		*f = nil
+
+	// 2. Масив чисел [1, 2, 3] — номер епізоду без об'єкта.
+	var nums []int
+	if err := json.Unmarshal(b, &nums); err == nil {
+		res := make([]BanderaEpisode, 0, len(nums))
+		for _, n := range nums {
+			res = append(res, BanderaEpisode{Number: FlexibleInt(n)})
+		}
+		*f = normaliseEpisodeOrder(res)
 		return nil
 	}
-	var str string
-	if err := json.Unmarshal(b, &str); err == nil {
-		*f = nil
-		return nil
-	}
-	var epMap map[string]BanderaEpisode
+
+	// 3. Об'єкт-ключ->епізод. Ключ = номер епізоду, значення = сам епізод.
+	var epMap map[string]json.RawMessage
 	if err := json.Unmarshal(b, &epMap); err == nil {
-		var res []BanderaEpisode
-		for _, ep := range epMap {
+		keys := make([]string, 0, len(epMap))
+		for k := range epMap {
+			keys = append(keys, k)
+		}
+		sortNumericStrings(keys)
+		res := make([]BanderaEpisode, 0, len(epMap))
+		for _, k := range keys {
+			var ep BanderaEpisode
+			if err := json.Unmarshal(epMap[k], &ep); err != nil {
+				// Значення, яке не є об'єктом епізоду, все одно дає корисний
+				// результат: номер береться з ключа.
+				ep = BanderaEpisode{}
+			}
+			if ep.Number == 0 {
+				if n, convErr := strconv.Atoi(strings.TrimSpace(k)); convErr == nil {
+					ep.Number = FlexibleInt(n)
+				}
+			}
 			res = append(res, ep)
 		}
-		*f = res
+		*f = normaliseEpisodeOrder(res)
 		return nil
 	}
+
+	// 4. Скаляр — епізодів немає, але це не помилка.
 	*f = nil
 	return nil
+}
+
+// normaliseEpisodeOrder сортує епізоди за номером, щоб порядок у details-відповіді
+// та в клієнті не залежав від порядку ключів у відповіді агрегатора.
+func normaliseEpisodeOrder(episodes []BanderaEpisode) []BanderaEpisode {
+	if len(episodes) < 2 {
+		return episodes
+	}
+	sort.SliceStable(episodes, func(i, j int) bool {
+		return episodes[i].Number.Int() < episodes[j].Number.Int()
+	})
+	return episodes
 }
 
 type BanderaEpisode struct {

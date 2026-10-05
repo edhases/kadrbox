@@ -310,6 +310,19 @@ func (c *BanderaClient) SearchWithMeta(ctx context.Context, query string, year i
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
 
+	// The aggregator answers HTTP 200 with {"ok":false,"error":"..."} for a
+	// failed search, so the status check above cannot catch it. Returning the
+	// struct as-is made every failure look like "zero hits": the caller
+	// recorded a successful health streak, the empty result was cached, and
+	// GetPopular then fired a SECOND upstream call on the fallback path. An
+	// explicit ok:false is an upstream failure and is reported as one.
+	if !searchResp.OK {
+		if msg := searchResp.Error.String(); msg != "" {
+			return nil, fmt.Errorf("search rejected by upstream: %s", msg)
+		}
+		return nil, fmt.Errorf("search rejected by upstream: ok=false")
+	}
+
 	return &searchResp, nil
 }
 
@@ -356,6 +369,17 @@ func (c *BanderaClient) GetContent(ctx context.Context, source string, ref json.
 	var contentResp BanderaContentResponse
 	if err := decodeLimitedJSON(resp.Body, &contentResp); err != nil {
 		return nil, fmt.Errorf("decode content response: %w", err)
+	}
+
+	// Same contract as /search: a failed lookup is HTTP 200 + ok:false, not a
+	// status code. Without this the caller treated a broken content lookup as
+	// "a title with no streams", which is the difference between an honest
+	// error and an empty player on the client's screen.
+	if !contentResp.OK {
+		if msg := contentResp.Error.String(); msg != "" {
+			return nil, fmt.Errorf("content rejected by upstream: %s", msg)
+		}
+		return nil, fmt.Errorf("content rejected by upstream: ok=false")
 	}
 
 	return &contentResp, nil

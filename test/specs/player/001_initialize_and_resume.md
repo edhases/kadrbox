@@ -24,4 +24,9 @@ Notes/Edge cases:
 - Use FakeAsync to ensure no timer side-effects interfere
 
 Fixture:
-- test/fixtures/parsers/uakino_sample.html (if repository resolves to streams via repository flow)
+- none required. This spec drives PlayerController with a synthetic
+  StreamSource list; it never resolves streams through the repository flow, so
+  it does not need an HTML fixture. The catalog-page fixture that does exist for
+  the uakino scraper is server/internal/provider/testdata/uakino_catalog.html,
+  and it is a catalog card list with no player or streams in it, so it cannot
+  serve this spec either.

@@ -59,6 +59,14 @@ func (h *ContentHandler) Search(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, "provider disabled", http.StatusForbidden)
 		case errors.Is(err, provider.ErrProviderNotFound):
 			writeAPIError(w, "unknown provider", http.StatusNotFound)
+		case errors.Is(err, provider.ErrProviderPanic):
+			// A recovered provider panic is a server fault, not an upstream
+			// fault. Falling through to writeUpstreamError would answer 503 +
+			// Retry-After and tell the client to retry something that fails the
+			// same way every time. Kept in step with writeProviderError, which
+			// already maps this sentinel to 500 for the other five endpoints.
+			log.Printf("[Content] provider panic during search: %v", err)
+			writeAPIError(w, "internal server error", http.StatusInternalServerError)
 		default:
 			writeUpstreamError(w, err, "failed to execute search")
 		}
