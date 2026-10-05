@@ -974,22 +974,63 @@ class KadrboxServerService {
   // Watch Party: WebSocket
   // ===========================================================================
 
-  /// Connect to Watch Party room via WebSocket
+  /// Obtain an admission ticket for a watch-party room.
+  ///
+  /// The socket handshake authenticates with a ticket, never with the account's
+  /// access token: browsers cannot set headers on a WebSocket upgrade, so the
+  /// ticket rides in the query string. The ticket is also the *only* source of
+  /// identity on that endpoint -- the hub reads the user id, the display name
+  /// and the room from the verified claims and from nowhere else.
+  ///
+  /// The previous client sent `user_id` and `user_name` as query parameters and
+  /// never asked for a ticket at all, so every server-hosted room was rejected
+  /// with 401 and silently fell back to the peer transport.
+  Future<String> issueWatchPartyTicket({
+    required String roomCode,
+    required bool isHost,
+    String? userName,
+  }) async {
+    if (!isAuthenticated) {
+      throw StateError(
+        'watch party on Kadrbox Server needs a signed-in account',
+      );
+    }
+    final url = '${AppConfig.serverApiUrl}/watch-party/tickets';
+    final res = await _withAuthRecovery(
+      () => _apiClient.postJson(url, data: {
+        'roomCode': roomCode,
+        'isHost': isHost,
+        // Null-aware so the key is absent rather than null: the server decodes
+        // into a plain string, and "absent" and "explicitly empty" are not the
+        // same thing to a Go decoder's zero value.
+        'userName': ?userName,
+      }),
+    );
+    final ticket = res['ticket'];
+    if (ticket is! String || ticket.isEmpty) {
+      throw const FormatException('server returned no watch party ticket');
+    }
+    return ticket;
+  }
+
+  /// Connect to a watch-party room over WebSocket.
+  ///
+  /// [ticket] must come from [issueWatchPartyTicket] for the same [roomCode]:
+  /// the hub compares the two and answers 403 `wrong_room` when they differ,
+  /// which is what stops a guest from reusing a ticket to enter another room.
   Future<WebSocket> connectWatchParty({
     required String roomCode,
-    required String userId,
-    required String userName,
+    required String ticket,
   }) async {
     final baseUrl = AppConfig.serverWsUrl;
     final uri = Uri.parse(baseUrl).replace(
-      queryParameters: {
-        'room': roomCode,
-        'user_id': userId,
-        'user_name': userName,
-      },
+      queryParameters: {'room': roomCode, 'ticket': ticket},
     );
 
-    Logger.i('Connecting to Watch Party WebSocket: $uri', tag: _tag);
+    Logger.i(
+      'Connecting to Watch Party WebSocket: base=$baseUrl url=$uri',
+      tag: _tag,
+    );
     final ws = await WebSocket.connect(uri.toString()).timeout(
       const Duration(seconds: 10),
       onTimeout: () {

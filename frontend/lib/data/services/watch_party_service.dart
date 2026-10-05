@@ -163,10 +163,19 @@ class _KadrboxServerBackend implements WatchPartyBackend {
     _isDisconnecting = false;
 
     try {
+      // The socket handshake is ticket-authenticated, so the ticket has to be
+      // fetched over authenticated HTTP first. `isHost` rides along because a
+      // host ticket is what wins the host election on the server; dropping it
+      // would leave the host to be chosen by arrival order.
+      final ticket = await _server.issueWatchPartyTicket(
+        roomCode: roomCode,
+        isHost: isHost,
+        userName: myName,
+      );
+
       _ws = await _server.connectWatchParty(
         roomCode: roomCode,
-        userId: myId,
-        userName: myName,
+        ticket: ticket,
       );
 
       _sub = _ws!.listen(
