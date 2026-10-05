@@ -486,10 +486,9 @@ class ServerBackedProvider extends ContentProvider {
     final providerIdFromJson = json['provider_id'] as String?;
     return MediaItem(
       id: url.isNotEmpty ? url : idVal,
-      providerId:
-          (providerIdFromJson != null && providerIdFromJson.isNotEmpty)
-              ? providerIdFromJson
-              : id,
+      providerId: (providerIdFromJson != null && providerIdFromJson.isNotEmpty)
+          ? providerIdFromJson
+          : id,
       title: json['title'] as String? ?? '',
       originalTitle: json['original_title'] as String?,
       posterUrl: json['poster_url'] as String?,

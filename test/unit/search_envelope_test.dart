@@ -227,64 +227,76 @@ void main() {
   });
 
   group('ServerBackedProvider real mapping', () {
-    test('preserves provider_id and id without overwriting them with aggregator defaults', () {
-      final entry = ProviderCatalogEntry.fromJson({
-        'id': 'bandera',
-        'name': 'Bandera',
-        'baseUrl': 'https://example.com',
-      });
-      final provider = ServerBackedProvider(entry);
+    test(
+      'preserves provider_id and id without overwriting them with aggregator defaults',
+      () {
+        final entry = ProviderCatalogEntry.fromJson({
+          'id': 'bandera',
+          'name': 'Bandera',
+          'baseUrl': 'https://example.com',
+        });
+        final provider = ServerBackedProvider(entry);
 
-      final item = provider.mapItemForTest({
-        'provider_id': 'uakino',
-        'id': 'abc',
-        'url': 'https://uakino.biz/item-123.html',
-        'title': 'Sample Title',
-        'type': 'movie',
-      });
+        final item = provider.mapItemForTest({
+          'provider_id': 'uakino',
+          'id': 'abc',
+          'url': 'https://uakino.biz/item-123.html',
+          'title': 'Sample Title',
+          'type': 'movie',
+        });
 
-      expect(item.providerId, 'uakino');
-      expect(item.id, 'https://uakino.biz/item-123.html');
-      expect(item.url, 'https://uakino.biz/item-123.html');
-      expect(item.uniqueId, 'uakino:https://uakino.biz/item-123.html');
-    });
+        expect(item.providerId, 'uakino');
+        expect(item.id, 'https://uakino.biz/item-123.html');
+        expect(item.url, 'https://uakino.biz/item-123.html');
+        expect(item.uniqueId, 'uakino:https://uakino.biz/item-123.html');
+      },
+    );
 
-    test('SearchEnvelope.fromJson with real mapping maps multi-provider items correctly', () {
-      final entry = ProviderCatalogEntry.fromJson({
-        'id': 'bandera',
-        'name': 'Bandera',
-        'baseUrl': 'https://example.com',
-      });
-      final provider = ServerBackedProvider(entry);
+    test(
+      'SearchEnvelope.fromJson with real mapping maps multi-provider items correctly',
+      () {
+        final entry = ProviderCatalogEntry.fromJson({
+          'id': 'bandera',
+          'name': 'Bandera',
+          'baseUrl': 'https://example.com',
+        });
+        final provider = ServerBackedProvider(entry);
 
-      final envelope = SearchEnvelope.fromJson({
-        'query': 'Dune',
-        'items': [
-          {
-            'provider_id': 'uakino',
-            'id': 'uakino-dune-1',
-            'url': 'https://uakino.biz/dune.html',
-            'title': 'Dune',
-            'score': 1.0,
-          },
-          {
-            'provider_id': 'eneyida',
-            'id': 'eneyida-dune-2',
-            'url': 'https://eneyida.tv/dune.html',
-            'title': 'Dune',
-            'score': 0.9,
-          },
-        ],
-      }, provider.mapItemForTest);
+        final envelope = SearchEnvelope.fromJson({
+          'query': 'Dune',
+          'items': [
+            {
+              'provider_id': 'uakino',
+              'id': 'uakino-dune-1',
+              'url': 'https://uakino.biz/dune.html',
+              'title': 'Dune',
+              'score': 1.0,
+            },
+            {
+              'provider_id': 'eneyida',
+              'id': 'eneyida-dune-2',
+              'url': 'https://eneyida.tv/dune.html',
+              'title': 'Dune',
+              'score': 0.9,
+            },
+          ],
+        }, provider.mapItemForTest);
 
-      expect(envelope.items.length, 2);
-      expect(envelope.items[0].item.providerId, 'uakino');
-      expect(envelope.items[0].item.id, 'https://uakino.biz/dune.html');
-      expect(envelope.items[0].item.uniqueId, 'uakino:https://uakino.biz/dune.html');
+        expect(envelope.items.length, 2);
+        expect(envelope.items[0].item.providerId, 'uakino');
+        expect(envelope.items[0].item.id, 'https://uakino.biz/dune.html');
+        expect(
+          envelope.items[0].item.uniqueId,
+          'uakino:https://uakino.biz/dune.html',
+        );
 
-      expect(envelope.items[1].item.providerId, 'eneyida');
-      expect(envelope.items[1].item.id, 'https://eneyida.tv/dune.html');
-      expect(envelope.items[1].item.uniqueId, 'eneyida:https://eneyida.tv/dune.html');
-    });
+        expect(envelope.items[1].item.providerId, 'eneyida');
+        expect(envelope.items[1].item.id, 'https://eneyida.tv/dune.html');
+        expect(
+          envelope.items[1].item.uniqueId,
+          'eneyida:https://eneyida.tv/dune.html',
+        );
+      },
+    );
   });
 }
