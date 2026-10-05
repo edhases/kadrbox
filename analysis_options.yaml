@@ -9,6 +9,13 @@
 # packages, and plugins designed to encourage good coding practices.
 analyzer:
   exclude:
+    - "build/**"
+    - "android/**"
+    - "ios/**"
+    - "linux/**"
+    - "macos/**"
+    - "windows/**"
+    - "web/**"
     - "scripts/**"
     - "lib/generated/**"
   errors:

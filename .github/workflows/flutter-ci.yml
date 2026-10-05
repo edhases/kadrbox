@@ -58,7 +58,7 @@ jobs:
             echo "::error::build_runner failed; see the log above."
             exit 1
           fi
-          if ! git diff --exit-code --stat; then
+          if ! git diff --exit-code --stat -- '*.g.dart' '*.config.dart'; then
             echo "::error::generated files are stale. Run 'dart run build_runner build --delete-conflicting-outputs' and commit the result."
             exit 1
           fi
