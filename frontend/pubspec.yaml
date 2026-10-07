@@ -88,7 +88,11 @@ dependencies:
   permission_handler: 11.3.1
   crypto: 3.0.7
 
-  http: any
+  # Was `any`, which lets pub resolve a new major with no review -- in an app that
+  # ships to a store, an unreviewed major bump is a binary change nobody chose.
+  # pubspec.lock is committed, so builds are already reproducible; this constraint
+  # is what keeps `pub upgrade` from moving the floor on its own.
+  http: ^1.6.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
