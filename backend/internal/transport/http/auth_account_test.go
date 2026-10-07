@@ -308,10 +308,19 @@ func TestResetPassword(t *testing.T) {
 
 	// The whole point of MarkPasswordResetUsed: a leaked reset link must stop
 	// working the moment it is redeemed.
+	//
+	// From a distinct source address, because these subtests are separate
+	// scenarios rather than one caller trying five times: reset-password is rate
+	// limited per caller, and reusing httptest's default address made this
+	// subtest see a 429 from its predecessors instead of the replay rejection it
+	// is about.
 	t.Run("a redeemed token cannot be replayed", func(t *testing.T) {
-		rr := postJSON(t, h.ResetPassword, "/api/v1/auth/reset-password", context.Background(),
-			map[string]string{"token": token, "password": "attacker-chosen-password"})
+		rr := postFromAddr(t, h.ResetPassword, "/api/v1/auth/reset-password",
+			context.Background(),
+			map[string]string{"token": token, "password": "attacker-chosen-password"},
+			"198.51.100.44:1")
 		wantStatus(t, rr, http.StatusBadRequest)
+		wantErrorBody(t, rr, "invalid or expired reset token")
 
 		stored, _ := users.GetUserByID(context.Background(), u.ID)
 		ok, _ := auth.ComparePasswordAndHash("brand-new-password", stored.PasswordHash)

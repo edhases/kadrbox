@@ -323,6 +323,10 @@ func TestCovResendVerificationNeverRevealsWhetherAnAccountExists(t *testing.T) {
 }
 
 func TestCovResendVerificationTellsAnAlreadyVerifiedUserNothingNew(t *testing.T) {
+	// This used to assert the opposite: that the body said "already verified".
+	// That was an enumeration oracle behind a 200 -- registered-and-verified
+	// answered differently from unknown, so the endpoint said which addresses
+	// exist. Now all three outcomes share one sentence.
 	t.Setenv("RESEND_API", "cov-resend-key")
 	t.Setenv("APP_URL", "https://app.example")
 	swapTransport(t, covSilentTransport{})
@@ -335,15 +339,26 @@ func TestCovResendVerificationTellsAnAlreadyVerifiedUserNothingNew(t *testing.T)
 	}
 	h := covAuth(users, sessions, email.NewService())
 
-	rec := httptest.NewRecorder()
-	h.ResendVerification(rec, covJSONRequest(t, http.MethodPost, "/api/v1/auth/resend-verification",
-		map[string]string{"email": "done@example.com"}))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200", rec.Code)
+	post := func(emailAddr string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ResendVerification(rec, covJSONRequest(t, http.MethodPost,
+			"/api/v1/auth/resend-verification", map[string]string{"email": emailAddr}))
+		return rec
 	}
-	if !strings.Contains(rec.Body.String(), "already verified") {
-		t.Errorf("body = %s, want the already-verified message", rec.Body.String())
+
+	verified := post("done@example.com")
+	unknown := post("nobody@example.com")
+
+	if verified.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", verified.Code)
+	}
+	if verified.Body.String() != unknown.Body.String() {
+		t.Errorf("a verified account and an unknown address answer differently, "+
+			"which leaks which addresses exist:\n  verified: %s\n  unknown:   %s",
+			verified.Body.String(), unknown.Body.String())
+	}
+	if strings.Contains(strings.ToLower(verified.Body.String()), "already verified") {
+		t.Errorf("body = %s, still states that the address is registered", verified.Body.String())
 	}
 	if len(users.verificationTokens) != 0 {
 		t.Error("a new token was minted for an already-verified account")

@@ -297,6 +297,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // in which the same token could be redeemed twice and discarded the delete
 // error, so a failed delete silently kept the old token valid.
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := h.loginLimiter.allowRefresh(r); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	var req RefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request payload", http.StatusBadRequest)
@@ -354,6 +359,11 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // VerifyEmail — POST /api/v1/auth/verify-email
 // Body: {"token": "..."}
 func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := h.loginLimiter.allowVerifyEmail(r); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	var body struct {
 		Token string `json:"token"`
 	}
@@ -382,8 +392,8 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 // ResendVerification — POST /api/v1/auth/resend-verification
 // Body: {"email": "..."}
 func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
-	if !h.emailSvc.IsConfigured() {
-		jsonError(w, "email service not configured", http.StatusServiceUnavailable)
+	if allowed, retryAfter := h.loginLimiter.allowMailRequest(r); !allowed {
+		rejectRateLimited(w, retryAfter)
 		return
 	}
 
@@ -395,19 +405,35 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Charged BEFORE the service check, unlike the guard above. A 503 because the
+	// mail vendor is down must not hand an attacker an unlimited supply of
+	// attempts to spend the moment it recovers. The budget protects an inbox, and
+	// the inbox is equally worth protecting while we cannot reach it.
+	recipient := normalizeEmail(body.Email)
+	if allowed, _ := h.loginLimiter.allowMailTo(recipient); !allowed {
+		log.Printf("[Auth] verification mail budget exhausted for %s", recipient)
+		respondGenericResend(w)
+		return
+	}
+
+	if !h.emailSvc.IsConfigured() {
+		jsonError(w, "email service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	user, err := h.userRepo.GetUserByEmail(r.Context(), body.Email)
 	if err != nil {
 		// Не розкриваємо що юзера не існує
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"message":"if the email exists, a new verification link has been sent"}`))
+		respondGenericResend(w)
 		return
 	}
 
 	if user.IsVerified {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"message":"email already verified"}`))
+		// Previously answered "email already verified" here while an unknown
+		// address got the generic sentence. Two different bodies for two
+		// different states is an enumeration oracle with a 200 status code, which
+		// is the hardest kind to notice in a log.
+		respondGenericResend(w)
 		return
 	}
 
@@ -432,6 +458,17 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"message":"verification email sent"}`))
+}
+
+// respondGenericResend answers every outcome of ResendVerification identically.
+//
+// One sentence for "sent", "already verified", "no such account" and "mail
+// budget exhausted". Any difference between them is a statement about whether an
+// address is registered, which is the one thing this endpoint must not say.
+func respondGenericResend(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"message":"if the email exists, a new verification link has been sent"}`))
 }
 
 // UpdateProfile — PUT /api/v1/auth/profile
@@ -553,11 +590,33 @@ func (h *AuthHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 // ForgotPassword — POST /api/v1/auth/forgot-password
 func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := h.loginLimiter.allowMailRequest(r); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	var req struct {
 		Email string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" {
 		jsonError(w, "email is required", http.StatusBadRequest)
+		return
+	}
+
+	// The per-inbox budget, not a per-IP one. This endpoint answers 200 for
+	// unknown and known addresses alike -- that is deliberate, it removes the
+	// enumeration oracle -- so the rate limit is the only thing standing between
+	// a caller and using somebody else's inbox as a mail cannon. A per-IP limit
+	// does not: the abuse is many addresses and one victim.
+	recipient := normalizeEmail(req.Email)
+	if allowed, _ := h.loginLimiter.allowMailTo(recipient); !allowed {
+		// Answered with the same generic body as the success case. A 429 here
+		// would turn the limiter itself into an oracle for "this inbox has been
+		// asked three times already", which is a smaller leak but still a leak.
+		log.Printf("[Auth] password reset mail budget exhausted for %s", recipient)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"if the email exists, a password reset link has been sent"}`))
 		return
 	}
 
@@ -579,6 +638,11 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 
 // ResetPassword — POST /api/v1/auth/reset-password
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := h.loginLimiter.allowResetPassword(r); !allowed {
+		rejectRateLimited(w, retryAfter)
+		return
+	}
+
 	var req struct {
 		Token    string `json:"token"`
 		Password string `json:"password"`

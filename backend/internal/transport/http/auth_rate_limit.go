@@ -44,6 +44,44 @@ const (
 
 	// limiterCleanupInterval bounds how often the maps are swept.
 	limiterCleanupInterval = 10 * time.Minute
+
+	// The endpoints below all cost something an attacker can repeat for free, and
+	// the router's shared 30/min per IP budget is far too generous for any of
+	// them.
+
+	// mailAttemptsPerWindow bounds mail-sending requests per source address.
+	// Covers forgot-password and resend-verification.
+	mailAttemptsPerWindow = 5
+	mailWindow            = time.Minute
+
+	// verifyAttemptsPerWindow bounds email verification attempts. No mail is sent
+	// here, but each attempt is a database lookup keyed by a secret token.
+	verifyAttemptsPerWindow = 10
+	verifyWindow            = time.Minute
+
+	// resetAttemptsPerWindow bounds confirmed reset attempts.
+	resetAttemptsPerWindow = 5
+	resetWindow            = time.Minute
+
+	// refreshAttemptsPerWindow bounds refresh exchanges per source address.
+	// Deliberately generous: a legitimate client refreshes on a timer, often
+	// several devices per household, and a hard limit here would log everyone
+	// out. Its job is to stop a hammered endpoint, not to stop a user.
+	refreshAttemptsPerWindow = 30
+	refreshWindow            = time.Minute
+
+	// mailAttemptsPerRecipient bounds how much mail ONE inbox can be made to
+	// send per window.
+	//
+	// This is the only limit that stops email bombing. A per-IP limit does not:
+	// the abuse is "many addresses, one victim", so a botnet gets one budget per
+	// bot and the victim's inbox pays for all of them.
+	//
+	// Shared by every endpoint that sends to the address -- forgot-password and
+	// resend-verification -- so alternating between them does not buy a second
+	// budget for the same inbox.
+	mailAttemptsPerRecipient = 3
+	mailRecipientWindow      = 10 * time.Minute
 )
 
 type attemptWindow struct {
@@ -66,15 +104,29 @@ type authRateLimiter struct {
 	registerByIP map[string]*attemptWindow
 	accounts     map[string]*accountFailures
 
+	// Keyed by normalised address, not by caller: the budget belongs to the
+	// inbox, not to whoever is asking.
+	mailByRecipient map[string]*attemptWindow
+
+	mailByIP    map[string]*attemptWindow
+	verifyByIP  map[string]*attemptWindow
+	resetByIP   map[string]*attemptWindow
+	refreshByIP map[string]*attemptWindow
+
 	lastSweep time.Time
 }
 
 func newAuthRateLimiter() *authRateLimiter {
 	return &authRateLimiter{
-		loginByIP:    map[string]*attemptWindow{},
-		registerByIP: map[string]*attemptWindow{},
-		accounts:     map[string]*accountFailures{},
-		lastSweep:    time.Now(),
+		loginByIP:       map[string]*attemptWindow{},
+		registerByIP:    map[string]*attemptWindow{},
+		accounts:        map[string]*accountFailures{},
+		mailByRecipient: map[string]*attemptWindow{},
+		mailByIP:        map[string]*attemptWindow{},
+		verifyByIP:      map[string]*attemptWindow{},
+		resetByIP:       map[string]*attemptWindow{},
+		refreshByIP:     map[string]*attemptWindow{},
+		lastSweep:       time.Now(),
 	}
 }
 
@@ -104,6 +156,55 @@ func (l *authRateLimiter) allowLogin(r *http.Request) (bool, time.Duration) {
 // allowRegister reports whether one more registration from this caller is allowed.
 func (l *authRateLimiter) allowRegister(r *http.Request) (bool, time.Duration) {
 	return l.allowWindow(&l.registerByIP, clientKey(r), registerAttemptsPerWindow, registerWindow)
+}
+
+// allowMailRequest reports whether one more message-sending request is allowed
+// from this caller: forgot-password or resend-verification.
+//
+// Shared by both, so alternating between them does not buy a second per-caller
+// budget. The per-inbox budget is [allowMailTo], and it is the one that
+// actually bounds the damage.
+func (l *authRateLimiter) allowMailRequest(r *http.Request) (bool, time.Duration) {
+	return l.allowWindow(&l.mailByIP, clientKey(r), mailAttemptsPerWindow, mailWindow)
+}
+
+// allowVerifyEmail reports whether one more verification attempt is allowed.
+func (l *authRateLimiter) allowVerifyEmail(r *http.Request) (bool, time.Duration) {
+	return l.allowWindow(&l.verifyByIP, clientKey(r), verifyAttemptsPerWindow, verifyWindow)
+}
+
+// allowResetPassword reports whether one more reset confirmation is allowed.
+func (l *authRateLimiter) allowResetPassword(r *http.Request) (bool, time.Duration) {
+	return l.allowWindow(&l.resetByIP, clientKey(r), resetAttemptsPerWindow, resetWindow)
+}
+
+// allowRefresh reports whether one more token refresh is allowed.
+//
+// Generous on purpose: this sits on the happy path of every signed-in client,
+// so throttling here trades a real user being logged out against a marginal
+// reduction in load.
+func (l *authRateLimiter) allowRefresh(r *http.Request) (bool, time.Duration) {
+	return l.allowWindow(&l.refreshByIP, clientKey(r), refreshAttemptsPerWindow, refreshWindow)
+}
+
+// allowMailTo reports whether one more message may be sent to this address.
+//
+// The address is normalised HERE rather than trusted to the caller. A budget
+// keyed by a caller-supplied string is one `ToUpper` away from being free, and
+// the failure is silent: every address simply gets its own allowance. The
+// handler already has a normaliser, so this costs nothing and cannot be got
+// wrong by the next caller.
+func (l *authRateLimiter) allowMailTo(email string) (bool, time.Duration) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return true, 0
+	}
+	return l.allowWindow(
+		&l.mailByRecipient,
+		email,
+		mailAttemptsPerRecipient,
+		mailRecipientWindow,
+	)
 }
 
 func (l *authRateLimiter) allowWindow(
@@ -205,6 +306,19 @@ func (l *authRateLimiter) sweepLocked() {
 	for key, entry := range l.registerByIP {
 		if now.After(entry.expiresAt) {
 			delete(l.registerByIP, key)
+		}
+	}
+	for _, bucket := range []map[string]*attemptWindow{
+		l.mailByIP,
+		l.verifyByIP,
+		l.resetByIP,
+		l.refreshByIP,
+		l.mailByRecipient,
+	} {
+		for key, entry := range bucket {
+			if now.After(entry.expiresAt) {
+				delete(bucket, key)
+			}
 		}
 	}
 	for key, entry := range l.accounts {
