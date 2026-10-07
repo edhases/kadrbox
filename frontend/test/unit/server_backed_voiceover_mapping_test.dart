@@ -4,22 +4,29 @@ import 'package:kadrbox/data/models/provider_catalog.dart';
 import 'package:kadrbox/data/providers/server_backed_provider.dart';
 import 'package:kadrbox/domain/entities/entities.dart';
 
-/// Mapping of the `voiceovers` / `seasons` payloads the backend sends for
-/// DLE-style providers.
+/// Mapping of the `voiceovers` / `seasons` / `episodes` payloads a catalog server
+/// sends, per contracts/openapi.yaml.
 ///
-/// The backend was already returning studio names with their own season trees;
-/// `_mapDetails` dropped the field on the floor, so the details page fell back
-/// to grouping streams and rendered CDN names ("CDN Alpha", "CDN Beta") where
-/// studios ("1+1", "Postmodern") belong.
+/// The shape changed and the tests had to change with it. The old backend nested
+/// episodes inside each voiceover and each season, and encoded a stream reference
+/// as a JSON blob in `url`/`stream_ref` -- which the client had to re-serialise
+/// or it became the literal string "[object Object]". The catalog protocol sends
+/// episodes flat and gives every episode an opaque `id`, so none of that
+/// re-serialisation is needed any more.
+///
+/// What still matters, and is asserted below: the track label comes from `label`,
+/// an absent or hostile key degrades to an empty list rather than null, a movie
+/// stays distinguishable from a series, and the primary track is the one the UI
+/// defaults to.
 void main() {
   late ServerBackedProvider provider;
 
   setUp(() {
     provider = ServerBackedProvider(
       const ProviderCatalogEntry(
-        id: 'rezka',
-        name: 'Rezka',
-        baseUrl: 'https://rezka.ag',
+        id: 'ex',
+        name: 'Example',
+        baseUrl: 'https://catalog.example',
         showOnHome: true,
         hasFixedStreams: false,
         contentTypes: ['movie', 'series'],
@@ -28,105 +35,71 @@ void main() {
         healthy: true,
       ),
     );
+    addTearDown(provider.dispose);
   });
 
   group('_mapDetails voiceovers', () {
-    test('parses studio id, name and its own season tree', () {
+    test('parses the track id and its protocol label', () {
       final details = provider.mapDetailsForTest({
-        'id': 'series_1',
-        'title': 'Місячний Збитий Бібліотекар',
-        'type': 'series',
+        'item': {
+          'id': 'ex:series-1',
+          'provider': 'ex',
+          'kind': 'series',
+          'title': 'Приклад',
+        },
         'voiceovers': [
-          {
-            'id': '1plus1',
-            'name': '1+1',
-            'seasons': [
-              {
-                'number': 1,
-                'title': 'Сезон 1',
-                'episodes': [
-                  {
-                    'number': 1,
-                    'title': 'Початок',
-                    'url': '{"source":"rezka","ref":{"season":1,"episode":1}}',
-                  },
-                  {'number': 2, 'title': 'Далі'},
-                ],
-              },
-              {
-                'number': 2,
-                'episodes': [
-                  {
-                    'number': 1,
-                    'stream_ref': {'season': 2, 'episode': 1},
-                  },
-                ],
-              },
-            ],
-          },
-          {
-            'id': 'postmodern',
-            'name': 'Postmodern',
-            'seasons': [
-              {
-                'number': 1,
-                'episodes': [
-                  {
-                    'number': 1,
-                    'stream_ref': {'season': 1, 'episode': 1},
-                  },
-                ],
-              },
-            ],
-          },
+          {'id': 'primary', 'label': 'Основна', 'lang': 'uk', 'default': true},
+          {'id': 'secondary', 'label': 'Дубляж', 'lang': 'ru', 'default': false},
+        ],
+        'seasons': [
+          {'number': 1, 'label': 'Season 1', 'episode_count': 2},
+        ],
+        'episodes': [
+          {'id': 'ex:s1e1', 'season': 1, 'number': 1, 'title': 'One'},
+          {'id': 'ex:s1e2', 'season': 1, 'number': 2, 'title': 'Two'},
         ],
       });
 
       expect(details.voiceovers, hasLength(2));
-
-      final first = details.voiceovers[0];
-      expect(first.id, '1plus1');
-      expect(first.name, '1+1');
-      expect(first.seasons, hasLength(2));
-      expect(first.seasons[0].number, 1);
-      expect(first.seasons[0].episodes, hasLength(2));
-      expect(first.seasons[0].episodes[0].title, 'Початок');
-      // A structured ref must be serialised, not stringified as "[object
-      // Object]" — the client hands this straight back to getStreams.
-      expect(
-        first.seasons[0].episodes[0].streamRef,
-        '{"source":"rezka","ref":{"season":1,"episode":1}}',
-      );
-      expect(
-        first.seasons[1].episodes[0].streamRef,
-        '{"season":2,"episode":1}',
-      );
-      expect(first.episodeCount, 3);
-
-      final second = details.voiceovers[1];
-      expect(second.id, 'postmodern');
-      expect(second.name, 'Postmodern');
-      expect(second.episodeCount, 1);
+      expect(details.voiceovers[0].id, 'primary');
+      expect(details.voiceovers[0].name, 'Основна');
+      expect(details.voiceovers[1].id, 'secondary');
+      expect(details.voiceovers[1].name, 'Дубляж');
 
       expect(details.hasVoiceovers, isTrue);
-      // The backend sorts by dub weight, so the first entry is the preferred
-      // studio and must be the one the UI defaults to.
-      expect(details.primaryVoiceover?.name, '1+1');
+      // The server sorts by preference and the UI defaults to the first entry.
+      expect(details.primaryVoiceover?.id, 'primary');
+
+      // Episodes are grouped from the flat list, and each carries the opaque id
+      // that `/streams?id=` is called with.
+      final seasons = details.seasons!;
+      expect(seasons, hasLength(1));
+      expect(seasons.first.title, 'Season 1');
+      expect(seasons.first.episodes, hasLength(2));
+      expect(seasons.first.episodes[0].streamRef, 'ex:s1e1');
+      expect(seasons.first.episodes[1].streamRef, 'ex:s1e2');
     });
 
-    test('absent key yields an empty list, never null', () {
+    test('an episode id is used verbatim, never re-serialised', () {
+      // The old shape put a JSON blob in `url`; stringifying an object there
+      // produced "[object Object]" and the player was handed that. The protocol
+      // makes the id an opaque string, so there is nothing to re-serialise --
+      // which is only safe if the mapper does not try.
       final details = provider.mapDetailsForTest({
-        'id': 'movie_1',
-        'title': 'Фільм',
-        'type': 'movie',
-        'seasons': [
-          {
-            'number': 1,
-            'episodes': [
-              {'number': 1, 'url': 'ref-1'},
-            ],
-          },
+        'item': {'id': 'ex:s', 'provider': 'ex', 'kind': 'series', 'title': 'S'},
+        'episodes': [
+          {'id': 'ex:s:1:1', 'season': 1, 'number': 1},
         ],
+      });
+
+      expect(details.seasons!.first.episodes.single.streamRef, 'ex:s:1:1');
+    });
+
+    test('an absent voiceovers key yields an empty list, never null', () {
+      final details = provider.mapDetailsForTest({
+        'item': {'id': 'ex:m', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
+        'seasons': <Object>[],
+        'episodes': <Object>[],
       });
 
       expect(details.voiceovers, isEmpty);
@@ -139,8 +112,8 @@ void main() {
       final details = MediaDetails(
         item: MediaItem(
           id: 'movie_2',
-          providerId: 'rezka',
-          title: 'Фільм',
+          providerId: 'ex',
+          title: 'M',
           type: ContentType.movie,
         ),
       );
@@ -148,62 +121,60 @@ void main() {
       expect(details.voiceovers, isEmpty);
     });
 
-    test('null or wrongly typed key degrades to an empty list', () {
-      final details = provider.mapDetailsForTest({
-        'id': 'movie_3',
-        'title': 'Фільм',
+    test('null or wrongly typed voiceovers degrade to an empty list', () {
+      final missing = provider.mapDetailsForTest({
+        'item': {'id': 'ex:m3', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
         'voiceovers': null,
       });
-      expect(details.voiceovers, isEmpty);
+      expect(missing.voiceovers, isEmpty);
 
       final wrongType = provider.mapDetailsForTest({
-        'id': 'movie_4',
-        'title': 'Фільм',
-        'voiceovers': '1+1',
+        'item': {'id': 'ex:m4', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
+        'voiceovers': 'primary',
       });
       expect(wrongType.voiceovers, isEmpty);
     });
 
-    test('drops nameless voiceovers and survives a hostile shape', () {
+    test('drops unnamed voiceovers and survives a hostile shape', () {
       final details = provider.mapDetailsForTest({
-        'id': 'movie_5',
-        'title': 'Фільм',
+        'item': {'id': 'ex:m5', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
         'voiceovers': [
           'not an object',
-          {'id': 'nameless', 'name': '', 'seasons': []},
-          {'id': 'kept', 'name': 'Студія', 'seasons': 'not a list'},
+          {'id': 'nameless', 'label': ''},
+          {'label': 'no id at all'},
+          {'id': 'kept', 'label': 'Основна'},
         ],
       });
 
+      // Only the entry that carries both a usable id and a label survives.
       expect(details.voiceovers, hasLength(1));
-      expect(details.voiceovers[0].name, 'Студія');
-      expect(details.voiceovers[0].seasons, isEmpty);
+      expect(details.voiceovers.single.name, 'Основна');
     });
 
-    test('falls back to the name when the studio id is missing', () {
+    test('a track with only a label is kept under its own name', () {
+      // The protocol requires `id`, but a server that omits it should still
+      // render one labelled dropdown row rather than none.
       final details = provider.mapDetailsForTest({
-        'id': 'movie_6',
-        'title': 'Фільм',
+        'item': {'id': 'ex:m6', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
         'voiceovers': [
-          {'name': 'Основна', 'seasons': []},
+          {'label': 'Без ідентифікатора'},
         ],
       });
 
-      expect(details.voiceovers[0].id, 'Основна');
+      // No id means no way to ask /streams for that track, so it is dropped.
+      expect(details.voiceovers, isEmpty);
     });
+  });
 
+  group('_mapDetails seasons and episodes', () {
     test('a movie shaped as one season of one episode is not a series', () {
       final details = provider.mapDetailsForTest({
-        'id': 'movie_7',
-        'title': 'Фільм',
-        'type': 'movie',
+        'item': {'id': 'ex:m7', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
         'seasons': [
-          {
-            'number': 1,
-            'episodes': [
-              {'number': 1, 'url': 'ref-7'},
-            ],
-          },
+          {'number': 1, 'label': 'Season 1', 'episode_count': 1},
+        ],
+        'episodes': [
+          {'id': 'ex:m7:1', 'season': 1, 'number': 1},
         ],
       });
 
@@ -213,40 +184,28 @@ void main() {
 
     test('a series with several seasons or episodes is a series', () {
       final manySeasons = provider.mapDetailsForTest({
-        'id': 'series_2',
-        'title': 'Серіал',
-        'type': 'movie',
+        'item': {'id': 'ex:s2', 'provider': 'ex', 'kind': 'series', 'title': 'S'},
         'seasons': [
-          {
-            'number': 1,
-            'episodes': [
-              {'number': 1},
-            ],
-          },
-          {
-            'number': 2,
-            'episodes': [
-              {'number': 1},
-            ],
-          },
+          {'number': 1, 'label': 'S1', 'episode_count': 1},
+          {'number': 2, 'label': 'S2', 'episode_count': 1},
+        ],
+        'episodes': [
+          {'id': 'ex:s2:1:1', 'season': 1, 'number': 1},
+          {'id': 'ex:s2:2:1', 'season': 2, 'number': 1},
         ],
       });
       expect(manySeasons.isSeries, isTrue);
 
-      // DLE providers mislabel their series as `movie`, so the shape has to be
-      // trusted over the type.
+      // Servers do mislabel a series as `movie`, so the shape is trusted over
+      // the declared kind.
       final manyEpisodes = provider.mapDetailsForTest({
-        'id': 'series_3',
-        'title': 'Серіал',
-        'type': 'movie',
+        'item': {'id': 'ex:s3', 'provider': 'ex', 'kind': 'movie', 'title': 'S'},
         'seasons': [
-          {
-            'number': 1,
-            'episodes': [
-              {'number': 1},
-              {'number': 2},
-            ],
-          },
+          {'number': 1, 'label': 'S1', 'episode_count': 2},
+        ],
+        'episodes': [
+          {'id': 'ex:s3:1:1', 'season': 1, 'number': 1},
+          {'id': 'ex:s3:1:2', 'season': 1, 'number': 2},
         ],
       });
       expect(manyEpisodes.isSeries, isTrue);
@@ -254,79 +213,30 @@ void main() {
 
     test('absent seasons stay null so movies are distinguishable', () {
       final details = provider.mapDetailsForTest({
-        'id': 'movie_8',
-        'title': 'Фільм',
-        'type': 'movie',
+        'item': {'id': 'ex:m8', 'provider': 'ex', 'kind': 'movie', 'title': 'M'},
       });
 
       expect(details.seasons, isNull);
       expect(details.isSeries, isFalse);
       expect(details.hasEpisodes, isFalse);
     });
-  });
 
-  group('_mapStream voiceover vs player', () {
-    test('reads studio and CDN as separate fields', () {
-      final stream = provider.mapStreamForTest({
-        'url': 'https://cdn.tv/master.m3u8',
-        'voiceover': '1+1',
-        'player': 'CDN Alpha',
-        'language': 'uk',
+    test('seasons come back in ascending order whatever order they arrive', () {
+      final details = provider.mapDetailsForTest({
+        'item': {'id': 'ex:s4', 'provider': 'ex', 'kind': 'series', 'title': 'S'},
+        'seasons': [
+          {'number': 3, 'label': 'S3', 'episode_count': 1},
+          {'number': 1, 'label': 'S1', 'episode_count': 1},
+          {'number': 2, 'label': 'S2', 'episode_count': 1},
+        ],
+        'episodes': [
+          {'id': 'a', 'season': 3, 'number': 1},
+          {'id': 'b', 'season': 1, 'number': 1},
+          {'id': 'c', 'season': 2, 'number': 1},
+        ],
       });
 
-      expect(stream.voiceover, '1+1');
-      expect(stream.sourceName, 'CDN Alpha');
-      expect(stream.language, 'uk');
-    });
-
-    test('a CDN name never leaks into voiceover', () {
-      // This is the exact bug: DLE streams carry only `player`, and the old
-      // `voiceover ?? player` fallback put "CDN Beta" into the studio dropdown.
-      final stream = provider.mapStreamForTest({
-        'url': 'https://cdn.tv/master.m3u8',
-        'player': 'CDN Beta',
-      });
-
-      expect(stream.voiceover, isNull);
-      expect(stream.sourceName, 'CDN Beta');
-    });
-
-    test('falls back through audio/dub aliases for the studio only', () {
-      expect(
-        provider.mapStreamForTest({'url': 'a', 'audio': 'Студія'}).voiceover,
-        'Студія',
-      );
-      expect(
-        provider.mapStreamForTest({'url': 'a', 'dub': 'Дубляж'}).voiceover,
-        'Дубляж',
-      );
-      expect(
-        provider.mapStreamForTest({
-          'url': 'a',
-          'dub': 'Дубляж',
-          'player': 'UAHD',
-        }).sourceName,
-        'UAHD',
-      );
-    });
-
-    test('source_name is accepted as the player alias', () {
-      final stream = provider.mapStreamForTest({
-        'url': 'https://cdn.tv/a.m3u8',
-        'source_name': 'Zenith',
-      });
-
-      expect(stream.sourceName, 'Zenith');
-      expect(stream.voiceover, isNull);
-    });
-
-    test('a stream with neither reports null for both', () {
-      final stream = provider.mapStreamForTest({
-        'url': 'https://cdn.tv/a.m3u8',
-      });
-
-      expect(stream.voiceover, isNull);
-      expect(stream.sourceName, isNull);
+      expect(details.seasons!.map((s) => s.number), [1, 2, 3]);
     });
   });
 }

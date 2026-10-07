@@ -125,6 +125,83 @@ class CatalogClient {
     return '$scheme://$authority${uri.path}';
   }
 
+  /// `GET /search`.
+  ///
+  /// [q] is optional on purpose: an empty query is the protocol's browse
+  /// listing, which is what the home rows are built from. [page] is the opaque
+  /// continuation token from a previous response and must never be synthesised
+  /// from a page number.
+  Future<Map<String, dynamic>> search({
+    String? q,
+    String? page,
+    String? kind,
+    String? voiceover,
+    int? limit,
+  }) => _getJson(
+    '/search',
+    query: {
+      'q': ?q,
+      'page': ?page,
+      'kind': ?kind,
+      'voiceover': ?voiceover,
+      'limit': ?limit,
+    },
+    what: 'пошук',
+  );
+
+  /// `GET /details` for one item id from `/search`.
+  Future<Map<String, dynamic>> details({
+    required String id,
+    String? voiceover,
+  }) => _getJson(
+    '/details',
+    query: {'id': id, 'voiceover': ?voiceover},
+    what: 'деталі',
+  );
+
+  /// `GET /streams` for an item id, or an episode id from `/details`.
+  ///
+  /// Never cached by the client: these URLs are signed and expire.
+  Future<Map<String, dynamic>> streams({
+    required String id,
+    int? season,
+    int? episode,
+    String? voiceover,
+  }) => _getJson(
+    '/streams',
+    query: {
+      'id': id,
+      'season': ?season,
+      'episode': ?episode,
+      'voiceover': ?voiceover,
+    },
+    what: 'потоки',
+  );
+
+  /// Shared GET that turns a non-200 into an actionable message.
+  ///
+  /// The content endpoints answer 404 legitimately -- "no such item", "nothing
+  /// playable right now" -- so the message names what was being asked for
+  /// instead of claiming the server is not a catalog at all.
+  Future<Map<String, dynamic>> _getJson(
+    String path, {
+    required Map<String, dynamic> query,
+    required String what,
+  }) async {
+    final response = await _get(path, query);
+    final code = response.statusCode ?? 0;
+    if (code == 404) {
+      throw CatalogException(
+        'Сервер каталогу не знає $what за цим запитом',
+        statusCode: 404,
+      );
+    }
+    if (code != 200) {
+      throw CatalogException(_statusMessage(code), statusCode: code);
+    }
+    return _asMap(response.data);
+  }
+
   Future<Response<dynamic>> _get(String path, [Map<String, dynamic>? query]) async {
     try {
       return await _dio.get<dynamic>(
@@ -132,7 +209,9 @@ class CatalogClient {
         queryParameters: query,
       );
     } on DioException catch (e) {
-      throw CatalogException(_transportMessage(e));
+      // Marked as transport so the caller can suppress a repeat: a catalog that
+      // is unreachable will still be unreachable thirty seconds later.
+      throw CatalogException(_transportMessage(e), isTransport: true);
     }
   }
 
@@ -201,9 +280,27 @@ class CatalogStatus {
 
 /// A failure with a reason already phrased for the user.
 class CatalogException implements Exception {
-  const CatalogException(this.message);
+  const CatalogException(this.message, {this.statusCode, this.isTransport = false});
 
   final String message;
+
+  /// The HTTP status the catalog answered with, or null when the request never
+  /// produced one.
+  final int? statusCode;
+
+  /// True when the request failed before or during transport -- DNS, TCP, TLS,
+  /// a timeout -- rather than being answered.
+  final bool isTransport;
+
+  /// Whether the same request is worth repeating in a moment.
+  ///
+  /// A catalog that is down, timing out or answering 5xx will very likely still
+  /// be in that state on the next tap, so the caller suppresses the repeat. A 404
+  /// or a 403 is the caller's own doing and must never be suppressed: silently
+  /// serving nothing because the user asked for something that does not exist
+  /// reads as an empty catalogue, not a mistake.
+  bool get isRetryable =>
+      isTransport || (statusCode != null && statusCode! >= 500);
 
   @override
   String toString() => message;

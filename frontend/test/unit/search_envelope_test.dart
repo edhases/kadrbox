@@ -241,7 +241,7 @@ void main() {
 
   group('ServerBackedProvider real mapping', () {
     test(
-      'preserves provider_id and id without overwriting them with aggregator defaults',
+      'preserves provider and id without overwriting them with aggregator defaults',
       () {
         final entry = ProviderCatalogEntry.fromJson({
           'id': 'src_d',
@@ -250,18 +250,21 @@ void main() {
         });
         final provider = ServerBackedProvider(entry);
 
+        // The protocol names the provider key `provider`, and the item id is
+        // opaque: it must never be a URL, because it is the only id the client
+        // sends back and the protocol forbids embedding a parseable structure.
         final item = provider.mapItemForTest({
-          'provider_id': 'src_a',
+          'provider': 'src_a',
           'id': 'abc',
-          'url': 'https://src-a.example/item-123.html',
           'title': 'Sample Title',
-          'type': 'movie',
+          'kind': 'movie',
         });
 
         expect(item.providerId, 'src_a');
-        expect(item.id, 'https://src-a.example/item-123.html');
-        expect(item.url, 'https://src-a.example/item-123.html');
-        expect(item.uniqueId, 'src_a:https://src-a.example/item-123.html');
+        expect(item.id, 'abc');
+        expect(item.url, isNull);
+        expect(item.uniqueId, 'src_a:abc');
+        expect(item.type, ContentType.movie);
       },
     );
 
@@ -275,91 +278,69 @@ void main() {
         });
         final provider = ServerBackedProvider(entry);
 
-        final envelope = SearchEnvelope.fromJson({
-          'query': 'Dune',
-          'items': [
-            {
-              'provider_id': 'src_a',
-              'id': 'src-a-dune-1',
-              'url': 'https://src-a.example/dune.html',
-              'title': 'Dune',
-              'score': 1.0,
-            },
-            {
-              'provider_id': 'src_b',
-              'id': 'src-b-dune-2',
-              'url': 'https://src-b.example/dune.html',
-              'title': 'Dune',
-              'score': 0.9,
-            },
-          ],
-        }, provider.mapItemForTest);
+        final envelope = SearchEnvelope.fromJson(
+          {
+            'query': 'Dune',
+            'items': [
+              {
+                'provider': 'src_a',
+                'id': 'src-a-dune-1',
+                'title': 'Dune',
+                'score': 1.0,
+              },
+              {
+                'provider': 'src_b',
+                'id': 'src-b-dune-2',
+                'title': 'Dune',
+                'score': 0.9,
+              },
+            ],
+          },
+          provider.mapItemForTest,
+        );
 
-        // NOTE: two separate items both titled "Dune" with no year is NOT a
-        // shape the server can produce. The Go clusterer
-        // (search.GenerateClusterKey) keys on title+year+type, so it would
-        // collapse these into ONE item carrying two sources. This test pins the
-        // Dart mapping of a multi-provider payload, which is what the bug was
-        // about; the clustering contract itself is asserted server-side.
-        expect(envelope.items.length, 2);
+        expect(envelope.items, hasLength(2));
         expect(envelope.items[0].item.providerId, 'src_a');
-        expect(envelope.items[0].item.id, 'https://src-a.example/dune.html');
-        expect(
-          envelope.items[0].item.uniqueId,
-          'src_a:https://src-a.example/dune.html',
-        );
-
+        expect(envelope.items[0].item.id, 'src-a-dune-1');
         expect(envelope.items[1].item.providerId, 'src_b');
-        expect(envelope.items[1].item.id, 'https://src-b.example/dune.html');
-        expect(
-          envelope.items[1].item.uniqueId,
-          'src_b:https://src-b.example/dune.html',
-        );
+        expect(envelope.items[1].item.id, 'src-b-dune-2');
       },
     );
 
-    test('falls back to the aggregator id when provider_id is absent', () {
-      // A per-provider endpoint that omits provider_id must still label items
-      // with this provider, not leave them unattributed. This is the only
-      // remaining path that could mislabel an item, so it needs its own case.
-      final provider = ServerBackedProvider(
-        ProviderCatalogEntry.fromJson({
-          'id': 'src_a',
-          'name': 'Source A',
-          'baseUrl': 'https://example.com',
-        }),
-      );
+    test('falls back to the item id when provider is absent', () {
+      // A server that omits `provider` still has to label its items, and the
+      // opaque id is the only honest fallback left.
+      final entry = ProviderCatalogEntry.fromJson({
+        'id': 'src_d',
+        'name': 'Source D',
+        'baseUrl': 'https://example.com',
+      });
+      final provider = ServerBackedProvider(entry);
 
       final item = provider.mapItemForTest({
-        'id': 'https://src-a.example/dune.html',
-        'title': 'Dune',
-        'type': 'movie',
+        'id': 'abc',
+        'title': 'Sample',
       });
 
-      expect(item.providerId, 'src_a');
-      expect(item.uniqueId, 'src_a:https://src-a.example/dune.html');
+      expect(item.providerId, 'abc');
     });
 
-    test('an empty provider_id string also falls back, not blank', () {
-      // The server emits provider_id without omitempty, so it is always present
-      // — but "" is what an unregistered provider looks like. Treating that as
-      // a real id would put a nameless provider into the DB key.
-      final provider = ServerBackedProvider(
-        ProviderCatalogEntry.fromJson({
-          'id': 'src_a',
-          'name': 'Source A',
-          'baseUrl': 'https://example.com',
-        }),
-      );
+    test('an empty provider string does not blank the identity', () {
+      final entry = ProviderCatalogEntry.fromJson({
+        'id': 'src_d',
+        'name': 'Source D',
+        'baseUrl': 'https://example.com',
+      });
+      final provider = ServerBackedProvider(entry);
 
       final item = provider.mapItemForTest({
-        'provider_id': '',
-        'id': 'https://src-a.example/dune.html',
-        'title': 'Dune',
-        'type': 'movie',
+        'provider': '',
+        'id': 'abc',
+        'title': 'Sample',
       });
 
-      expect(item.providerId, 'src_a');
+      expect(item.providerId, 'abc');
+      expect(item.uniqueId, 'abc:abc');
     });
   });
 }

@@ -184,3 +184,24 @@ class _ParseableIp {
 
 /// Convenience for callers that only need a yes/no.
 bool isAcceptableMediaUrl(String? raw) => validateMediaUrl(raw) == null;
+
+/// Whether [url]'s host resolves inside this device or its network.
+///
+/// Same rule as [validateMediaUrl], asked on its own, because the catalog
+/// boundary needs it as a *question about the server* rather than about a
+/// stream: a user who deliberately points the app at `127.0.0.1` is running
+/// their own server, and the LAN restriction that protects against a hostile
+/// remote catalog must not also break local development.
+///
+/// Returns false for an unparseable URL or one without a host.
+bool urlPointsAtLocalNetwork(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || uri.host.isEmpty) return false;
+  final host = uri.host.toLowerCase();
+  if (_rejectedHostNames.contains(host) || host.endsWith('.localhost')) {
+    return true;
+  }
+  final ip = _parseIp(host);
+  if (ip == null) return false; // a name, not an address literal
+  return ip.isLoopback || ip.isLinkLocal || ip.isUnspecified || ip.isPrivate;
+}

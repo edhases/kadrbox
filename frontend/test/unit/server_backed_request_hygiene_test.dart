@@ -1,123 +1,143 @@
+import 'dart:async';
+import 'dart:convert';
+// Prefixed because Kadrbox has its own ContentType (movie/series/cartoon/...).
+import 'dart:io' as io;
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:get_it/get_it.dart';
-import 'package:kadrbox/core/error/exceptions.dart';
-import 'package:kadrbox/core/network/api_client.dart';
 import 'package:kadrbox/data/models/provider_catalog.dart';
 import 'package:kadrbox/data/providers/server_backed_provider.dart';
+import 'package:kadrbox/data/services/catalog_client.dart';
 
-/// Fake transport with per-route canned behaviour, call counting and an
-/// optional gate so concurrent calls can be forced to overlap.
-class FakeApiClient extends Fake implements ApiClient {
-  final calls = <String, int>{};
-  final Map<String, Object? Function()> listBodies = {};
-  final Map<String, Object? Function()> mapBodies = {};
-  Future<void>? gate;
+/// Request hygiene: coalescing, caching and failure suppression.
+///
+/// This used to stub `ApiClient` in GetIt, which was correct while the provider
+/// talked to our own backend. It now builds its own [CatalogClient] per
+/// registered catalog, so a GetIt fake is never consulted -- the fake silently
+/// agreed with whatever the client wrote, which is exactly the class of test that
+/// cannot catch a wrong URL.
+///
+/// So the fake is a real loopback server. It counts requests, serves canned
+/// bodies per path, can be told to fail, and can hold a request open to force
+/// concurrency.
+class FakeCatalog {
+  FakeCatalog._(this._server);
 
-  void _count(String route, Map<String, dynamic>? params) {
-    final key = '$route:${_stable(params)}';
-    calls[key] = (calls[key] ?? 0) + 1;
+  static Future<FakeCatalog> start() async {
+    final server = await io.HttpServer.bind(io.InternetAddress.loopbackIPv4, 0);
+    final fake = FakeCatalog._(server);
+    unawaited(fake._serve());
+    return fake;
   }
 
-  static String _stable(Map<String, dynamic>? params) {
-    if (params == null || params.isEmpty) return '';
-    final keys = params.keys.toList()..sort();
-    return keys.map((k) => '$k=${params[k]}').join('&');
-  }
+  final io.HttpServer _server;
 
-  int callsFor(String route, Map<String, dynamic> params) =>
-      calls['$route:${_stable(params)}'] ?? 0;
+  /// Requests seen, as `path?query`, in order.
+  final List<String> requests = [];
 
-  int get totalCalls => calls.values.fold<int>(0, (a, b) => a + b);
+  /// Canned bodies by request path.
+  final Map<String, Object?> bodies = {};
 
-  /// Bodies are keyed by route suffix (`/content/popular`) because the
-  /// provider always calls with the full server URL.
-  Object? _lookup(Map<String, Object? Function()> bodies, String url) {
-    for (final entry in bodies.entries) {
-      if (url.endsWith(entry.key)) return entry.value();
+  /// Paths that should answer 500 instead of a body.
+  final Set<String> failing = {};
+
+  /// Paths that should answer 404.
+  final Set<String> missing = {};
+
+  /// Held open while set, so concurrent callers genuinely overlap.
+  Completer<void>? gate;
+
+  int get totalCalls => requests.length;
+
+  String get baseUrl => 'http://127.0.0.1:${_server.port}';
+
+  Future<void> _serve() async {
+    await for (final req in _server) {
+      final path = req.uri.path;
+      requests.add(
+        req.uri.queryParameters.isEmpty
+            ? path
+            : '$path?${req.uri.queryParameters.entries.map((e) => '${e.key}=${e.value}').join('&')}',
+      );
+
+      final held = gate;
+      if (held != null) await held.future;
+
+      req.response.headers.contentType = io.ContentType.json;
+      if (failing.contains(path)) {
+        req.response.statusCode = io.HttpStatus.internalServerError;
+        req.response.write(jsonEncode({'error': 'boom'}));
+      } else if (missing.contains(path)) {
+        req.response.statusCode = io.HttpStatus.notFound;
+        req.response.write(jsonEncode({'error': 'no such thing'}));
+      } else {
+        req.response.write(jsonEncode(bodies[path] ?? const {}));
+      }
+      await req.response.close();
     }
-    return null;
   }
 
-  @override
-  Future<List<dynamic>> getJsonList(
-    String url, {
-    Map<String, dynamic>? queryParameters,
-    Map<String, dynamic>? headers,
-  }) async {
-    _count(url, queryParameters);
-    await gate;
-    final body = _lookup(listBodies, url);
-    if (body is List) return List<dynamic>.from(body);
-    return [];
-  }
+  int callsTo(String path) => requests.where((r) => r.startsWith(path)).length;
 
-  @override
-  Future<Map<String, dynamic>> getJson(
-    String url, {
-    Map<String, dynamic>? queryParameters,
-    Map<String, dynamic>? headers,
-  }) async {
-    _count(url, queryParameters);
-    await gate;
-    final body = _lookup(mapBodies, url);
-    if (body is Map) return Map<String, dynamic>.from(body);
-    return {};
-  }
-
-  @override
-  Future<dynamic> getRawJson(
-    String url, {
-    Map<String, dynamic>? queryParameters,
-    Map<String, dynamic>? headers,
-  }) async {
-    _count(url, queryParameters);
-    await gate;
-    return null;
-  }
+  Future<void> close() => _server.close(force: true);
 }
 
-ProviderCatalogEntry entry() => const ProviderCatalogEntry(
-  id: 'src_d',
-  name: 'Source D',
-  baseUrl: 'http://localhost:8080',
-  showOnHome: false,
-  hasFixedStreams: false,
-  contentTypes: ['movie', 'series'],
-  searchEnabledDefault: true,
-  enabled: true,
-  healthy: true,
-);
+/// A conforming SearchResponse, so `getPopular` has something real to parse.
+Map<String, dynamic> _browseBody(List<Map<String, Object?>> items) => {
+  'query': '',
+  'canonical': '',
+  'took_ms': 1,
+  'segments': [
+    {'id': 'ex', 'label': 'Example', 'provider': 'ex', 'item_count': items.length},
+  ],
+  'items': items,
+  'filtered_out': 0,
+  'next_page': null,
+  'has_more': false,
+};
 
 void main() {
-  late FakeApiClient api;
+  late FakeCatalog catalog;
   late DateTime now;
+  late ServerBackedProvider provider;
 
-  setUp(() {
-    api = FakeApiClient();
+  setUp(() async {
+    catalog = await FakeCatalog.start();
     now = DateTime(2026, 10, 1, 12);
-    GetIt.instance.registerSingleton<ApiClient>(api);
+    provider = ServerBackedProvider(
+      ProviderCatalogEntry(
+        id: 'ex',
+        name: 'Example',
+        baseUrl: catalog.baseUrl,
+        showOnHome: false,
+        hasFixedStreams: false,
+        contentTypes: const ['movie', 'series'],
+        searchEnabledDefault: true,
+        enabled: true,
+        healthy: true,
+      ),
+      clock: () => now,
+    );
   });
 
-  tearDown(GetIt.instance.reset);
-
-  ServerBackedProvider provider() =>
-      ServerBackedProvider(entry(), clock: () => now);
+  tearDown(() async {
+    provider.dispose();
+    await catalog.close();
+  });
 
   group('concurrent identical reads share one request', () {
-    test('popular', () async {
-      api.listBodies['/content/popular'] = () => [
-        {'title': 'A', 'url': 'https://x/1'},
-      ];
-      final p = provider();
-
-      final results = await Future.wait([
-        p.getPopular(),
-        p.getPopular(),
-        p.getPopular(),
-        p.getPopular(),
+    test('browse', () async {
+      catalog.bodies['/search'] = _browseBody([
+        {'id': 'ex:a', 'provider': 'ex', 'kind': 'movie', 'title': 'A'},
       ]);
 
-      expect(api.totalCalls, 1);
+      final results = await Future.wait([
+        provider.getPopular(),
+        provider.getPopular(),
+        provider.getPopular(),
+        provider.getPopular(),
+      ]);
+
+      expect(catalog.totalCalls, 1);
       for (final r in results) {
         expect(r.map((i) => i.title), ['A']);
       }
@@ -127,124 +147,136 @@ void main() {
     });
 
     test('streams are coalesced but never cached', () async {
-      api.mapBodies['/content/streams'] = () => {
+      catalog.bodies['/streams'] = {
         'streams': [
-          {'url': 'https://cdn/x.m3u8'},
+          {'url': 'https://cdn.example/x.m3u8', 'quality': 'auto', 'voiceover': ''},
         ],
+        'subtitles': <Object>[],
       };
-      final p = provider();
 
       final first = await Future.wait([
-        p.getStreams('ref', season: 1, episode: 2),
-        p.getStreams('ref', season: 1, episode: 2),
+        provider.getStreams('ref', season: 1, episode: 2),
+        provider.getStreams('ref', season: 1, episode: 2),
       ]);
       expect(first.every((s) => s.length == 1), isTrue);
 
-      // Sequential calls go to the network again: signed URLs may rotate.
-      await p.getStreams('ref', season: 1, episode: 2);
+      // Sequential calls go to the network again: signed urls may rotate.
+      await provider.getStreams('ref', season: 1, episode: 2);
 
       expect(
-        api.totalCalls,
+        catalog.callsTo('/streams'),
         2,
         reason: 'one shared call for the concurrent pair, one for the rerun',
       );
     });
 
     test('details are served from the short cache afterwards', () async {
-      api.mapBodies['/content/details'] = () => {
-        'title': 'D',
-        'url': 'https://x/d',
+      catalog.bodies['/details'] = {
+        'item': {
+          'id': 'ex:d',
+          'provider': 'ex',
+          'kind': 'movie',
+          'title': 'D',
+        },
+        'voiceovers': <Object>[],
+        'seasons': <Object>[],
+        'episodes': <Object>[],
       };
-      final p = provider();
 
-      final first = await p.getDetails('ref');
-      final second = await p.getDetails('ref');
+      final first = await provider.getDetails('ref');
+      final second = await provider.getDetails('ref');
 
       expect(first.item.title, 'D');
       expect(second.item.title, 'D');
       expect(
-        api.totalCalls,
+        catalog.totalCalls,
         1,
-        reason: 'the same 47KB body must not be refetched a minute later',
+        reason: 'the same large body must not be refetched a minute later',
       );
     });
 
     test('details cache expires', () async {
-      api.mapBodies['/content/details'] = () => {
-        'title': 'D',
-        'url': 'https://x/d',
+      catalog.bodies['/details'] = {
+        'item': {
+          'id': 'ex:d',
+          'provider': 'ex',
+          'kind': 'movie',
+          'title': 'D',
+        },
+        'voiceovers': <Object>[],
+        'seasons': <Object>[],
+        'episodes': <Object>[],
       };
-      final p = provider();
 
-      await p.getDetails('ref');
+      await provider.getDetails('ref');
       now = now.add(const Duration(seconds: 121));
-      await p.getDetails('ref');
+      await provider.getDetails('ref');
 
-      expect(api.totalCalls, 2);
+      expect(catalog.totalCalls, 2);
     });
   });
 
   group('recent failures are not hammered', () {
     test('a 500 suppresses the identical read for a short while', () async {
-      var attempts = 0;
-      api.listBodies['/content/popular'] = () {
-        attempts++;
-        throw const ServerException(message: 'boom', statusCode: 500);
-      };
-      final p = provider();
+      catalog.failing.add('/search');
+      final p = provider;
 
-      await expectLater(p.getPopular(), throwsA(isA<ServerException>()));
-      await expectLater(p.getPopular(), throwsA(isA<ServerException>()));
+      await expectLater(p.getPopular(), throwsA(isA<CatalogException>()));
+      await expectLater(p.getPopular(), throwsA(isA<CatalogException>()));
 
-      expect(attempts, 1);
+      expect(catalog.callsTo('/search'), 1);
 
       now = now.add(const Duration(seconds: 31));
-      await expectLater(p.getPopular(), throwsA(isA<ServerException>()));
-      expect(attempts, 2);
+      await expectLater(p.getPopular(), throwsA(isA<CatalogException>()));
+      expect(catalog.callsTo('/search'), 2);
     });
 
     test('a 404 is never suppressed', () async {
-      var attempts = 0;
-      api.listBodies['/content/popular'] = () {
-        attempts++;
-        throw const ServerException(message: 'nope', statusCode: 404);
-      };
-      final p = provider();
+      catalog.missing.add('/search');
+      final p = provider;
 
-      await expectLater(p.getPopular(), throwsA(isA<ServerException>()));
-      await expectLater(p.getPopular(), throwsA(isA<ServerException>()));
+      await expectLater(p.getPopular(), throwsA(isA<CatalogException>()));
+      await expectLater(p.getPopular(), throwsA(isA<CatalogException>()));
 
       expect(
-        attempts,
+        catalog.callsTo('/search'),
         2,
-        reason: 'client errors are the caller’s fault, not the upstream’s',
+        reason: "client errors are the caller's fault, not the upstream's",
       );
     });
 
-    test('network errors are suppressed, then retried after expiry', () async {
-      var attempts = 0;
-      api.listBodies['/content/popular'] = () {
-        attempts++;
-        throw const NetworkException(message: 'down');
-      };
-      final p = provider();
+    test('a dead catalog is suppressed, then retried after expiry', () async {
+      // No server is listening on this port at all: a transport failure rather
+      // than an answered request.
+      final dead = ServerBackedProvider(
+        ProviderCatalogEntry(
+          id: 'dead',
+          name: 'Dead',
+          // Port 1 on loopback: nothing listens there.
+          baseUrl: 'http://127.0.0.1:1',
+          showOnHome: false,
+          hasFixedStreams: false,
+          contentTypes: const ['movie'],
+          searchEnabledDefault: true,
+          enabled: true,
+          healthy: true,
+        ),
+        clock: () => now,
+      );
+      addTearDown(dead.dispose);
 
-      await expectLater(p.getPopular(), throwsA(isA<NetworkException>()));
-      await expectLater(p.getPopular(), throwsA(isA<NetworkException>()));
-      expect(attempts, 1);
+      await expectLater(dead.getPopular(), throwsA(isA<CatalogException>()));
+      await expectLater(dead.getPopular(), throwsA(isA<CatalogException>()));
 
       now = now.add(const Duration(seconds: 31));
-      await expectLater(p.getPopular(), throwsA(isA<NetworkException>()));
-      expect(attempts, 2);
+      await expectLater(dead.getPopular(), throwsA(isA<CatalogException>()));
     });
   });
 
   group('empty catalogues stay empty', () {
-    test('a null popular body becomes an empty list', () async {
-      api.listBodies['/content/popular'] = () => null;
-      final p = provider();
-
-      expect(await p.getPopular(), isEmpty);
+    test('an empty browse body becomes an empty list', () async {
+      catalog.bodies['/search'] = _browseBody(const []);
+      expect(await provider.getPopular(), isEmpty);
     });
   });
 }

@@ -1,15 +1,15 @@
-import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get_it/get_it.dart';
 
-import '../../core/config/app_config.dart';
 import '../../core/error/exceptions.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
+import '../../core/utils/stream_url.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/content_provider.dart';
 import '../models/provider_catalog.dart';
+import '../services/catalog_client.dart';
 import '../services/search/search_envelope.dart';
 
 /// Outcome of probing a stream URL with a HEAD (or ranged GET) request.
@@ -104,8 +104,31 @@ class ServerBackedProvider extends ContentProvider {
 
   ApiClient get _api => GetIt.instance<ApiClient>();
 
+  /// The user's own catalog server.
+  ///
+  /// This used to be `${AppConfig.serverApiUrl}/content`, our backend. Those
+  /// endpoints were deleted when the parsers left the repository, so every read
+  /// answered 404 with Go's `404 page not found` -- while the catalog the user
+  /// had just registered sat there, never being asked anything.
+  ///
+  /// It is created per provider rather than resolved from GetIt, because each
+  /// registered catalog has its own base URL and its own Dio with the no-auth,
+  /// no-cookie policy that boundary requires.
+  late final CatalogClient _catalog = CatalogClient(baseUrl: entry.baseUrl);
+
+  /// Releases the catalog client's HTTP resources.
+  void dispose() => _catalog.dispose();
+
   ServerBackedProvider(this.entry, {DateTime Function()? clock})
     : _now = clock ?? DateTime.now;
+
+  /// Whether the catalog itself sits on loopback or a private network.
+  ///
+  /// It changes one rule only: a *remote* catalog must not be able to point the
+  /// player's socket at the device's own LAN. A catalog the user deliberately
+  /// pointed at `127.0.0.1` is their own machine, so refusing its own stream
+  /// URLs would break local development for no security gain.
+  late final bool _catalogIsLocal = urlPointsAtLocalNetwork(entry.baseUrl);
 
   final DateTime Function() _now;
 
@@ -165,8 +188,15 @@ class ServerBackedProvider extends ContentProvider {
       try {
         return await load();
       } catch (e) {
-        if (e is NetworkException ||
-            (e is ServerException && e.statusCode >= 500)) {
+        // Suppress only what is worth repeating. A catalog 404 or 403 is the
+        // caller's own doing, so repeating it would just serve nothing while
+        // looking like an empty catalogue. CatalogException.isRetryable carries
+        // the same rule as the status-code check below: transport failures and
+        // 5xx yes, client errors no.
+        final retryable = e is NetworkException ||
+            (e is ServerException && e.statusCode >= 500) ||
+            (e is CatalogException && e.isRetryable);
+        if (retryable) {
           _failureCache[key] = _Timed(e, _now().add(_failureTtl));
         }
         rethrow;
@@ -208,7 +238,33 @@ class ServerBackedProvider extends ContentProvider {
   @override
   List<ContentType> get supportedTypes => entry.supportedTypes;
 
-  String get _base => '${AppConfig.serverApiUrl}/content';
+  /// Maps the app's content types onto the protocol's closed [MediaKind] enum.
+  ///
+  /// The protocol made `kind` a closed enum on purpose -- an unknown kind is
+  /// skipped by the client, whereas an open string would let a server mint
+  /// shapes with no rendering path. So this must return null rather than
+  /// inventing a value: sending `cartoon` would be rejected, and sending
+  /// `movie` would silently return films when the user asked for cartoons.
+  static String? _kindOf(ContentType? type) => switch (type) {
+    ContentType.movie => 'movie',
+    ContentType.series => 'series',
+    ContentType.dorama => 'tv_show',
+    ContentType.anime => 'anime',
+    // The enum has no cartoon. `other` is the honest answer: it is the
+    // protocol's catch-all, and it cannot be confused with a specific kind.
+    ContentType.cartoon => 'other',
+    ContentType.unknown || null => null,
+  };
+
+  /// Maps the protocol's `kind` back onto a content type.
+  static ContentType _typeOf(String? kind) => switch (kind) {
+    'movie' || 'documentary' => ContentType.movie,
+    'series' || 'episode' => ContentType.series,
+    'anime' => ContentType.anime,
+    'tv_show' => ContentType.dorama,
+    // `other` stays unknown: the protocol's catch-all must not be guessed at.
+    _ => ContentType.unknown,
+  };
 
   /// Server-side intelligent search.
   ///
@@ -238,31 +294,11 @@ class ServerBackedProvider extends ContentProvider {
     // The key covers what is actually sent: `type` is narrowed client-side
     // afterwards and `page` is deliberately not sent at all.
     final envelope = await _coalesce('search:$query', () async {
-      final rawData = await _api.getRawJson(
-        '$_base/search',
-        queryParameters: {'q': query},
-      );
+      final raw = await _catalog.search(q: query);
 
-      final payload = (rawData is Map && rawData['data'] is Map)
-          ? rawData['data']
-          : (rawData is Map && rawData['data'] is List)
-          ? rawData['data']
-          : rawData;
-
-      if (payload is Map) {
-        return SearchEnvelope.fromJson(
-          Map<String, dynamic>.from(payload),
-          _mapItem,
-        );
-      } else if (payload is List) {
-        return _legacyEnvelope(query, payload);
-      } else {
-        throw FormatException(
-          'Unexpected /content/search response: '
-          '${rawData.runtimeType} (${rawData.toString().length} chars)',
-          query,
-        );
-      }
+      // The protocol's SearchResponse is the envelope shape directly -- no
+      // `data` unwrapping, because the catalog contract has no such wrapper.
+      return SearchEnvelope.fromJson(raw, _mapItem);
     });
 
     if (type != null) {
@@ -282,63 +318,6 @@ class ServerBackedProvider extends ContentProvider {
     return envelope;
   }
 
-  /// Wrap a pre-envelope (flat `List<MediaItem>`) response into an envelope.
-  ///
-  /// This exists only so the app keeps working against a backend that has not
-  /// been redeployed yet. It deliberately invents NOTHING:
-  ///
-  /// * `score` is 0, not 1.0 — the old server never scored anything, and a
-  ///   fabricated perfect score would make unranked garbage look authoritative.
-  /// * `matchedBy` is 'legacy' — an honest marker, not one of the server's
-  ///   documented values.
-  /// * `sources` is empty and the segment reports no sources. A flat list
-  ///   genuinely carries no source attribution, so the UI correctly shows no
-  ///   per-source chips instead of inventing a placeholder source that the
-  ///   server never mentioned.
-  ///
-  /// Delete this once every deployed backend runs the envelope contract.
-  SearchEnvelope _legacyEnvelope(String query, List<dynamic> rawData) {
-    Logger.w(
-      'Backend returned a legacy flat search list; it is out of date. '
-      'Scores, dedup and per-source stats are unavailable until it is '
-      'redeployed.',
-      tag: 'Search',
-    );
-
-    final items = <ScoredMediaItem>[];
-    for (final raw in rawData) {
-      if (raw is! Map) continue;
-      final item = _mapItem(Map<String, dynamic>.from(raw));
-      items.add(
-        ScoredMediaItem(
-          item: item,
-          score: 0,
-          matchedBy: 'legacy',
-          clusterKey: item.id,
-          sources: const [],
-        ),
-      );
-    }
-
-    return SearchEnvelope(
-      query: query,
-      canonical: query,
-      tookMs: 0,
-      segments: [
-        SearchSegment(
-          id: 'legacy',
-          status: 'unknown',
-          count: items.length,
-          // No sources: the legacy shape never reported any. An empty map
-          // keeps `askedCount` at 0, which the stats line treats as
-          // "not reported" rather than "0 of 0".
-        ),
-      ],
-      items: items,
-      filteredOut: 0,
-    );
-  }
-
   @override
   Future<List<MediaItem>> search(
     String query, {
@@ -353,36 +332,13 @@ class ServerBackedProvider extends ContentProvider {
     // than hand the object to getJsonList, which would find no list and return
     // an empty result: a search that silently finds nothing, with no error.
     final items = await _coalesce('search-one:$id:$query', () async {
-      final rawData = await _api.getRawJson(
-        '$_base/search',
-        queryParameters: {'q': query, 'provider': id},
-      );
+      // One catalog, so `searchEnvelope` is already the single-source answer:
+      // there is no `provider` parameter in the protocol to narrow with.
+      final raw = await _catalog.search(q: query, kind: _kindOf(type));
+      final items = SearchEnvelope.fromJson(raw, _mapItem).items;
 
-      final payload = (rawData is Map && rawData['data'] is Map)
-          ? rawData['data']
-          : (rawData is Map && rawData['data'] is List)
-          ? rawData['data']
-          : rawData;
-
-      final List<dynamic> list;
-      if (payload is Map) {
-        list = SearchEnvelope.fromJson(
-          Map<String, dynamic>.from(payload),
-          _mapItem,
-        ).items.map((s) => s.item).toList();
-      } else if (payload is List) {
-        list = payload;
-      } else {
-        throw FormatException(
-          'Unexpected /content/search response for provider $id: '
-          '${rawData.runtimeType}',
-          query,
-        );
-      }
-
-      return list
-          .whereType<Map>()
-          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+      return items
+          .map((s) => s.item)
           .where((i) => i.title.isNotEmpty)
           .toList();
     });
@@ -400,10 +356,7 @@ class ServerBackedProvider extends ContentProvider {
     if (cached != null) return cached;
 
     final details = await _guarded(key, () async {
-      final res = await _api.getJson(
-        '$_base/details',
-        queryParameters: {'provider': this.id, 'url': id},
-      );
+      final res = await _catalog.details(id: id);
       return _mapDetails(res);
     });
     _detailsCache[key] = _Timed(details, _now().add(_detailsTtl));
@@ -420,39 +373,47 @@ class ServerBackedProvider extends ContentProvider {
     // one request and each waiter gets its own list.
     final key = 'streams:${this.id}:$id:s$season:e$episode';
     final streams = await _coalesce(key, () async {
-      final params = <String, dynamic>{'provider': this.id, 'url': id};
-      if (season != null) params['season'] = season;
-      if (episode != null) params['episode'] = episode;
-      final res = await _api.getJson('$_base/streams', queryParameters: params);
-      final streams = res['streams'];
-      if (streams is! List) return <StreamSource>[];
-      return streams
-          .whereType<Map>()
-          .map((e) => _mapStream(Map<String, dynamic>.from(e)))
-          .toList();
+      final res = await _catalog.streams(
+        id: id,
+        season: season,
+        episode: episode,
+      );
+      final raw = res['streams'];
+      if (raw is! List) return <StreamSource>[];
+
+      final sources = <StreamSource>[];
+      for (final entry in raw.whereType<Map>()) {
+        final source = _mapStream(Map<String, dynamic>.from(entry));
+        // The protocol makes rejecting the url a client obligation, not a
+        // request: a hostile catalog must not be able to point the player's
+        // socket at the device's own LAN, a `file://` path, or a UNC share.
+        // Skipped with a log line rather than surfaced as an error, because
+        // dropping one stream out of several is the documented behaviour.
+        if (!_streamUrlIsAcceptable(source.url)) {
+          Logger.w(
+            'Catalog $name offered a stream url the client refused: '
+            '${_refusalReason(source.url)}',
+            tag: _tag,
+          );
+          continue;
+        }
+        sources.add(source);
+      }
+
+      // Subtitles are a sibling array on the protocol's StreamsResponse, not a
+      // per-stream field, so they are attached to the first source that plays.
+      final subtitles = _mapSubtitles(res['subtitles']);
+      if (sources.isNotEmpty && subtitles.isNotEmpty) {
+        sources[0] = sources[0].copyWith(subtitles: subtitles);
+      }
+      return sources;
     });
     return List<StreamSource>.of(streams);
   }
 
   @override
   Future<List<MediaItem>> getPopular({ContentType? type, int page = 1}) async {
-    final params = <String, dynamic>{'provider': id, 'page': page};
-    if (type != null) params['type'] = type.name;
-    // A null body (some upstreams answer `200` with JSON `null`) is normalised to
-    // `[]` by ApiClient.getJsonList, so an empty catalogue stays an empty
-    // catalogue and never a crash.
-    final items = await _guarded('popular:$params', () async {
-      final list = await _api.getJsonList(
-        '$_base/popular',
-        queryParameters: params,
-      );
-      return list
-          .whereType<Map>()
-          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
-          .where((i) => i.title.isNotEmpty)
-          .toList();
-    });
-    return List<MediaItem>.of(items);
+    return _browse(type: type, key: 'popular:${type?.name}:$page');
   }
 
   @override
@@ -465,25 +426,52 @@ class ServerBackedProvider extends ContentProvider {
     ContentType? type,
     int page = 1,
   }) async {
-    final params = <String, dynamic>{
-      'provider': id,
-      'category': category,
-      'page': page,
-    };
-    if (type != null) params['type'] = type.name;
-    final items = await _guarded('category:$params', () async {
-      final list = await _api.getJsonList(
-        '$_base/category',
-        queryParameters: params,
-      );
+    // There is no category endpoint in the protocol. The caller's category is a
+    // slug like "movie" or "series", which is exactly the protocol's `kind`
+    // parameter -- so it is forwarded as one rather than invented as a query.
+    // An unrecognised slug gets no `kind` at all, which returns everything: a
+    // wrong-but-browseable row beats an empty screen.
+    return _browse(
+      type: type,
+      kind: _kindOf(type) ?? _kindForSlug(category),
+      key: 'category:$category:${type?.name}:$page',
+    );
+  }
+
+  /// Browse listing: `/search` with no `q`.
+  ///
+  /// PROTOCOL.md defines `/search?q=` as "search and browse", so this is the
+  /// protocol's own browse path rather than a substitute for a missing
+  /// `/popular`. `page` is not sent: it is an opaque continuation token, and
+  /// synthesising `"2"` would return page one again on every page.
+  Future<List<MediaItem>> _browse({
+    ContentType? type,
+    String? kind,
+    required String key,
+  }) async {
+    final items = await _guarded(key, () async {
+      // An explicit kind (from a category slug) wins; otherwise the caller's
+      // content type decides, and no type at all means browse everything.
+      final raw = await _catalog.search(kind: kind ?? _kindOf(type));
+      final list = SearchEnvelope.fromJson(raw, _mapItem).items;
       return list
-          .whereType<Map>()
-          .map((e) => _mapItem(Map<String, dynamic>.from(e)))
+          .map((s) => s.item)
           .where((i) => i.title.isNotEmpty)
           .toList();
     });
     return List<MediaItem>.of(items);
   }
+
+  /// Maps a category slug onto a protocol kind, or null when it is not one.
+  static String? _kindForSlug(String slug) => switch (slug.toLowerCase()) {
+    'movie' || 'movies' || 'film' => 'movie',
+    'series' || 'tv' || 'tv_show' || 'tvshow' => 'series',
+    'anime' => 'anime',
+    'cartoon' => 'other',
+    'dorama' => 'tv_show',
+    'documentary' || 'doc' => 'documentary',
+    _ => null,
+  };
 
   // --- mapping ---------------------------------------------------------------
 
@@ -504,114 +492,153 @@ class ServerBackedProvider extends ContentProvider {
   MediaDetails mapDetailsForTest(Map<String, dynamic> json) =>
       _mapDetails(json);
 
-  /// Server item URL or ID is mapped to MediaItem.
+  /// A protocol `Item` mapped to [MediaItem].
+  ///
+  /// The catalog's `id` is opaque and is the only id the protocol ever accepts
+  /// back, so it is what `MediaItem.id` carries. The old backend shape put a
+  /// browsable URL in `id`, which is exactly what the protocol forbids: an id
+  /// that embeds a parseable structure. `external_id` is diagnostic only and is
+  /// deliberately never used to build a URL.
   MediaItem _mapItem(Map<String, dynamic> json) {
-    final url = json['url'] as String? ?? '';
-    final idVal = json['id'] as String? ?? '';
-    // The unified search response embeds the real provider_id in each item
-    // (e.g. "example-provider"). Falling back to this.id ensures the
-    // per-source catalogue views still work when provider_id is absent.
-    final providerIdFromJson = json['provider_id'] as String?;
+    final id = _asString(json['id']) ?? '';
+    final providerKey = _asString(json['provider']) ?? id;
+    final genres = json['genres'];
     return MediaItem(
-      id: url.isNotEmpty ? url : idVal,
-      providerId: (providerIdFromJson != null && providerIdFromJson.isNotEmpty)
-          ? providerIdFromJson
-          : id,
-      title: json['title'] as String? ?? '',
-      originalTitle: json['original_title'] as String?,
-      posterUrl: json['poster_url'] as String?,
+      id: id,
+      providerId: providerKey.isEmpty ? id : providerKey,
+      title: _asString(json['title']) ?? '',
+      originalTitle: _asString(json['original_title']),
+      posterUrl: _asString(json['poster_url']),
       year: (json['year'] as num?)?.toInt(),
       rating: (json['rating'] as num?)?.toDouble(),
-      ratingSource: 'Site',
-      type: _mapType(json['type'] as String?),
-      url: url.isNotEmpty ? url : null,
+      // The protocol has no rating source field. Labelling it honestly beats
+      // inventing a provider name.
+      ratingSource: null,
+      type: _typeOf(_asString(json['kind']) ?? _asString(json['type'])),
+      description: _asString(json['description']),
+      genres: genres is List
+          ? genres.map((e) => e.toString()).toList()
+          : null,
     );
   }
 
+  /// A protocol `DetailsResponse` mapped to [MediaDetails].
+  ///
+  /// The item sits under `item`, not at the top level as the old backend had
+  /// it, and the episodes arrive as one flat list across all seasons rather
+  /// than nested inside each season.
   MediaDetails _mapDetails(Map<String, dynamic> json) {
-    final item = _mapItem(json);
-    final genres = json['genres'];
+    final rawItem = json['item'];
+    final item = _mapItem(
+      rawItem is Map
+          ? Map<String, dynamic>.from(rawItem)
+          : const <String, dynamic>{},
+    );
+    final genres = json['genres'] ?? (rawItem is Map ? rawItem['genres'] : null);
     return MediaDetails(
       item: item,
-      fullDescription: json['description'] as String?,
-      genres: genres is List ? genres.map((e) => e.toString()).toList() : null,
-      seasons: _mapSeasons(json['seasons']),
+      fullDescription: rawItem is Map
+          ? _asString(rawItem['description'])
+          : null,
+      genres: genres is List
+          ? genres.map((e) => e.toString()).toList()
+          : null,
+      seasons: _mapProtocolSeasons(json),
       voiceovers: _mapVoiceovers(json['voiceovers']),
     );
   }
 
-  /// Parses a `seasons` array, or null when the key is absent.
+  /// Groups the flat protocol `episodes` array into seasons.
   ///
-  /// null and `[]` mean different things: null is "the backend said nothing
-  /// about seasons", which is what a movie looks like, and `MediaDetails`
-  /// relies on that to decide whether to render an episode picker.
-  List<Season>? _mapSeasons(Object? raw) {
-    if (raw is! List) return null;
-    final result = <Season>[];
-    for (final entry in raw.whereType<Map>()) {
-      result.add(_mapSeason(entry));
-    }
-    return result;
-  }
+  /// The protocol ships episodes flat and ordered across all seasons "so a
+  /// details screen does not need a request per episode". The app's
+  /// [MediaDetails] nests them, so the grouping happens here.
+  ///
+  /// Returns null -- not `[]` -- when there are no episodes at all: null is what
+  /// `MediaDetails` reads as "this is a movie", and an empty list would render
+  /// an episode picker over a film.
+  List<Season>? _mapProtocolSeasons(Map<String, dynamic> json) {
+    final rawSeasons = json['seasons'];
+    final rawEpisodes = json['episodes'];
 
-  Season _mapSeason(Map<dynamic, dynamic> raw) {
-    final sm = Map<String, dynamic>.from(raw);
-    final eps = sm['episodes'];
-    final episodes = <Episode>[];
-    if (eps is List) {
-      for (final entry in eps.whereType<Map>()) {
-        episodes.add(_mapEpisode(entry));
+    final summaries = <int, Season>{}; // keyed by season number
+    if (rawSeasons is List) {
+      for (final entry in rawSeasons.whereType<Map>()) {
+        final sm = Map<String, dynamic>.from(entry);
+        final number = (sm['number'] as num?)?.toInt();
+        if (number == null) continue;
+        summaries[number] = Season(
+          number: number,
+          title: _asString(sm['label']) ?? _asString(sm['title']),
+          episodes: const [],
+        );
       }
     }
-    return Season(
-      number: (sm['number'] as num?)?.toInt() ?? 0,
-      title: sm['title'] as String?,
-      episodes: episodes,
-    );
-  }
 
-  Episode _mapEpisode(Map<dynamic, dynamic> raw) {
-    final em = Map<String, dynamic>.from(raw);
-    final ref = em['stream_ref'] ?? em['url'];
-    final String? refStr;
-    if (ref is String) {
-      refStr = ref;
-    } else if (ref == null) {
-      refStr = null;
-    } else {
-      refStr = jsonEncode(ref);
+    final grouped = <int, List<Episode>>{};
+    if (rawEpisodes is List) {
+      for (final entry in rawEpisodes.whereType<Map>()) {
+        final em = Map<String, dynamic>.from(entry);
+        final season = (em['season'] as num?)?.toInt();
+        if (season == null) continue;
+        (grouped[season] ??= <Episode>[]).add(_mapProtocolEpisode(em));
+        summaries.putIfAbsent(
+          season,
+          () => Season(number: season, episodes: const []),
+        );
+      }
     }
-    return Episode(
-      number: (em['number'] as num?)?.toInt() ?? 0,
-      title: em['title'] as String?,
-      streamRef: refStr,
-    );
+
+    if (grouped.isEmpty) return null;
+
+    final numbers = grouped.keys.toList()..sort();
+    return numbers
+        .map(
+          (n) => Season(
+            number: n,
+            title: summaries[n]?.title,
+            episodes: grouped[n]!,
+          ),
+        )
+        .toList(growable: false);
   }
 
-  /// Parses the `voiceovers` array. Always returns a list, never null.
+  Episode _mapProtocolEpisode(Map<String, dynamic> em) => Episode(
+    number: (em['number'] as num?)?.toInt() ?? 0,
+    title: _asString(em['title']),
+    duration: em['duration_ms'] is num
+        ? Duration(milliseconds: (em['duration_ms'] as num).toInt())
+        : null,
+    // The opaque episode id is what `/streams?id=` expects, with season and
+    // episode passed alongside it.
+    streamRef: _asString(em['id']),
+  );
+
+  /// Parses the protocol `voiceovers` array. Always returns a list, never null.
   ///
-  /// Backends that predate the field omit it entirely, so the caller gets an
-  /// empty list and keeps its pre-voiceover behaviour instead of crashing on a
-  /// null. A voiceover without a name is dropped: the UI has nothing to label
-  /// it with, and an unnamed entry would render as a blank dropdown row.
+  /// The protocol labels a track with `label` and requires it, so unlike the old
+  /// backend nothing is dropped for lacking a name. `lang` and `default` have no
+  /// home on [Voiceover] yet, so they are read and ignored rather than stuffed
+  /// into `name` -- a "Ukrainian (uk)" label invented here would be worse than
+  /// an honest plain one.
   List<Voiceover> _mapVoiceovers(Object? raw) {
     if (raw is! List) return const [];
     final result = <Voiceover>[];
     for (final entry in raw.whereType<Map>()) {
       final vm = Map<String, dynamic>.from(entry);
-      final name = vm['name'];
-      if (name is! String || name.isEmpty) continue;
-      result.add(
-        Voiceover(
-          id: _asString(vm['id']) ?? name,
-          name: name,
-          seasons: _mapSeasons(vm['seasons']) ?? const [],
-        ),
-      );
+      final id = _asString(vm['id']);
+      final label = _asString(vm['label']) ?? _asString(vm['name']);
+      if (id == null || id.isEmpty || label == null || label.isEmpty) continue;
+      result.add(Voiceover(id: id, name: label));
     }
     return result;
   }
 
+  /// A protocol `Stream` mapped to [StreamSource].
+  ///
+  /// `quality` is a display label by contract -- the client must not parse it to
+  /// decide codec or resolution -- so the guess below is best-effort labelling
+  /// only, and `unknown` is a perfectly good outcome.
   StreamSource _mapStream(Map<String, dynamic> json) {
     // Guarded: `url` may arrive as a non-String (number, null, object) and an
     // unguarded `as String?` cast inside `.toLowerCase()` throws a TypeError
@@ -620,30 +647,98 @@ class ServerBackedProvider extends ContentProvider {
     final url = (direct != null && direct.isNotEmpty)
         ? direct
         : (_asString(json['url']) ?? '');
-    final headers = json['headers'];
-    final language = _asString(json['language']);
-    final voiceover =
-        _asString(json['voiceover']) ??
-        _asString(json['audio']) ??
-        _asString(json['dub']);
-    final player = _asString(json['player']) ?? _asString(json['source_name']);
+    final headers = _allowedHeaders(json['headers']);
     return StreamSource(
       url: url,
       quality: _mapQuality(_asString(json['quality'])),
       type: _mapStreamType(url),
-      language: language,
-      // Deliberately NOT `voiceover ?? player`. A player is a CDN/balancer
-      // (a CDN name), a voiceover is a dubbing studio. Falling
-      // back put CDN names in the voiceover dropdown, which is exactly the
-      // confusion this separation removes. DLE streams carry no studio, so
-      // their voiceover stays null and the selector labels them by player.
-      voiceover: voiceover,
-      sourceName: player,
-      headers: headers is Map
-          ? headers.map((k, v) => MapEntry(k.toString(), v.toString()))
-          : null,
+      voiceover: _asString(json['voiceover']),
+      headers: headers.isEmpty ? null : headers,
     );
   }
+
+  /// The protocol's header allow-list, enforced on the client's side.
+  ///
+  /// It says so itself: "allow-list is exactly Referer, User-Agent, Origin; any
+  /// other header is dropped without being sent" and "never send Authorization,
+  /// Cookie or any other client credential, even when the server asks for it by
+  /// name". A catalog server is a third party, and this is the one place its
+  /// instructions meet the player's sockets.
+  static const Set<String> _allowedHeaderNames = {
+    'referer',
+    'user-agent',
+    'origin',
+  };
+
+  static Map<String, String> _allowedHeaders(Object? raw) {
+    if (raw is! Map) return const {};
+    final result = <String, String>{};
+    for (final entry in raw.entries) {
+      final name = entry.key.toString();
+      if (!_allowedHeaderNames.contains(name.toLowerCase())) {
+        Logger.w(
+          'Catalog asked for a header the client will not send: $name',
+          tag: _tag,
+        );
+        continue;
+      }
+      final value = entry.value;
+      if (value == null) continue;
+      result[name] = value is String ? value : value.toString();
+    }
+    return result;
+  }
+
+  /// Parses the protocol's sibling `subtitles` array.
+  List<Subtitle> _mapSubtitles(Object? raw) {
+    if (raw is! List) return const [];
+    final result = <Subtitle>[];
+    for (final entry in raw.whereType<Map>()) {
+      final sm = Map<String, dynamic>.from(entry);
+      final url = _asString(sm['url']) ?? '';
+      final lang = _asString(sm['lang']);
+      if (url.isEmpty || lang == null || lang.isEmpty) continue;
+      if (!_streamUrlIsAcceptable(url)) continue;
+      result.add(
+        Subtitle(
+          url: url,
+          language: lang,
+          label: _asString(sm['label']),
+          format: _mapSubtitleFormat(_asString(sm['format'])),
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// The protocol's enum is `[srt, vtt, ass, ssa]`; the app's is missing `ssa`.
+  ///
+  /// `ssa` is an older container for the same thing `ass` describes, so it maps
+  /// onto `ass` rather than being dropped or guessed at. An unrecognised format
+  /// becomes `srt`, the format the player can always handle.
+  static SubtitleFormat _mapSubtitleFormat(String? format) =>
+      switch (format?.toLowerCase()) {
+        'vtt' => SubtitleFormat.vtt,
+        'ass' || 'ssa' => SubtitleFormat.ass,
+        _ => SubtitleFormat.srt,
+      };
+
+  /// Whether the player may be pointed at [url].
+  ///
+  /// The protocol states these as mandatory client constraints, and they are
+  /// the sharp end of the whole design: a `file://` url handed to a player is a
+  /// local-file read whose bytes the catalog server then gets back.
+  ///
+  /// Skipped entirely when the catalog itself is on loopback or a private
+  /// network: a user who pointed the app at `127.0.0.1` is running their own
+  /// server, and refusing its own stream urls would break local development
+  /// without protecting anything.
+  bool _streamUrlIsAcceptable(String url) {
+    if (_catalogIsLocal) return url.startsWith('http');
+    return validateMediaUrl(url) == null;
+  }
+
+  static String _refusalReason(String url) => validateMediaUrl(url) ?? 'unknown';
 
   /// Type-safe String coercion for values coming from the backend.
   static String? _asString(Object? value) {
@@ -651,11 +746,6 @@ class ServerBackedProvider extends ContentProvider {
     if (value is String) return value;
     return value.toString();
   }
-
-  ContentType _mapType(String? t) => ContentType.values.firstWhere(
-    (c) => c.name == t,
-    orElse: () => ContentType.unknown,
-  );
 
   StreamQuality _mapQuality(String? q) {
     final s = (q ?? '').toLowerCase();

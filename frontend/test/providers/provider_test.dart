@@ -270,31 +270,69 @@ void main() {
       );
     });
 
-    test('maps headers when present and null when absent', () {
-      final withHeaders = provider.mapStreamForTest({
+    test('keeps only the headers the protocol allows, and drops the rest', () {
+      // contracts/openapi.yaml states the allow-list as a client obligation:
+      // "allow-list is exactly Referer, User-Agent, Origin; any other header is
+      // dropped without being sent" and "never send Authorization, Cookie or any
+      // other client credential, even when the server asks for it by name".
+      // A catalog server is a third party, so this is enforced here rather than
+      // trusted.
+      final source = provider.mapStreamForTest({
         'url': 'https://cdn.tv/a.mp4',
-        'headers': {'Referer': 'https://site.tv', 'X-Token': 123},
+        'headers': {
+          'Referer': 'https://site.tv',
+          'User-Agent': 'Kadrbox/1.0',
+          'Origin': 'https://catalog.example',
+          'X-Token': 123,
+          'Authorization': 'Bearer stolen',
+          'Cookie': 'session=abc',
+        },
       });
-      expect(withHeaders.headers, {
+      expect(source.headers, {
         'Referer': 'https://site.tv',
-        'X-Token': '123',
+        'User-Agent': 'Kadrbox/1.0',
+        'Origin': 'https://catalog.example',
       });
+    });
 
-      final withoutHeaders = provider.mapStreamForTest({
+    test('header names are matched case-insensitively', () {
+      final source = provider.mapStreamForTest({
         'url': 'https://cdn.tv/a.mp4',
+        'headers': {'referer': 'https://site.tv', 'X-Token': '1'},
       });
-      expect(withoutHeaders.headers, isNull);
+      expect(source.headers, {'referer': 'https://site.tv'});
+    });
+
+    test('headers are null when absent or empty after filtering', () {
+      expect(
+        provider.mapStreamForTest({'url': 'https://cdn.tv/a.mp4'}).headers,
+        isNull,
+      );
+      expect(
+        provider
+            .mapStreamForTest({
+              'url': 'https://cdn.tv/a.mp4',
+              'headers': {'X-Token': '1'},
+            })
+            .headers,
+        isNull,
+      );
+      expect(
+        provider.mapStreamForTest({'url': 'https://cdn.tv/a.mp4', 'headers': 7})
+            .headers,
+        isNull,
+      );
     });
 
     test('populates voiceover so alternative chips are distinguishable', () {
-      // Without voiceover every chip rendered as the identical "РђРІС‚Рѕ".
+      // The protocol's `Stream.voiceover` is the track id, which is also what
+      // `/streams?voiceover=` and `Episode.voiceovers` use. There is no
+      // `language` member on a protocol Stream, so nothing is invented for it.
       final source = provider.mapStreamForTest({
         'url': 'https://cdn.tv/a.mp4',
-        'voiceover': 'РЎС‚СѓРґС–СЏ Р”СѓР±Р»СЏР¶',
-        'language': 'uk',
+        'voiceover': 'uk',
       });
-      expect(source.voiceover, 'РЎС‚СѓРґС–СЏ Р”СѓР±Р»СЏР¶');
-      expect(source.language, 'uk');
+      expect(source.voiceover, 'uk');
     });
 
     test('voiceover is null-safe against non-String values', () {
@@ -305,42 +343,137 @@ void main() {
       expect(source.voiceover, '7');
     });
 
-    test('maps Episode streamRef from em["stream_ref"] or em["url"]', () {
+    test('groups the flat protocol episode list into seasons', () {
+      // The protocol ships episodes flat across all seasons so a details screen
+      // needs no request per episode; MediaDetails nests them, so the grouping
+      // happens in the mapper.
       final details = provider.mapDetailsForTest({
-        'id': 'bo_test_1',
-        'title': 'Серіал',
+        'item': {'id': 'ex:show', 'provider': 'ex', 'kind': 'series', 'title': 'Example'},
         'seasons': [
-          {
-            'number': 1,
-            'title': 'Сезон 1',
-            'episodes': [
-              {
-                'number': 1,
-                'title': 'Серія 1',
-                'url': '{"source":"src_f","ref":{"episode_id":60300}}',
-              },
-              {
-                'number': 2,
-                'title': 'Серія 2',
-                'stream_ref': {'episode_id': 60301},
-              },
-              {'number': 3, 'title': 'Серія 3'},
-            ],
-          },
+          {'number': 1, 'label': 'Season 1', 'episode_count': 2},
+          {'number': 2, 'label': 'Season 2', 'episode_count': 1},
+        ],
+        'episodes': [
+          {'id': 'ex:show:1:1', 'season': 1, 'number': 1, 'title': 'One'},
+          {'id': 'ex:show:1:2', 'season': 1, 'number': 2, 'title': 'Two'},
+          {'id': 'ex:show:2:1', 'season': 2, 'number': 1, 'title': 'Three'},
         ],
       });
 
-      expect(details.seasons, isNotNull);
-      expect(details.seasons!.first.episodes.length, 3);
+      final seasons = details.seasons;
+      expect(seasons, isNotNull);
+      expect(seasons!.map((s) => s.number), [1, 2]);
+      expect(seasons[0].title, 'Season 1');
+      expect(seasons[0].episodes.length, 2);
+      expect(seasons[1].episodes.length, 1);
 
-      final ep1 = details.seasons!.first.episodes[0];
-      expect(ep1.streamRef, '{"source":"src_f","ref":{"episode_id":60300}}');
+      // The opaque episode id is what `/streams?id=` is called with, with season
+      // and episode passed alongside it.
+      expect(seasons[0].episodes[0].streamRef, 'ex:show:1:1');
+      expect(seasons[0].episodes[1].streamRef, 'ex:show:1:2');
+      expect(seasons[1].episodes[0].streamRef, 'ex:show:2:1');
+    });
 
-      final ep2 = details.seasons!.first.episodes[1];
-      expect(ep2.streamRef, contains('"episode_id":60301'));
+    test('a season the server summarised but never populated still appears', () {
+      final details = provider.mapDetailsForTest({
+        'item': {'id': 'ex:show', 'provider': 'ex', 'kind': 'series', 'title': 'Example'},
+        'seasons': [
+          {'number': 1, 'label': 'Season 1', 'episode_count': 2},
+          {'number': 2, 'label': 'Season 2', 'episode_count': 0},
+        ],
+        'episodes': [
+          {'id': 'ex:show:1:1', 'season': 1, 'number': 1, 'title': 'One'},
+        ],
+      });
 
-      final ep3 = details.seasons!.first.episodes[2];
-      expect(ep3.streamRef, isNull);
+      // Only seasons that actually have episodes are rendered, because an empty
+      // one is a dead end the user can click into.
+      expect(details.seasons!.map((s) => s.number), [1]);
+    });
+
+    test('an episode without a season is dropped rather than filed under 0', () {
+      final details = provider.mapDetailsForTest({
+        'item': {'id': 'ex:show', 'provider': 'ex', 'kind': 'series', 'title': 'Example'},
+        'seasons': const [],
+        'episodes': [
+          {'id': 'ex:show:x:1', 'number': 1, 'title': 'No season'},
+        ],
+      });
+      expect(details.seasons, isNull);
+    });
+
+    test('a movie has no seasons at all, which is what null means', () {
+      // MediaDetails reads null as "this is a movie" and renders no episode
+      // picker. An empty list would put a picker over a film.
+      final details = provider.mapDetailsForTest({
+        'item': {
+          'id': 'ex:film',
+          'provider': 'ex',
+          'kind': 'movie',
+          'title': 'Example Feature',
+          'year': 2021,
+          'rating': 7.8,
+          'genres': ['science fiction'],
+        },
+        'voiceovers': const [],
+        'seasons': const [],
+        'episodes': const [],
+      });
+
+      expect(details.seasons, isNull);
+      expect(details.item.title, 'Example Feature');
+      expect(details.item.type, ContentType.movie);
+      expect(details.item.year, 2021);
+      expect(details.genres, ['science fiction']);
+    });
+
+    test('reads voiceovers by their protocol label, not a legacy name', () {
+      final details = provider.mapDetailsForTest({
+        'item': {'id': 'ex:film', 'provider': 'ex', 'kind': 'movie', 'title': 'F'},
+        'voiceovers': [
+          {'id': 'en', 'label': 'English', 'lang': 'en', 'default': true},
+          {'id': 'uk', 'label': 'Ukrainian', 'lang': 'uk', 'default': false},
+        ],
+        'seasons': const [],
+        'episodes': const [],
+      });
+
+      expect(details.voiceovers.map((v) => v.id), ['en', 'uk']);
+      expect(details.voiceovers.first.name, 'English');
+    });
+
+    test('maps the protocol kind onto a content type', () {
+      ContentType typeOf(String? kind) => provider.mapItemForTest({
+        'id': 'x',
+        'title': 't',
+        'kind': kind,
+      }).type;
+
+      expect(typeOf('movie'), ContentType.movie);
+      expect(typeOf('series'), ContentType.series);
+      expect(typeOf('episode'), ContentType.series);
+      expect(typeOf('anime'), ContentType.anime);
+      expect(typeOf('tv_show'), ContentType.dorama);
+      expect(typeOf('documentary'), ContentType.movie);
+      // `other` and anything unknown must not be guessed at.
+      expect(typeOf('other'), ContentType.unknown);
+      expect(typeOf('nonsense'), ContentType.unknown);
+      expect(typeOf(null), ContentType.unknown);
+    });
+
+    test('an item id is used verbatim, with no url smuggled into it', () {
+      final item = provider.mapItemForTest({
+        'id': 'ex:film-2021',
+        'provider': 'ex',
+        'kind': 'movie',
+        'title': 'Example',
+        'external_id': 'film-2021',
+      });
+      expect(item.id, 'ex:film-2021');
+      expect(item.providerId, 'ex');
+      // external_id is diagnostic only; the protocol forbids building URLs from
+      // it, so it must not surface as the item's url.
+      expect(item.url, isNull);
     });
   });
 }

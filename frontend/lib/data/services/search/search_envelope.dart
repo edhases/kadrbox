@@ -130,7 +130,10 @@ class SearchSegment extends Equatable {
     return SearchSegment(
       id: json['id']?.toString() ?? 'unknown',
       status: json['status']?.toString() ?? 'unknown',
-      count: _asInt(json['count']),
+      // The catalog protocol names this `item_count`; the old backend named it
+      // `count`. Reading only `count` left every catalog reporting zero items
+      // per segment, which the UI shows as a per-source count.
+      count: _asInt(json['item_count'] ?? json['count']),
       sources: sources,
     );
   }
