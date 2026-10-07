@@ -12,11 +12,14 @@ is the deliverable — nothing here tells anyone how to scrape anything.
 | --- | --- |
 | [openapi.yaml](./openapi.yaml) | Normative machine-readable schema for the four endpoints |
 | [PROTOCOL.md](./PROTOCOL.md) | Design rationale, the mandatory client security rules, versioning policy |
-| `fixtures/` | Sample payloads, for implementers and for the stub server |
-| `conformance/` | The checks a server or client runs to claim conformance |
-| `stub/` | A minimal server that speaks the protocol, for development |
+| [plugins/AUTHORING.md](./plugins/AUTHORING.md) | The author's guide: order of work, decisions, traps |
+| [plugins/CONCEPT.md](./plugins/CONCEPT.md) | Why the model is shaped this way, and what was rejected |
+| [plugins/SECURITY.md](./plugins/SECURITY.md) | Threat model and the rules a server author must honour |
 
-`fixtures/`, `conformance/` and `stub/` are maintained separately.
+**Not written yet**, despite earlier revisions of this file claiming otherwise:
+a machine-readable `conformance/` suite, a `fixtures/` directory of sample
+payloads, and a reference `stub/` server. Until they exist, the contract is
+`openapi.yaml` plus the worked examples inside it.
 
 ## Endpoints at a glance
 
