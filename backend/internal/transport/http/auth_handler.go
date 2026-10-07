@@ -895,9 +895,10 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 // GoogleLogin — GET /api/v1/auth/google/login та GET /auth/google
 func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	if h.googleClientID == "" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(renderOAuthStatusHTML(false, "Google недоступний", "GOOGLE_CLIENT_ID не налаштований на сервері", "", "", "")))
+		// Through writeHTMLStatus, not a bare Content-Type: this was the one HTML
+		// response in this file skipping the no-store and CSP headers.
+		writeHTMLStatus(w, http.StatusServiceUnavailable,
+			renderOAuthStatusHTML(false, "Google недоступний", "GOOGLE_CLIENT_ID не налаштований на сервері", "", "", ""))
 		return
 	}
 
@@ -1247,10 +1248,8 @@ func (h *AuthHandler) TelegramLoginWeb(w http.ResponseWriter, r *http.Request) {
 
 	authURL := "/api/v1/auth/telegram/callback?state=" + url.QueryEscape(state)
 
-	setNoTokenCacheHeaders(w)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderTelegramWidgetHTML(botUser, authURL)))
+	writeHTMLStatusWithCSP(w, http.StatusOK, renderTelegramWidgetHTML(botUser, authURL),
+		telegramWidgetCSP)
 }
 
 // TelegramCallbackWeb — GET /api/v1/auth/telegram/callback

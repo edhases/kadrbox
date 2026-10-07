@@ -39,6 +39,11 @@ func NewRouter(
 	// Той самий allow-list передається в ws.Options, інакше браузер проходить
 	// REST, але отримує 403 origin_not_allowed на WebSocket handshake.
 	allowedOrigins := AllowedOrigins(appURL)
+	// Before CORS, so an OPTIONS preflight carries them too. The policy is a
+	// property of the service rather than of any one route, and the audit was
+	// right that nothing set it: only the token pages did, and only for
+	// themselves.
+	r.Use(middleware.SecurityHeaders)
 	r.Use(cors.Handler(cors.Options{
 		AllowOriginFunc: func(r *http.Request, origin string) bool {
 			return originAllowed(origin, allowedOrigins)

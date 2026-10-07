@@ -50,6 +50,31 @@ func sanitizeProviderMessage(msg string) string {
 	return cleaned
 }
 
+// strictCSP is the policy for pages that render entirely from this origin.
+//
+// `frame-ancestors 'none'` is not decoration: these pages carry one-time tokens
+// in their URLs, and a framed page is a page whose address bar a hostile site can
+// read. The middleware sets the same rule for non-HTML responses, but a page that
+// sets its own CSP replaces that header, so it has to repeat the clause here.
+//
+// script-src allows inline because the pages' only script is a static deep-link
+// redirect. Nothing external needs to execute, so there is no external origin in
+// the list.
+const strictCSP = "default-src 'none'; style-src 'unsafe-inline'; " +
+	"script-src 'unsafe-inline'; frame-ancestors 'none'"
+
+// telegramWidgetCSP is the one policy that has to name an external origin.
+//
+// The Telegram login widget is a script from telegram.org that then injects an
+// iframe. The previous build applied strictCSP here as well, which meant
+// `script-src 'unsafe-inline'` with no telegram.org in it: the widget script was
+// blocked by our own policy and the button never appeared. A page that needs a
+// third party must allow exactly that third party and nothing else.
+const telegramWidgetCSP = "default-src 'none'; style-src 'unsafe-inline'; " +
+	"script-src 'unsafe-inline' https://telegram.org; " +
+	"frame-src https://telegram.org; " +
+	"frame-ancestors 'none'"
+
 // setNoTokenCacheHeaders marks a response as never cacheable and never
 // referrer-leaking. Used on every page that contains, or redirects to, a token.
 func setNoTokenCacheHeaders(w http.ResponseWriter) {
@@ -58,9 +83,7 @@ func setNoTokenCacheHeaders(w http.ResponseWriter) {
 	header.Set("Pragma", "no-cache")
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("X-Content-Type-Options", "nosniff")
-	// The only script in the page is a static deep-link redirect; no external
-	// origin needs to load anything.
-	header.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+	header.Set("Content-Security-Policy", strictCSP)
 }
 
 // statusPageData is the whole data set for the status templates. Keeping it a
@@ -206,7 +229,15 @@ func buildDeepLink(provider, accessToken, refreshToken string) string {
 
 // writeHTMLStatus renders one of the status pages with the no-store headers.
 func writeHTMLStatus(w http.ResponseWriter, status int, html string) {
+	writeHTMLStatusWithCSP(w, status, html, strictCSP)
+}
+
+// writeHTMLStatusWithCSP is writeHTMLStatus for a page that needs a different
+// policy. The no-store headers still apply: a page holding a token is never
+// cacheable whatever it is allowed to load.
+func writeHTMLStatusWithCSP(w http.ResponseWriter, status int, html, csp string) {
 	setNoTokenCacheHeaders(w)
+	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(html))

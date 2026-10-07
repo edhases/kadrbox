@@ -116,6 +116,64 @@ func TestTelegramLoginWeb(t *testing.T) {
 	}
 }
 
+// cspDirective extracts one directive's value list from a policy string.
+func cspDirective(policy, name string) (string, bool) {
+	for _, part := range strings.Split(policy, ";") {
+		fields := strings.Fields(strings.TrimSpace(part))
+		if len(fields) > 0 && fields[0] == name {
+			return strings.Join(fields[1:], " "), true
+		}
+	}
+	return "", false
+}
+
+// The Telegram widget page loads a script from telegram.org and then injects an
+// iframe, so its policy must name that origin in script-src and frame-src.
+//
+// This asserts through the handler rather than against the constant, because the
+// bug it pins was a wiring mistake: the page was served the strict policy, whose
+// script-src is 'unsafe-inline' with no external origin in it. Our own policy
+// blocked the widget, the button never rendered, and the page's own timeout
+// script then told the user their domain was not registered.
+func TestTelegramWidgetPagePolicyAllowsTelegram(t *testing.T) {
+	h := transporthttp.NewAuthHandler(nil, nil, nil, "jwtsecret", "")
+	h.SetOAuth("token", "kadrboxbot", "", "", "", "")
+
+	rec := httptest.NewRecorder()
+	h.TelegramLoginWeb(rec, httptest.NewRequest(http.MethodGet,
+		"/api/v1/auth/telegram/login", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "https://telegram.org/js/telegram-widget.js") {
+		t.Fatal("the page does not load the widget, so the test proves nothing")
+	}
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	scriptSrc, ok := cspDirective(csp, "script-src")
+	if !ok {
+		t.Fatalf("no script-src in %q", csp)
+	}
+	if !strings.Contains(scriptSrc, "https://telegram.org") {
+		t.Errorf("the page loads telegram-widget.js but script-src is %q: "+
+			"our own policy blocks the widget", scriptSrc)
+	}
+
+	frameSrc, _ := cspDirective(csp, "frame-src")
+	if !strings.Contains(frameSrc, "https://telegram.org") {
+		t.Errorf("the widget injects an iframe from telegram.org but frame-src is %q", frameSrc)
+	}
+
+	// Still closed: the exemption is for one origin, not for the world.
+	if !strings.Contains(csp, "default-src 'none'") {
+		t.Errorf("the widget policy is not closed by default: %s", csp)
+	}
+	if !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("the widget page can be framed: %s", csp)
+	}
+}
+
 func TestDiscordLoginRedirect(t *testing.T) {
 	t.Run("redirect when configured", func(t *testing.T) {
 		h := transporthttp.NewAuthHandler(nil, nil, nil, "jwtsecret", "")
