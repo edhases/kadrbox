@@ -68,6 +68,7 @@ class AppStrings {
   String get noContent => _t('Немає контенту', 'No content');
   String get loadingError => _t('Помилка завантаження', 'Loading error');
   String get openLocalFile => _t('Відкрити локальне відео', 'Open Local Video');
+  String get openNetworkStream => _t('Відкрити за посиланням', 'Open by Link');
   String get localVideo => _t('Локальне відео', 'Local Video');
   String get unsupportedFormat =>
       _t('Непідтримуваний формат файлу', 'Unsupported file format');

@@ -6,6 +6,7 @@ import 'package:get_it/get_it.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kadrbox/domain/entities/entities.dart';
 import 'package:kadrbox/presentation/pages/player/player_controller.dart';
+import 'package:kadrbox/presentation/pages/player/system_media_controls_service.dart';
 import 'package:kadrbox/data/services/history_service.dart';
 import 'package:kadrbox/data/services/settings_service.dart';
 import 'package:kadrbox/data/services/watch_party_service.dart';
@@ -13,7 +14,7 @@ import 'package:kadrbox/data/services/watch_party_service.dart';
 enum MiniPlayerState { hidden, minimized, fullscreen }
 
 class VideoPlayerService extends ChangeNotifier {
-  static const _platform = MethodChannel('com.kadrbox.kadrbox/pip');
+  static const _platform = MethodChannel('com.oxidefilm.oxide_film/pip');
 
   PlayerController? _controller;
   MiniPlayerState _miniPlayerState = MiniPlayerState.hidden;
@@ -61,6 +62,9 @@ class VideoPlayerService extends ChangeNotifier {
       initialEpisode: episode,
       initialEpisodeTitle: episodeTitle,
       isOffline: isOffline,
+      mediaControlsService: GetIt.I.isRegistered<SystemMediaControlsService>()
+          ? GetIt.I<SystemMediaControlsService>()
+          : null,
     );
 
     setController(newController);

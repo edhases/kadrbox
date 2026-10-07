@@ -15,6 +15,7 @@ import '../../../data/services/settings_service.dart';
 import '../../../data/services/watch_party_service.dart';
 import '../../../domain/entities/entities.dart';
 import 'playback_error.dart';
+import 'system_media_controls_service.dart';
 
 /// Player state that can be observed by UI
 class PlayerState {
@@ -41,6 +42,7 @@ class PlayerState {
   final VideoTrack? selectedVideoTrack;
   final List<AudioTrack> audioTracks;
   final AudioTrack? selectedAudioTrack;
+  final bool isAudioOnlyMode;
 
   const PlayerState({
     this.isInitialized = false,
@@ -66,6 +68,7 @@ class PlayerState {
     this.selectedVideoTrack,
     this.audioTracks = const [],
     this.selectedAudioTrack,
+    this.isAudioOnlyMode = false,
   });
 
   /// Raw libmpv message, kept for compatibility with existing UI code.
@@ -95,6 +98,7 @@ class PlayerState {
     int? currentSeason,
     int? currentEpisode,
     String? currentEpisodeTitle,
+    bool? isAudioOnlyMode,
     bool clearError = false,
   }) {
     return PlayerState(
@@ -121,6 +125,7 @@ class PlayerState {
       currentSeason: currentSeason ?? this.currentSeason,
       currentEpisode: currentEpisode ?? this.currentEpisode,
       currentEpisodeTitle: currentEpisodeTitle ?? this.currentEpisodeTitle,
+      isAudioOnlyMode: isAudioOnlyMode ?? this.isAudioOnlyMode,
     );
   }
 }
@@ -141,6 +146,7 @@ class PlayerController extends ChangeNotifier with WindowListener {
   final HistoryService _historyService;
   final SettingsService _settingsService;
   final WatchPartyService _watchPartyService;
+  final SystemMediaControlsService? _mediaControlsService;
 
   // Optional player factory for testing (returns a media_kit Player)
   final Player Function()? _playerFactory;
@@ -385,11 +391,13 @@ class PlayerController extends ChangeNotifier with WindowListener {
     this.streams,
     this.isOffline = false,
     bool setupPlayerStreams = true,
+    SystemMediaControlsService? mediaControlsService,
   }) : _historyService = historyService,
        _settingsService = settingsService,
        _watchPartyService = watchPartyService,
        _playerFactory = playerFactory,
-       _setupPlayerStreams = setupPlayerStreams {
+       _setupPlayerStreams = setupPlayerStreams,
+       _mediaControlsService = mediaControlsService {
     _state = _state.copyWith(
       currentSeason: initialSeason,
       currentEpisode: initialEpisode,
@@ -398,6 +406,7 @@ class PlayerController extends ChangeNotifier with WindowListener {
     _initCurrentStreamInfo();
     // Register window listener for fullscreen events
     windowManager.addListener(this);
+    _mediaControlsService?.attachController(this);
   }
 
   // --- WindowListener Callbacks ---
@@ -664,6 +673,8 @@ class PlayerController extends ChangeNotifier with WindowListener {
         // Seconds. mpv's default of 60 is far too long for a player that is
         // supposed to fail fast and offer a retry.
         'network-timeout': '15',
+        // Volume boost up to 150% in libmpv
+        'volume-max': '150',
       }.entries) {
         try {
           await native.setProperty(option.key, option.value);
@@ -761,6 +772,8 @@ class PlayerController extends ChangeNotifier with WindowListener {
         } else {
           WakelockPlus.disable();
         }
+
+        _mediaControlsService?.updatePlaybackStatus(playing);
 
         // Watch Party sync
         if (_watchPartyService.state == WatchPartyState.connected) {
@@ -1101,14 +1114,39 @@ class PlayerController extends ChangeNotifier with WindowListener {
     }
   }
 
+  double _volumeBeforeMute = 100.0;
+
   void setVolume(double volume) {
-    _player.setVolume(volume);
+    final clamped = volume.clamp(0.0, 150.0);
+    if (clamped > 0) {
+      _volumeBeforeMute = clamped;
+    }
+    _player.setVolume(clamped);
+  }
+
+  void adjustVolume(double delta) {
+    setVolume(_state.volume + delta);
+  }
+
+  void toggleMute() {
+    if (_state.volume > 0) {
+      _volumeBeforeMute = _state.volume;
+      _player.setVolume(0.0);
+    } else {
+      _player.setVolume(_volumeBeforeMute > 0 ? _volumeBeforeMute : 100.0);
+    }
   }
 
   void cycleFit() {
     final currentIndex = fits.indexOf(_state.videoFit);
     final nextIndex = (currentIndex + 1) % fits.length;
     _state = _state.copyWith(videoFit: fits[nextIndex]);
+    notifyListeners();
+  }
+
+  void toggleAudioOnlyMode() {
+    final newMode = !_state.isAudioOnlyMode;
+    _state = _state.copyWith(isAudioOnlyMode: newMode);
     notifyListeners();
   }
 
@@ -1415,6 +1453,9 @@ class PlayerController extends ChangeNotifier with WindowListener {
     _watchPartyService.onSpeedChanged = null;
     _watchPartyService.onSyncStatusChanged = null;
     _watchPartyService.onQualityAdjustRequested = null;
+
+    // Detach System Media Controls
+    _mediaControlsService?.detachController();
 
     // Disable wakelock
     WakelockPlus.disable();

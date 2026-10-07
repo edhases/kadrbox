@@ -270,6 +270,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (controller == null) return;
 
     final FocusNode? currentFocus = FocusManager.instance.primaryFocus;
+    // Don't handle shortcuts if a modal dialog/sheet is on top of player page
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      return;
+    }
+
     if (_showChat ||
         (currentFocus != null &&
             currentFocus.context?.widget is EditableText)) {
@@ -281,6 +287,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         case LogicalKeyboardKey.space:
         case LogicalKeyboardKey.enter:
           controller.playOrPause();
+          _showControlsTemp();
+          break;
+        case LogicalKeyboardKey.keyF:
+          controller.toggleFullscreen();
+          break;
+        case LogicalKeyboardKey.keyM:
+          controller.toggleMute();
+          _showControlsTemp();
+          break;
+        case LogicalKeyboardKey.arrowUp:
+          controller.adjustVolume(5.0);
+          _showControlsTemp();
+          break;
+        case LogicalKeyboardKey.arrowDown:
+          controller.adjustVolume(-5.0);
           _showControlsTemp();
           break;
         case LogicalKeyboardKey.arrowRight:
@@ -303,6 +324,60 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           controller.seekForward();
           _showControlsTemp();
           break;
+        case LogicalKeyboardKey.period:
+        case LogicalKeyboardKey.bracketRight:
+          final currentSpeed = controller.state.playbackSpeed;
+          final nextSpeed = (currentSpeed + 0.25).clamp(0.25, 3.0);
+          controller.setSpeed(nextSpeed);
+          _showControlsTemp();
+          break;
+        case LogicalKeyboardKey.comma:
+        case LogicalKeyboardKey.bracketLeft:
+          final currentSpeed = controller.state.playbackSpeed;
+          final prevSpeed = (currentSpeed - 0.25).clamp(0.25, 3.0);
+          controller.setSpeed(prevSpeed);
+          _showControlsTemp();
+          break;
+        case LogicalKeyboardKey.digit0:
+        case LogicalKeyboardKey.numpad0:
+          _seekToPercent(controller, 0.0);
+          break;
+        case LogicalKeyboardKey.digit1:
+        case LogicalKeyboardKey.numpad1:
+          _seekToPercent(controller, 0.1);
+          break;
+        case LogicalKeyboardKey.digit2:
+        case LogicalKeyboardKey.numpad2:
+          _seekToPercent(controller, 0.2);
+          break;
+        case LogicalKeyboardKey.digit3:
+        case LogicalKeyboardKey.numpad3:
+          _seekToPercent(controller, 0.3);
+          break;
+        case LogicalKeyboardKey.digit4:
+        case LogicalKeyboardKey.numpad4:
+          _seekToPercent(controller, 0.4);
+          break;
+        case LogicalKeyboardKey.digit5:
+        case LogicalKeyboardKey.numpad5:
+          _seekToPercent(controller, 0.5);
+          break;
+        case LogicalKeyboardKey.digit6:
+        case LogicalKeyboardKey.numpad6:
+          _seekToPercent(controller, 0.6);
+          break;
+        case LogicalKeyboardKey.digit7:
+        case LogicalKeyboardKey.numpad7:
+          _seekToPercent(controller, 0.7);
+          break;
+        case LogicalKeyboardKey.digit8:
+        case LogicalKeyboardKey.numpad8:
+          _seekToPercent(controller, 0.8);
+          break;
+        case LogicalKeyboardKey.digit9:
+        case LogicalKeyboardKey.numpad9:
+          _seekToPercent(controller, 0.9);
+          break;
         case LogicalKeyboardKey.escape:
           if (controller.state.isFullscreen) {
             controller.toggleFullscreen();
@@ -311,6 +386,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           }
           break;
       }
+    }
+  }
+
+  void _seekToPercent(PlayerController controller, double percent) {
+    final duration = controller.state.duration;
+    if (duration > Duration.zero) {
+      final targetMs = (duration.inMilliseconds * percent).toInt();
+      controller.seek(Duration(milliseconds: targetMs));
+      _showControlsTemp();
     }
   }
 
@@ -391,7 +475,48 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       Stack(
                         fit: StackFit.expand,
                         children: [
-                          if (!state.isTransitioning &&
+                          if (state.isAudioOnlyMode)
+                            Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(24),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.white.withValues(alpha: 0.1),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.2),
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.headphones,
+                                      size: 56,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'Режим фонового аудіо',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Екран не витрачає енергію на рендеринг відео',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.7),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (!state.isTransitioning &&
                               controller.hasVideoController)
                             Video(
                               key: ValueKey('video_${state.textureKey}'),

@@ -1036,6 +1036,16 @@ void _showMainSettingsSheet(BuildContext context, PlayerController controller) {
               _showSpeedSheet(context, controller);
             },
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.headphones_outlined),
+            title: const Text('Фонове аудіо (економія екрана)'),
+            subtitle: const Text('Вимикає відеоряд для прослуховування'),
+            value: controller.state.isAudioOnlyMode,
+            onChanged: (val) {
+              controller.toggleAudioOnlyMode();
+              Navigator.pop(context);
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.file_download_outlined),
             title: const Text('Завантажити'),
@@ -1277,30 +1287,40 @@ class _VolumeSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currentVolume = controller.state.volume;
+    final isBoosted = currentVolume > 100.0;
+
     return Container(
       width: width,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          Icon(
-            _getVolumeIcon(controller.state.volume),
-            color: Colors.white,
-            size: 20,
+          IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(
+              _getVolumeIcon(currentVolume),
+              color: isBoosted ? Colors.orangeAccent : Colors.white,
+              size: 20,
+            ),
+            tooltip: currentVolume == 0 ? 'Увімкнути звук (M)' : 'Вимкнути звук (M)',
+            onPressed: controller.toggleMute,
           ),
+          const SizedBox(width: 6),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
                 trackHeight: 2,
-                activeTrackColor: Colors.white,
+                activeTrackColor: isBoosted ? Colors.orangeAccent : Colors.white,
                 inactiveTrackColor: Colors.white24,
-                thumbColor: Colors.white,
+                thumbColor: isBoosted ? Colors.orangeAccent : Colors.white,
               ),
               child: Slider(
-                value: controller.state.volume.clamp(0.0, 100.0),
+                value: currentVolume.clamp(0.0, 150.0),
                 min: 0.0,
-                max: 100.0,
+                max: 150.0,
                 onChanged: (value) {
                   controller.setVolume(value);
                 },
@@ -1315,7 +1335,8 @@ class _VolumeSlider extends StatelessWidget {
   IconData _getVolumeIcon(double volume) {
     if (volume == 0) return Icons.volume_off;
     if (volume < 50) return Icons.volume_down;
-    return Icons.volume_up;
+    if (volume <= 100) return Icons.volume_up;
+    return Icons.campaign; // Boost icon
   }
 }
 

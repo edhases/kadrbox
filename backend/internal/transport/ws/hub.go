@@ -460,11 +460,21 @@ func (h *Hub) dropLocked(c *Client) bool {
 // userLeft, re-announces a promoted host and releases the room's Redis
 // subscription.
 func (h *Hub) onClientGone(c *Client) {
+	left := &domain.WatchPartyEvent{
+		Action:     ActionUserLeft,
+		RoomCode:   c.roomCode,
+		SenderID:   c.userID,
+		SenderName: c.userName,
+		Timestamp:  time.Now(),
+	}
+
 	h.mu.Lock()
 	removed := h.dropLocked(c)
 	empty := len(h.rooms[c.roomCode]) == 0
 	hostChanged := false
+	var evicted []*Client
 	if removed {
+		evicted = h.broadcastToRoomLocked(left)
 		hostChanged = h.reelectHostLocked(c.roomCode)
 		if empty {
 			delete(h.hosts, c.roomCode)
@@ -472,16 +482,14 @@ func (h *Hub) onClientGone(c *Client) {
 	}
 	h.mu.Unlock()
 
+	for _, slow := range evicted {
+		h.onClientGone(slow)
+	}
+
 	if !removed {
 		return
 	}
-	h.publish(&domain.WatchPartyEvent{
-		Action:     ActionUserLeft,
-		RoomCode:   c.roomCode,
-		SenderID:   c.userID,
-		SenderName: c.userName,
-		Timestamp:  time.Now(),
-	})
+	h.publish(left)
 	if hostChanged {
 		h.emitRoomInfoAsync(c.roomCode)
 	}

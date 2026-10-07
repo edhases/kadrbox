@@ -36,6 +36,16 @@ class SearchIntent extends Intent {
   const SearchIntent();
 }
 
+/// Intent for Ctrl+O open file shortcut
+class OpenFileIntent extends Intent {
+  const OpenFileIntent();
+}
+
+/// Intent for Ctrl+U open URL shortcut
+class OpenUrlIntent extends Intent {
+  const OpenUrlIntent();
+}
+
 /// Home page with content browsing
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -370,12 +380,32 @@ class _HomePageState extends State<HomePage> {
             const SearchIntent(),
         LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyK):
             const SearchIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyO):
+            const OpenFileIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyO):
+            const OpenFileIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyU):
+            const OpenUrlIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyU):
+            const OpenUrlIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
           SearchIntent: CallbackAction<SearchIntent>(
             onInvoke: (intent) {
               context.push('/search');
+              return null;
+            },
+          ),
+          OpenFileIntent: CallbackAction<OpenFileIntent>(
+            onInvoke: (intent) {
+              _openLocalFile();
+              return null;
+            },
+          ),
+          OpenUrlIntent: CallbackAction<OpenUrlIntent>(
+            onInvoke: (intent) {
+              _openNetworkStream();
               return null;
             },
           ),
@@ -630,6 +660,9 @@ class _HomePageState extends State<HomePage> {
                     case 'local_file':
                       _openLocalFile();
                       break;
+                    case 'network_stream':
+                      _openNetworkStream();
+                      break;
                     case 'watch_party':
                       context.push('/watch-party');
                       break;
@@ -669,6 +702,16 @@ class _HomePageState extends State<HomePage> {
                         const Icon(Icons.folder_open, size: 20),
                         const SizedBox(width: 8),
                         Text(AppStrings.of(context).openLocalFile),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'network_stream',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.link, size: 20),
+                        const SizedBox(width: 8),
+                        Text(AppStrings.of(context).openNetworkStream),
                       ],
                     ),
                   ),

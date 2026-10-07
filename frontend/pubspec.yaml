@@ -93,6 +93,7 @@ dependencies:
   # pubspec.lock is committed, so builds are already reproducible; this constraint
   # is what keeps `pub upgrade` from moving the floor on its own.
   http: ^1.6.0
+  smtc_windows: ^1.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

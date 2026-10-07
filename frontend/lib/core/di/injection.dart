@@ -12,6 +12,8 @@ import '../../data/services/download_service.dart';
 import '../../data/services/stats_service.dart';
 import '../../data/services/episode_update_service.dart';
 import '../../data/services/video_player_service.dart';
+import '../../data/services/discord_rpc_service.dart';
+import '../../presentation/pages/player/system_media_controls_service.dart';
 import '../../data/services/watch_party_service.dart';
 import '../../data/services/kadrbox_server_service.dart';
 import '../../data/services/auth_service.dart';
@@ -89,6 +91,14 @@ Future<void> configureDependencies() async {
     () =>
         DownloadService(database, getIt<ApiClient>(), getIt<SettingsService>()),
   );
+  final discordRpc = DiscordRpcService();
+  await discordRpc.initialize();
+  getIt.registerSingleton<DiscordRpcService>(discordRpc);
+
+  final mediaControlsService = SystemMediaControlsService(discordRpc: discordRpc);
+  await mediaControlsService.initialize();
+  getIt.registerSingleton<SystemMediaControlsService>(mediaControlsService);
+
   getIt.registerLazySingleton<VideoPlayerService>(() => VideoPlayerService());
   getIt.registerLazySingleton<StatsService>(() => StatsService(database));
   getIt.registerLazySingleton<WatchPartyService>(
